@@ -233,6 +233,9 @@ public class ParameterInfoController extends UserDataHolderBase implements Visib
     hintHint.setExplicitClose(true);
     hintHint.setRequestFocus(requestFocus);
     hintHint.setShowImmediately(true);
+    hintHint.setBorderColor(ParameterInfoComponent.BORDER_COLOR);
+    hintHint.setBorderInsets(JBUI.insets(4, 1, 4, 1));
+    hintHint.setComponentBorder(JBUI.Borders.empty());
 
     int flags = HintManager.HIDE_BY_ESCAPE | HintManager.UPDATE_BY_SCROLLING;
     if (!singleParameterInfo && myKeepOnHintHidden) flags |= HintManager.HIDE_BY_TEXT_CHANGE;
@@ -472,7 +475,7 @@ public class ParameterInfoController extends UserDataHolderBase implements Visib
           final ParameterInfoHandlerWithTabActionSupport parameterInfoHandler2 = (ParameterInfoHandlerWithTabActionSupport)handler;
 
           // please don't remove typecast in the following line; it's required to compile the code under old JDK 6 versions
-          final E e = (E) ParameterInfoUtils.findArgumentList(file, offset, lbraceOffset, parameterInfoHandler2);
+          final E e = ParameterInfoUtils.findArgumentList(file, offset, lbraceOffset, parameterInfoHandler2);
           if (e != null) return e;
         }
       }
@@ -712,7 +715,18 @@ public class ParameterInfoController extends UserDataHolderBase implements Visib
     }
   }
 
-  public static class SignatureItem {
+  public interface SignatureItemModel {
+  }
+
+  public static class RawSignatureItem implements SignatureItemModel {
+    public final String htmlText;
+
+    RawSignatureItem(String htmlText) {
+      this.htmlText = htmlText;
+    }
+  }
+
+  public static class SignatureItem implements SignatureItemModel {
     public final String text;
     public final boolean deprecated;
     public final boolean disabled;
@@ -733,7 +747,7 @@ public class ParameterInfoController extends UserDataHolderBase implements Visib
   }
 
   public static class Model {
-    public final List<SignatureItem> signatures = new ArrayList<>();
+    public final List<SignatureItemModel> signatures = new ArrayList<>();
     public int current = -1;
     public TextRange range;
     public Editor editor;

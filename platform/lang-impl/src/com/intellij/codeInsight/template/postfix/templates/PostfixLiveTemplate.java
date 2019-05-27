@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.postfix.templates;
 
 import com.google.common.collect.Sets;
@@ -9,6 +9,10 @@ import com.intellij.codeInsight.template.postfix.completion.PostfixTemplateLooku
 import com.intellij.codeInsight.template.postfix.settings.PostfixTemplatesSettings;
 import com.intellij.diagnostic.AttachmentFactory;
 import com.intellij.featureStatistics.FeatureUsageTracker;
+import com.intellij.internal.statistic.eventLog.FeatureUsageData;
+import com.intellij.internal.statistic.service.fus.collectors.FUCounterUsageLogger;
+import com.intellij.internal.statistic.utils.PluginInfo;
+import com.intellij.internal.statistic.utils.PluginInfoDetectorKt;
 import com.intellij.lang.Language;
 import com.intellij.lang.LanguageUtil;
 import com.intellij.openapi.application.ApplicationManager;
@@ -29,11 +33,11 @@ import com.intellij.psi.PsiFileFactory;
 import com.intellij.psi.impl.source.PsiFileImpl;
 import com.intellij.psi.templateLanguages.TemplateLanguageUtil;
 import com.intellij.psi.util.PsiUtilCore;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.Set;
 
 public class PostfixLiveTemplate extends CustomLiveTemplateBase {
@@ -163,7 +167,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
     }
     PsiFile contextFile = callback.getFile();
     Language language = PsiUtilCore.getLanguageAtOffset(contextFile, offset);
-    String fileText = contextFile.getText();
+    CharSequence fileText = callback.getEditor().getDocument().getImmutableCharSequence();
     for (PostfixTemplateProvider provider : LanguagePostfixTemplate.LANG_EP.allForLanguage(language)) {
       if (StringUtil.isNotEmpty(computeTemplateKeyWithoutContextChecking(provider, fileText, offset + 1))) {
         return true;
@@ -203,7 +207,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
   public Collection<? extends CustomLiveTemplateLookupElement> getLookupElements(@NotNull PsiFile file,
                                                                                  @NotNull Editor editor,
                                                                                  int offset) {
-    Collection<CustomLiveTemplateLookupElement> result = ContainerUtil.newHashSet();
+    Collection<CustomLiveTemplateLookupElement> result = new HashSet<>();
     CustomTemplateCallback callback = new CustomTemplateCallback(editor, file);
     for (PostfixTemplateProvider provider : LanguagePostfixTemplate.LANG_EP.allForLanguage(getLanguage(callback))) {
       ProgressManager.checkCanceled();
@@ -225,6 +229,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
   private static void expandTemplate(@NotNull final PostfixTemplate template,
                                      @NotNull final Editor editor,
                                      @NotNull final PsiElement context) {
+    PostfixTemplateLogger.log(template, context);
     if (template.startInWriteAction()) {
       ApplicationManager.getApplication().runWriteAction(() -> CommandProcessor.getInstance()
                                                                                .executeCommand(context.getProject(),
@@ -318,7 +323,7 @@ public class PostfixLiveTemplate extends CustomLiveTemplateBase {
 
   @NotNull
   private static Set<String> getKeys(@NotNull PostfixTemplateProvider provider) {
-    Set<String> result = ContainerUtil.newHashSet();
+    Set<String> result = new HashSet<>();
     for (PostfixTemplate template : PostfixTemplatesUtils.getAvailableTemplates(provider)) {
       result.add(template.getKey());
     }

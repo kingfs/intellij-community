@@ -1,7 +1,7 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package icons;
 
-import com.intellij.openapi.util.IconLoader;
+import com.intellij.ui.IconManager;
 
 import javax.swing.*;
 
@@ -11,29 +11,41 @@ import javax.swing.*;
  */
 public final class MavenIcons {
   private static Icon load(String path) {
-    return IconLoader.getIcon(path, MavenIcons.class);
+    return IconManager.getInstance().getIcon(path, MavenIcons.class);
   }
 
   private static Icon load(String path, Class<?> clazz) {
-    return IconLoader.getIcon(path, clazz);
+    return IconManager.getInstance().getIcon(path, clazz);
   }
 
-  public static final Icon ChildrenProjects = load("/images/childrenProjects.png"); // 12x12
-  public static final Icon ExecuteMavenGoal = load("/images/executeMavenGoal.png"); // 16x16
-  public static final Icon MavenLogo = load("/images/mavenLogo.png"); // 16x16
-  public static final Icon MavenPlugin = load("/images/mavenPlugin.png"); // 16x16
-  public static final Icon MavenProject = load("/images/mavenProject.png"); // 16x16
-  public static final Icon ModulesClosed = load("/images/modulesClosed.png"); // 16x16
-  public static final Icon ParentProject = load("/images/parentProject.png"); // 12x12
-  public static final Icon Phase = load("/images/phase.png"); // 16x16
-  public static final Icon PhasesClosed = load("/images/phasesClosed.png"); // 16x16
-  public static final Icon PluginGoal = load("/images/pluginGoal.png"); // 16x16
-  public static final Icon ProfilesClosed = load("/images/profilesClosed.png"); // 16x16
-  public static final Icon ToolWindowMaven = load("/images/toolWindowMaven.svg"); // 13x13
-  public static final Icon UpdateFolders = load("/images/updateFolders.png"); // 16x16
+  /** 12x12 */ public static final Icon ChildrenProjects = load("/images/childrenProjects.svg");
+  /** 16x16 */ public static final Icon ExecuteMavenGoal = load("/images/executeMavenGoal.svg");
+  /** 16x16 */ public static final Icon MavenPlugin = load("/images/mavenPlugin.svg");
+  /** 16x16 */ public static final Icon MavenProject = load("/images/mavenProject.svg");
+  /** 16x16 */ public static final Icon ModulesClosed = load("/images/modulesClosed.svg");
+  /** 12x12 */ public static final Icon ParentProject = load("/images/parentProject.svg");
+  /** 16x16 */ public static final Icon PluginGoal = load("/images/pluginGoal.svg");
+  /** 16x16 */ public static final Icon ProfilesClosed = load("/images/profilesClosed.svg");
+  /** 13x13 */ public static final Icon ToolWindowMaven = load("/images/toolWindowMaven.svg");
+  /** 16x16 */ public static final Icon UpdateFolders = load("/images/updateFolders.svg");
+
+  /** @deprecated to be removed in IDEA 2020 - use OpenapiIcons.RepositoryLibraryLogo */
+  @SuppressWarnings("unused")
+  @Deprecated
+  public static final Icon MavenLogo = load("/icons/repositoryLibraryLogo.svg", icons.OpenapiIcons.class);
 
   /** @deprecated to be removed in IDEA 2020 - use AllIcons.Actions.OfflineMode */
   @SuppressWarnings("unused")
   @Deprecated
   public static final Icon OfflineMode = load("/actions/offlineMode.svg", com.intellij.icons.AllIcons.class);
+
+  /** @deprecated to be removed in IDEA 2020 - use ExternalSystemIcons.Task */
+  @SuppressWarnings("unused")
+  @Deprecated
+  public static final Icon Phase = load("/icons/task.svg", icons.ExternalSystemIcons.class);
+
+  /** @deprecated to be removed in IDEA 2020 - use ExternalSystemIcons.TaskGroup */
+  @SuppressWarnings("unused")
+  @Deprecated
+  public static final Icon PhasesClosed = load("/icons/taskGroup.svg", icons.ExternalSystemIcons.class);
 }

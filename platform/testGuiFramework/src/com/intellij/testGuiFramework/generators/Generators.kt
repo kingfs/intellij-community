@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 @file:Suppress("unused")
 
 package com.intellij.testGuiFramework.generators
@@ -49,6 +35,7 @@ import com.intellij.testGuiFramework.generators.Utils.getCellText
 import com.intellij.testGuiFramework.generators.Utils.getJTreePath
 import com.intellij.testGuiFramework.generators.Utils.getJTreePathItemsString
 import com.intellij.testGuiFramework.generators.Utils.withRobot
+import com.intellij.testGuiFramework.impl.GuiTestUtilKt
 import com.intellij.testGuiFramework.impl.GuiTestUtilKt.getComponentText
 import com.intellij.testGuiFramework.impl.GuiTestUtilKt.isTextComponent
 import com.intellij.testGuiFramework.impl.GuiTestUtilKt.onHeightCenter
@@ -62,7 +49,7 @@ import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.labels.ActionLink
 import com.intellij.ui.components.labels.LinkLabel
 import com.intellij.ui.messages.SheetController
-import com.intellij.ui.tabs.impl.TabLabel
+import com.intellij.ui.tabs.newImpl.TabLabel
 import com.intellij.ui.treeStructure.SimpleTree
 import com.intellij.ui.treeStructure.treetable.TreeTable
 import com.intellij.util.ui.tree.TreeUtil
@@ -86,8 +73,8 @@ import javax.swing.tree.TreePath
 
 //**********COMPONENT GENERATORS**********
 
-private val leftButton = MouseEvent.BUTTON1
-private val rightButton = MouseEvent.BUTTON3
+private const val leftButton = MouseEvent.BUTTON1
+private const val rightButton = MouseEvent.BUTTON3
 
 private fun MouseEvent.isLeftButton() = (this.button == leftButton)
 private fun MouseEvent.isRightButton() = (this.button == rightButton)
@@ -201,7 +188,7 @@ class CheckboxTreeGenerator : ComponentCodeGenerator<CheckboxTree> {
     return withRobot {
       val checkboxComponent = CheckboxTreeDriver(it).getCheckboxComponent(cmp, treePath) ?: throw Exception(
         "Checkbox component from cell renderer is null")
-      val pathBounds = cmp.getPathBounds(treePath)
+      val pathBounds = GuiTestUtilKt.computeOnEdt { cmp.getPathBounds(treePath) }!!
       val checkboxTreeBounds = Rectangle(pathBounds.x + checkboxComponent.x, pathBounds.y + checkboxComponent.y, checkboxComponent.width,
                                          checkboxComponent.height)
       checkboxTreeBounds.contains(cp)
@@ -213,7 +200,7 @@ class CheckboxTreeGenerator : ComponentCodeGenerator<CheckboxTree> {
     return if (wasClickOnCheckBox(cmp, cp))
       "checkboxTree($path).clickCheckbox()"
     else
-      "checkboxTree($path).clickLabel()"
+      "checkboxTree($path).clickPath()"
   }
 }
 

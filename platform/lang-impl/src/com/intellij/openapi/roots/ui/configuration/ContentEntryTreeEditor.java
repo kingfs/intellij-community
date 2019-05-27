@@ -220,9 +220,7 @@ public class ContentEntryTreeEditor {
   }
 
   public void requestFocus() {
-    IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> {
-      IdeFocusManager.getGlobalInstance().requestFocus(myTree, true);
-    });
+    IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> IdeFocusManager.getGlobalInstance().requestFocus(myTree, true));
   }
 
   public void update() {
@@ -278,18 +276,18 @@ public class ContentEntryTreeEditor {
 
     @NotNull
     @Override
-    public JComponent createCustomComponent(@NotNull Presentation presentation) {
-      return IconWithTextAction.createCustomComponentImpl(this, presentation);
+    public JComponent createCustomComponent(@NotNull Presentation presentation, @NotNull String place) {
+      return IconWithTextAction.createCustomComponentImpl(this, presentation, place);
     }
   }
 
   private static class MyFileTreeBuilder extends FileTreeBuilder {
     MyFileTreeBuilder(JTree tree,
-                             DefaultTreeModel treeModel,
-                             AbstractTreeStructure treeStructure,
-                             Comparator<NodeDescriptor> comparator,
-                             FileChooserDescriptor descriptor,
-                             @Nullable Runnable onInitialized) {
+                      DefaultTreeModel treeModel,
+                      AbstractTreeStructure treeStructure,
+                      Comparator<? super NodeDescriptor> comparator,
+                      FileChooserDescriptor descriptor,
+                      @Nullable Runnable onInitialized) {
       super(tree, treeModel, treeStructure, comparator, descriptor, onInitialized);
     }
 

@@ -17,7 +17,8 @@ package git4idea.config;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.SystemInfo;
-import git4idea.GitVcs;
+import com.intellij.openapi.vcs.AbstractVcs;
+import com.intellij.util.ObjectUtils;
 import git4idea.repo.GitRepository;
 import org.jetbrains.annotations.NotNull;
 
@@ -62,21 +63,18 @@ public enum GitVersionSpecialty {
     }
   },
 
+  CAN_USE_SHELL_HELPER_SCRIPT_ON_WINDOWS {
+    @Override
+    public boolean existsIn(@NotNull GitVersion version) {
+      return version.getType().equals(GitVersion.Type.MSYS) &&
+             version.isLaterOrEqual(new GitVersion(2, 3, 0, 0));
+    }
+  },
+
   STARTED_USING_RAW_BODY_IN_FORMAT {
     @Override
     public boolean existsIn(@NotNull GitVersion version) {
       return version.isLaterOrEqual(new GitVersion(1, 7, 2, 0));
-    }
-  },
-
-  /**
-   * Git understands {@code 'git status --porcelain'}.
-   * Since 1.7.0.
-   */
-  KNOWS_STATUS_PORCELAIN {
-    @Override
-    public boolean existsIn(@NotNull GitVersion version) {
-      return version.isLaterOrEqual(new GitVersion(1, 7, 0, 0));
     }
   },
 
@@ -157,10 +155,10 @@ public enum GitVersionSpecialty {
     }
   },
 
-  FOLLOW_IS_BUGGY_IN_THE_LOG {
+  CAN_OVERRIDE_CREDENTIAL_HELPER_WITH_EMPTY {
     @Override
     public boolean existsIn(@NotNull GitVersion version) {
-      return version.isOlderOrEqual(new GitVersion(1, 7, 2, 0));
+      return version.isLaterOrEqual(new GitVersion(2, 9, 0, 0));
     }
   },
 
@@ -204,6 +202,13 @@ public enum GitVersionSpecialty {
     }
   },
 
+  SUPPORTS_FORCE_PUSH_WITH_LEASE {
+    @Override
+    public boolean existsIn(@NotNull GitVersion version) {
+      return version.isLaterOrEqual(new GitVersion(2, 9, 4, 0));
+    }
+  },
+
   INCOMING_OUTGOING_BRANCH_INFO {
     @Override
     public boolean existsIn(@NotNull GitVersion version) {
@@ -223,6 +228,13 @@ public enum GitVersionSpecialty {
     @Override
     public boolean existsIn(@NotNull GitVersion version) {
       return version.isLaterOrEqual(new GitVersion(2, 1, 0, 0));
+    }
+  },
+
+  ENV_GIT_OPTIONAL_LOCKS_ALLOWED {
+    @Override
+    public boolean existsIn(@NotNull GitVersion version) {
+      return version.isLaterOrEqual(new GitVersion(2, 15, 0, 0));
     }
   },
 
@@ -250,10 +262,15 @@ public enum GitVersionSpecialty {
   public abstract boolean existsIn(@NotNull GitVersion version);
 
   public boolean existsIn(@NotNull Project project) {
-    return existsIn(GitVcs.getInstance(project).getVersion());
+    GitVersion version = GitExecutableManager.getInstance().tryGetVersion(project);
+    return existsIn(ObjectUtils.chooseNotNull(version, GitVersion.NULL));
   }
 
   public boolean existsIn(@NotNull GitRepository repository) {
-    return existsIn(repository.getVcs().getVersion());
+    return existsIn(repository.getProject());
+  }
+
+  public boolean existsIn(@NotNull AbstractVcs vcs) {
+    return existsIn(vcs.getProject());
   }
 }

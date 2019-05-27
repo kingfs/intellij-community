@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 /*
  * Class DebuggerUtilsEx
@@ -11,14 +11,13 @@ import com.intellij.debugger.DebuggerBundle;
 import com.intellij.debugger.SourcePosition;
 import com.intellij.debugger.engine.*;
 import com.intellij.debugger.engine.evaluation.*;
-import com.intellij.debugger.engine.evaluation.expression.EvaluatorBuilder;
 import com.intellij.debugger.engine.evaluation.expression.ExpressionEvaluator;
 import com.intellij.debugger.engine.evaluation.expression.UnBoxingEvaluator;
 import com.intellij.debugger.engine.requests.RequestManagerImpl;
+import com.intellij.debugger.jdi.JvmtiError;
 import com.intellij.debugger.jdi.VirtualMachineProxyImpl;
 import com.intellij.debugger.requests.Requestor;
 import com.intellij.debugger.ui.breakpoints.Breakpoint;
-import com.intellij.debugger.ui.tree.DebuggerTreeNode;
 import com.intellij.execution.filters.ExceptionFilters;
 import com.intellij.execution.filters.LineNumbersMapping;
 import com.intellij.execution.filters.TextConsoleBuilder;
@@ -26,15 +25,11 @@ import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.RunnerLayoutUi;
 import com.intellij.execution.ui.layout.impl.RunnerContentUi;
-import com.intellij.openapi.Disposable;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
-import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.project.Project;
@@ -45,6 +40,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.Navigatable;
 import com.intellij.psi.*;
+import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.ui.classFilter.ClassFilter;
 import com.intellij.ui.content.Content;
@@ -53,8 +49,7 @@ import com.intellij.unscramble.ThreadState;
 import com.intellij.util.DocumentUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.xdebugger.XDebugSession;
-import com.intellij.xdebugger.XDebuggerManager;
+import com.intellij.util.text.DateFormatUtil;
 import com.intellij.xdebugger.XSourcePosition;
 import com.intellij.xdebugger.frame.XValueNode;
 import com.intellij.xdebugger.impl.XSourcePositionImpl;
@@ -82,9 +77,9 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
    */
   public static List<CodeFragmentFactory> getCodeFragmentFactories(@Nullable PsiElement context) {
     final DefaultCodeFragmentFactory defaultFactory = DefaultCodeFragmentFactory.getInstance();
-    final CodeFragmentFactory[] providers = ApplicationManager.getApplication().getExtensions(CodeFragmentFactory.EXTENSION_POINT_NAME);
-    final List<CodeFragmentFactory> suitableFactories = new ArrayList<>(providers.length);
-    if (providers.length > 0) {
+    final List<CodeFragmentFactory> providers = CodeFragmentFactory.EXTENSION_POINT_NAME.getExtensionList();
+    final List<CodeFragmentFactory> suitableFactories = new ArrayList<>(providers.size());
+    if (providers.size() > 0) {
       for (CodeFragmentFactory factory : providers) {
         if (factory != defaultFactory && factory.isContextAccepted(context)) {
           suitableFactories.add(factory);
@@ -118,11 +113,14 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
   }
 
 
-  public static boolean isAssignableFrom(@NotNull final String baseQualifiedName, @NotNull ReferenceType checkedType) {
-    if (CommonClassNames.JAVA_LANG_OBJECT.equals(baseQualifiedName)) {
-      return true;
+  public static boolean isAssignableFrom(@NotNull String baseQualifiedName, @NotNull Type checkedType) {
+    if (checkedType instanceof ReferenceType) {
+      if (CommonClassNames.JAVA_LANG_OBJECT.equals(baseQualifiedName)) {
+        return true;
+      }
+      return getSuperClass(baseQualifiedName, (ReferenceType)checkedType) != null;
     }
-    return getSuperClass(baseQualifiedName, checkedType) != null;
+    return baseQualifiedName.equals(checkedType.name());
   }
 
   public static ReferenceType getSuperClass(@NotNull final String baseQualifiedName, @NotNull ReferenceType checkedType) {
@@ -171,40 +169,6 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
       return ((StringReference)val1).value().equals(((StringReference)val2).value());
     }
     return val1.equals(val2);
-  }
-
-  public static String getValueOrErrorAsString(final EvaluationContext evaluationContext, Value value) {
-    try {
-      return getValueAsString(evaluationContext, value);
-    }
-    catch (EvaluateException e) {
-      return e.getMessage();
-    }
-  }
-
-  public static boolean isCharOrInteger(Value value) {
-    return value instanceof CharValue || isInteger(value);
-  }
-
-  private static Set<String> myCharOrIntegers;
-
-  public static boolean isCharOrIntegerArray(Value value) {
-    if (value == null) return false;
-    if (myCharOrIntegers == null) {
-      myCharOrIntegers = new HashSet<>();
-      myCharOrIntegers.add("C");
-      myCharOrIntegers.add("B");
-      myCharOrIntegers.add("S");
-      myCharOrIntegers.add("I");
-      myCharOrIntegers.add("J");
-    }
-
-    String signature = value.type().signature();
-    int i;
-    for (i = 0; signature.charAt(i) == '['; i++) ;
-    if (i == 0) return false;
-    signature = signature.substring(i);
-    return myCharOrIntegers.contains(signature);
   }
 
   public static ClassFilter create(Element element) throws InvalidDataException {
@@ -261,7 +225,7 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return filters;
   }
 
-  public static void writeFilters(Element parentNode, @NonNls String tagName, ClassFilter[] filters) throws WriteExternalException {
+  public static void writeFilters(@NotNull Element parentNode, @NonNls String tagName, ClassFilter[] filters) throws WriteExternalException {
     for (ClassFilter filter : filters) {
       Element element = new Element(tagName);
       parentNode.addContent(element);
@@ -368,65 +332,24 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return Collections.emptyList();
   }
 
-  public static TextWithImports getEditorText(final Editor editor) {
-    if (editor == null) {
-      return null;
-    }
-    final Project project = editor.getProject();
-    if (project == null) return null;
-
-    String defaultExpression = editor.getSelectionModel().getSelectedText();
-    if (defaultExpression == null) {
-      int offset = editor.getCaretModel().getOffset();
-      PsiFile psiFile = PsiDocumentManager.getInstance(project).getPsiFile(editor.getDocument());
-      if (psiFile != null) {
-        PsiElement elementAtCursor = psiFile.findElementAt(offset);
-        if (elementAtCursor != null) {
-          final EditorTextProvider textProvider = EditorTextProvider.EP.forLanguage(elementAtCursor.getLanguage());
-          if (textProvider != null) {
-            final TextWithImports editorText = textProvider.getEditorText(elementAtCursor);
-            if (editorText != null) return editorText;
-          }
-        }
-      }
-    }
-    else {
-      return new TextWithImportsImpl(CodeFragmentKind.EXPRESSION, defaultExpression);
-    }
-    return null;
-  }
-
   private static int myThreadDumpsCount = 0;
-  private static int myCurrentThreadDumpId = 1;
 
-  private static final String THREAD_DUMP_CONTENT_PREFIX = "Dump";
-
-  public static void addThreadDump(Project project, List<ThreadState> threads, final RunnerLayoutUi ui, DebuggerSession session) {
+  public static void addThreadDump(Project project, List<ThreadState> threads, RunnerLayoutUi ui, GlobalSearchScope searchScope) {
     final TextConsoleBuilder consoleBuilder = TextConsoleBuilderFactory.getInstance().createBuilder(project);
-    consoleBuilder.filters(ExceptionFilters.getFilters(session.getSearchScope()));
+    consoleBuilder.filters(ExceptionFilters.getFilters(searchScope));
     final ConsoleView consoleView = consoleBuilder.getConsole();
     final DefaultActionGroup toolbarActions = new DefaultActionGroup();
     consoleView.allowHeavyFilters();
     final ThreadDumpPanel panel = new ThreadDumpPanel(project, consoleView, toolbarActions, threads);
 
-    final String id = THREAD_DUMP_CONTENT_PREFIX + " #" + myCurrentThreadDumpId;
-    final Content content = ui.createContent(id, panel, id, null, null);
+    String id = "Dump " + DateFormatUtil.formatTimeWithSeconds(System.currentTimeMillis());
+    final Content content = ui.createContent(id + " " + myThreadDumpsCount, panel, id, null, null);
     content.putUserData(RunnerContentUi.LIGHTWEIGHT_CONTENT_MARKER, Boolean.TRUE);
     content.setCloseable(true);
     content.setDescription("Thread Dump");
     ui.addContent(content);
     ui.selectAndFocus(content, true, true);
     myThreadDumpsCount++;
-    myCurrentThreadDumpId++;
-    Disposer.register(content, new Disposable() {
-      @Override
-      public void dispose() {
-        myThreadDumpsCount--;
-        if (myThreadDumpsCount == 0) {
-          myCurrentThreadDumpId = 1;
-        }
-      }
-    });
     Disposer.register(content, consoleView);
     ui.selectAndFocus(content, true, false);
     if (threads.size() > 0) {
@@ -452,10 +375,6 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return context.computeAndKeep(() -> context.getDebugProcess().newInstance(arrayType, dimension));
   }
 
-  public abstract DebuggerTreeNode getSelectedNode(DataContext context);
-
-  public abstract EvaluatorBuilder getEvaluatorBuilder();
-
   @NotNull
   public static CodeFragmentFactory getCodeFragmentFactory(@Nullable PsiElement context, @Nullable FileType fileType) {
     DefaultCodeFragmentFactory defaultFactory = DefaultCodeFragmentFactory.getInstance();
@@ -468,7 +387,7 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
         fileType = file != null ? file.getFileType() : null;
       }
     }
-    for (CodeFragmentFactory factory : ApplicationManager.getApplication().getExtensions(CodeFragmentFactory.EXTENSION_POINT_NAME)) {
+    for (CodeFragmentFactory factory : CodeFragmentFactory.EXTENSION_POINT_NAME.getExtensionList()) {
       if (factory != defaultFactory && (fileType == null || factory.getFileType().equals(fileType)) && factory.isContextAccepted(context)) {
         return factory;
       }
@@ -650,6 +569,23 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
       LOG.info(e);
     }
     return null;
+  }
+
+  public static List<Value> getArgumentValues(@NotNull StackFrame frame) {
+    try {
+      return frame.getArgumentValues();
+    }
+    catch (InternalException e) {
+      // From Oracle's forums:
+      // This could be a JPDA bug. Unexpected JDWP Error: 32 means that an 'opaque' frame was detected at the lower JPDA levels,
+      // typically a native frame.
+      if (e.errorCode() == JvmtiError.OPAQUE_FRAME /*opaque frame JDI bug*/ ) {
+        return Collections.emptyList();
+      }
+      else {
+        throw e;
+      }
+    }
   }
 
   public static Value createValue(VirtualMachineProxyImpl vm, String expectedType, double value) {
@@ -922,6 +858,15 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return method != null && isLambdaName(method.name());
   }
 
+  public static boolean isProxyClassName(@Nullable String name) {
+    return !StringUtil.isEmpty(name) && StringUtil.getShortName(name).startsWith("$Proxy");
+  }
+
+  public static boolean isProxyClass(@Nullable ReferenceType type) {
+    // it may be better to call java.lang.reflect.Proxy#isProxyClass but it is much slower
+    return type instanceof ClassType && isProxyClassName(type.name());
+  }
+
   public static final Comparator<Method> LAMBDA_ORDINAL_COMPARATOR = Comparator.comparingInt(m -> getLambdaOrdinal(m.name()));
 
   public static int getLambdaOrdinal(@NotNull String name) {
@@ -1043,19 +988,6 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
     return Comparing.equal(getContainingMethod(elem), method);
   }
 
-  public static boolean inTheSameMethod(@NotNull SourcePosition pos1, @NotNull SourcePosition pos2) {
-    ApplicationManager.getApplication().assertReadAccessAllowed();
-    PsiElement elem1 = pos1.getElementAt();
-    PsiElement elem2 = pos2.getElementAt();
-    if (elem1 == null) return elem2 == null;
-    if (elem2 != null) {
-      PsiElement expectedMethod = getContainingMethod(elem1);
-      PsiElement currentMethod = getContainingMethod(elem2);
-      return Comparing.equal(expectedMethod, currentMethod);
-    }
-    return false;
-  }
-
   public static boolean methodMatches(@NotNull PsiMethod psiMethod,
                                       String className,
                                       String name,
@@ -1063,14 +995,22 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
                                       DebugProcessImpl process) {
     PsiClass containingClass = psiMethod.getContainingClass();
     try {
-      return containingClass != null && Objects.equals(JVMNameUtil.getClassVMName(containingClass), className) &&
-             JVMNameUtil.getJVMMethodName(psiMethod).equals(name) &&
-             JVMNameUtil.getJVMSignature(psiMethod).getName(process).equals(signature);
+      if (containingClass != null &&
+          JVMNameUtil.getJVMMethodName(psiMethod).equals(name) &&
+          JVMNameUtil.getJVMSignature(psiMethod).getName(process).equals(signature)) {
+        String methodClassName = JVMNameUtil.getClassVMName(containingClass);
+        if (Objects.equals(methodClassName, className)) {
+          return true;
+        }
+        if (methodClassName != null) {
+          return process.getVirtualMachineProxy().classesByName(className).stream().anyMatch(t -> instanceOf(t, methodClassName));
+        }
+      }
     }
     catch (EvaluateException e) {
       LOG.debug(e);
-      return false;
     }
+    return false;
   }
 
   @Nullable
@@ -1130,19 +1070,8 @@ public abstract class DebuggerUtilsEx extends DebuggerUtils {
       }
       else {
         ProjectFileIndex projectFileIndex = ProjectRootManager.getInstance(project).getFileIndex();
-        return projectFileIndex.isInLibraryClasses(file) || projectFileIndex.isInLibrarySource(file);
+        return projectFileIndex.isInLibrary(file);
       }
     });
-  }
-
-  public static boolean isInJavaSession(AnActionEvent e) {
-    XDebugSession session = e.getData(XDebugSession.DATA_KEY);
-    if (session == null) {
-      Project project = e.getProject();
-      if (project != null) {
-        session = XDebuggerManager.getInstance(project).getCurrentSession();
-      }
-    }
-    return session != null && session.getDebugProcess() instanceof JavaDebugProcess;
   }
 }

@@ -15,8 +15,11 @@
  */
 package com.intellij.openapi.wm.impl;
 
+import com.intellij.jdkEx.JdkEx;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.util.ActionCallback;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.ui.ScreenUtil;
@@ -30,6 +33,8 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ComponentAdapter;
 import java.awt.event.ComponentEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 public abstract class IdeFrameDecorator implements Disposable {
   protected IdeFrameImpl myFrame;
@@ -82,36 +87,32 @@ public abstract class IdeFrameDecorator implements Disposable {
 
     @Override
     public boolean isInFullScreen() {
-      if (myFrame == null) return false;
-
-      Rectangle frameBounds = myFrame.getBounds();
-      GraphicsDevice device = ScreenUtil.getScreenDevice(frameBounds);
-      return device != null && device.getDefaultConfiguration().getBounds().equals(frameBounds) && myFrame.isUndecorated();
+      return UIUtil.isWindowClientPropertyTrue(myFrame, WindowManagerImpl.FULL_SCREEN);
     }
 
     @Override
     public ActionCallback toggleFullScreen(boolean state) {
       if (myFrame == null) return ActionCallback.REJECTED;
 
-      GraphicsDevice device = ScreenUtil.getScreenDevice(myFrame.getBounds());
+      Rectangle bounds = myFrame.getBounds();
+      int extendedState = myFrame.getExtendedState();
+      if (state && extendedState == Frame.NORMAL) {
+        myFrame.getRootPane().putClientProperty(IdeFrameImpl.NORMAL_STATE_BOUNDS, bounds);
+      }
+      GraphicsDevice device = ScreenUtil.getScreenDevice(bounds);
       if (device == null) return ActionCallback.REJECTED;
-
+      Rectangle defaultBounds = device.getDefaultConfiguration().getBounds();
       try {
         myFrame.getRootPane().putClientProperty(ScreenUtil.DISPOSE_TEMPORARY, Boolean.TRUE);
-        if (state) {
-          myFrame.getRootPane().putClientProperty("oldBounds", myFrame.getBounds());
-        }
         myFrame.dispose();
-        if (! (Registry.is("ide.win.frame.decoration") && (UIUtil.isUnderDarcula() || UIUtil.isUnderIntelliJLaF()))) {
-          myFrame.setUndecorated(state);
-        }
+        myFrame.setUndecorated(state);
       }
       finally {
         if (state) {
-          myFrame.setBounds(device.getDefaultConfiguration().getBounds());
+          myFrame.setBounds(defaultBounds);
         }
         else {
-          Object o = myFrame.getRootPane().getClientProperty("oldBounds");
+          Object o = myFrame.getRootPane().getClientProperty(IdeFrameImpl.NORMAL_STATE_BOUNDS);
           if (o instanceof Rectangle) {
             myFrame.setBounds((Rectangle)o);
           }
@@ -119,6 +120,9 @@ public abstract class IdeFrameDecorator implements Disposable {
         myFrame.setVisible(true);
         myFrame.getRootPane().putClientProperty(ScreenUtil.DISPOSE_TEMPORARY, null);
 
+        if (!state && (extendedState & Frame.MAXIMIZED_BOTH) != 0) {
+          myFrame.setExtendedState(extendedState);
+        }
         notifyFrameComponents(state);
       }
       return ActionCallback.DONE;
@@ -140,6 +144,25 @@ public abstract class IdeFrameDecorator implements Disposable {
           }
         }
       });
+
+      if (SystemInfo.isKDE && Registry.is("suppress.focus.stealing")) {
+        // KDE sends an unexpected MapNotify event if a window is deiconified.
+        // suppress.focus.stealing fix handles the MapNotify event differently
+        // if the application is not active
+        final WindowAdapter deiconifyListener = new WindowAdapter() {
+          @Override
+          public void windowDeiconified(WindowEvent event) {
+            frame.toFront();
+          }
+        };
+        frame.addWindowListener(deiconifyListener);
+        Disposer.register(this, new Disposable() {
+          @Override
+          public void dispose() {
+            frame.removeWindowListener(deiconifyListener);
+          }
+        });
+      }
     }
 
     @Override
@@ -152,8 +175,21 @@ public abstract class IdeFrameDecorator implements Disposable {
       if (myFrame != null) {
         myRequestedState = state;
         X11UiUtil.toggleFullScreenMode(myFrame);
+
+        if (myFrame.getJMenuBar() instanceof IdeMenuBar) {
+          final IdeMenuBar frameMenuBar = (IdeMenuBar)myFrame.getJMenuBar();
+          frameMenuBar.onToggleFullScreen(state);
+        }
       }
       return ActionCallback.DONE;
     }
+  }
+
+  public static boolean isCustomDecoration() {
+    return SystemInfo.isWindows && isCustomDecorationActive() && JdkEx.isCustomDecorationSupported();
+  }
+
+  public static boolean isCustomDecorationActive() {
+    return Registry.is("ide.win.frame.decoration");
   }
 }

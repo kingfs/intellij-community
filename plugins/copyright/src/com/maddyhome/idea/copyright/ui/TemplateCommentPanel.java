@@ -15,10 +15,12 @@ import com.intellij.ui.DocumentAdapter;
 import com.intellij.uiDesigner.core.GridConstraints;
 import com.intellij.util.ui.UIUtil;
 import com.maddyhome.idea.copyright.CopyrightProfileKt;
+import com.maddyhome.idea.copyright.CopyrightUpdaters;
 import com.maddyhome.idea.copyright.options.LanguageOptions;
 import com.maddyhome.idea.copyright.options.Options;
 import com.maddyhome.idea.copyright.pattern.EntityUtil;
 import com.maddyhome.idea.copyright.pattern.VelocityHelper;
+import com.maddyhome.idea.copyright.psi.UpdateCopyrightsProvider;
 import com.maddyhome.idea.copyright.util.FileTypeUtil;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
@@ -30,10 +32,10 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 
 public class TemplateCommentPanel implements SearchableConfigurable {
-  private final CopyrightManager myManager;
 
   private final FileType fileType;
   private final TemplateCommentPanel parentPanel;
+  private final Project myProject;
   private JRadioButton[] fileLocations = null;
 
   private JTextArea preview;
@@ -64,6 +66,7 @@ public class TemplateCommentPanel implements SearchableConfigurable {
   private JLabel lblLengthBefore;
   private JLabel lblLengthAfter;
   private JLabel mySeparatorCharLabel;
+  private JPanel myRelativeLocationPanel;
 
 
   private void updateBox() {
@@ -90,8 +93,8 @@ public class TemplateCommentPanel implements SearchableConfigurable {
 
   public TemplateCommentPanel(FileType fileType, TemplateCommentPanel parentPanel, String[] locations, Project project) {
     this.parentPanel = parentPanel;
+    myProject = project;
 
-    myManager = CopyrightManager.getInstance(project);
     if (fileType == null) {
       myUseDefaultSettingsRadioButton.setVisible(false);
       myUseCustomFormattingOptionsRadioButton.setVisible(false);
@@ -272,6 +275,7 @@ public class TemplateCommentPanel implements SearchableConfigurable {
       case LanguageOptions.NO_COPYRIGHT:
         enableFormattingOptions(false);
         showPreview(getOptions());
+        myRelativeLocationPanel.setEnabled(false);
         rbBefore.setEnabled(false);
         rbAfter.setEnabled(false);
         cbAddBlank.setEnabled(false);
@@ -285,6 +289,7 @@ public class TemplateCommentPanel implements SearchableConfigurable {
         final boolean isTemplate = parentPanel == null;
         enableFormattingOptions(isTemplate);
         showPreview(parentOpts != null ? parentOpts : getOptions());
+        myRelativeLocationPanel.setEnabled(isTemplate);
         rbBefore.setEnabled(isTemplate);
         rbAfter.setEnabled(isTemplate);
         cbAddBlank.setEnabled(isTemplate);
@@ -297,6 +302,7 @@ public class TemplateCommentPanel implements SearchableConfigurable {
       case LanguageOptions.USE_TEXT:
         enableFormattingOptions(true);
         showPreview(getOptions());
+        myRelativeLocationPanel.setEnabled(true);
         rbBefore.setEnabled(true);
         rbAfter.setEnabled(true);
         cbAddBlank.setEnabled(true);
@@ -311,6 +317,8 @@ public class TemplateCommentPanel implements SearchableConfigurable {
 
   private void enableFormattingOptions(boolean enable) {
     if (enable) {
+      myCommentTypePanel.setEnabled(true);
+      myBorderPanel.setEnabled(true);
       rbBlockComment.setEnabled(true);
       rbLineComment.setEnabled(true);
       cbPrefixLines.setEnabled(allowBlock);
@@ -359,13 +367,18 @@ public class TemplateCommentPanel implements SearchableConfigurable {
 
   @Override
   public boolean isModified() {
-    if (parentPanel == null) return !myManager.getOptions().getTemplateOptions().equals(getOptions());
-    return !myManager.getOptions().getOptions(fileType.getName()).equals(getOptions());
+    if (parentPanel == null) return !getCopyrightOptions().getTemplateOptions().equals(getOptions());
+    return !getCopyrightOptions().getOptions(fileType.getName()).equals(getOptions());
+  }
+
+  @NotNull
+  private Options getCopyrightOptions() {
+    return CopyrightManager.getInstance(myProject).getOptions();
   }
 
   @Override
   public void apply() throws ConfigurationException {
-    final Options options = myManager.getOptions();
+    final Options options = getCopyrightOptions();
     if (parentPanel == null) {
       options.setTemplateOptions(getOptions());
     }
@@ -377,7 +390,7 @@ public class TemplateCommentPanel implements SearchableConfigurable {
   @Override
   public void reset() {
     final LanguageOptions options =
-      parentPanel == null ? myManager.getOptions().getTemplateOptions() : myManager.getOptions().getOptions(fileType.getName());
+      parentPanel == null ? getCopyrightOptions().getTemplateOptions() : getCopyrightOptions().getOptions(fileType.getName());
     boolean isBlock = options.isBlock();
     if (isBlock) {
       rbBlockComment.setSelected(true);
@@ -432,5 +445,13 @@ public class TemplateCommentPanel implements SearchableConfigurable {
   @NotNull
   public String getId() {
     return getHelpTopic() + "." + fileType.getName();
+  }
+
+  @NotNull
+  @Override
+  public Class<?> getOriginalClass() {
+    final FileType type = FileTypeUtil.getInstance().getFileTypeByType(fileType);
+    final UpdateCopyrightsProvider provider = type != null ? CopyrightUpdaters.INSTANCE.forFileType(type) : null;
+    return provider != null ? provider.getClass() : super.getClass();
   }
 }

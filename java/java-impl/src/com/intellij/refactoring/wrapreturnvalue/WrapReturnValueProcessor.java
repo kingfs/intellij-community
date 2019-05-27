@@ -59,6 +59,7 @@ public class WrapReturnValueProcessor extends FixableUsagesRefactoringProcessor 
 
   private final MoveDestination myMoveDestination;
   private final PsiMethod myMethod;
+  @NotNull
   private final String myClassName;
   private final String myPackageName;
   private final boolean myCreateInnerClass;
@@ -68,7 +69,7 @@ public class WrapReturnValueProcessor extends FixableUsagesRefactoringProcessor 
   private final List<PsiTypeParameter> myTypeParameters;
   private final String myUnwrapMethodName;
 
-  public WrapReturnValueProcessor(String className,
+  public WrapReturnValueProcessor(@NotNull String className,
                                   String packageName,
                                   MoveDestination moveDestination,
                                   PsiMethod method,
@@ -129,7 +130,7 @@ public class WrapReturnValueProcessor extends FixableUsagesRefactoringProcessor 
     }
   }
 
-  private void findUsagesForMethod(PsiMethod psiMethod, List<FixableUsageInfo> usages) {
+  private void findUsagesForMethod(PsiMethod psiMethod, List<? super FixableUsageInfo> usages) {
     for (PsiReference reference : ReferencesSearch.search(psiMethod, psiMethod.getUseScope())) {
       final PsiElement referenceElement = reference.getElement();
       final PsiElement parent = referenceElement.getParent();

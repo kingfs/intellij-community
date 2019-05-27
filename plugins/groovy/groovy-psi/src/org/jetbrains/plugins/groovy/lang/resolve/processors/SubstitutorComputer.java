@@ -17,7 +17,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.codeInspection.utils.ControlFlowUtils;
 import org.jetbrains.plugins.groovy.lang.psi.GrControlFlowOwner;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyFile;
-import org.jetbrains.plugins.groovy.lang.psi.api.signatures.GrClosureSignature;
+import org.jetbrains.plugins.groovy.lang.psi.api.signatures.GrSignature;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrClassInitializer;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.GrVariable;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.blocks.GrClosableBlock;
@@ -41,7 +41,6 @@ import org.jetbrains.plugins.groovy.lang.psi.util.PsiUtil;
 import java.util.*;
 
 import static com.intellij.util.containers.ContainerUtil.emptyList;
-import static com.intellij.util.containers.ContainerUtil.newHashSet;
 import static org.jetbrains.plugins.groovy.lang.sam.SamConversionKt.findSingleAbstractMethod;
 import static org.jetbrains.plugins.groovy.lang.sam.SamConversionKt.isSamConversionAllowed;
 
@@ -83,7 +82,7 @@ public class SubstitutorComputer {
     myExitPoints = VolatileNotNullLazyValue.createValue(() -> {
       if (canBeExitPoint(place)) {
         GrControlFlowOwner flowOwner = ControlFlowUtils.findControlFlowOwner(place);
-        return newHashSet(ControlFlowUtils.collectReturns(flowOwner));
+        return new HashSet<>(ControlFlowUtils.collectReturns(flowOwner));
       }
       else {
         return emptyList();
@@ -169,9 +168,9 @@ public class SubstitutorComputer {
                                                    @NotNull PsiType[] argTypes) {
     if (typeParameters.length == 0 || myArgumentTypes == null) return partialSubstitutor;
 
-    final GrClosureSignature erasedSignature = GrClosureSignatureUtil.createSignature(method, partialSubstitutor, true);
+    final GrSignature erasedSignature = GrClosureSignatureUtil.createSignature(method, partialSubstitutor, true);
 
-    final GrClosureSignature signature = GrClosureSignatureUtil.createSignature(method, partialSubstitutor);
+    final GrSignature signature = GrClosureSignatureUtil.createSignature(method, partialSubstitutor);
     final GrClosureParameter[] params = signature.getParameters();
 
     final GrClosureSignatureUtil.ArgInfo<PsiType>[] argInfos =

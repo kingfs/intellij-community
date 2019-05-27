@@ -74,7 +74,9 @@ public class JavaColorProvider implements ElementColorProvider {
     if (isIntLiteralInsideNewJBColorExpression(element)) {
       final String text = element.getText();
       boolean hasAlpha = text != null && StringUtil.startsWithIgnoreCase(text, "0x") && text.length() > 8;
-      return new Color(getInt(UastContextKt.toUElement(element, ULiteralExpression.class)), hasAlpha);
+      ULiteralExpression literal = UastContextKt.toUElement(element, ULiteralExpression.class);
+      Object object = getObject(literal);
+      if (object instanceof Integer) return new Color(((Integer)object).intValue(), hasAlpha);
     }
     return null;
   }
@@ -95,16 +97,14 @@ public class JavaColorProvider implements ElementColorProvider {
       UCallExpression callExpression = (UCallExpression)element;
       if (callExpression.getKind() == UastCallKind.CONSTRUCTOR_CALL) {
         final PsiClass psiClass = PsiTypesUtil.getPsiClass(callExpression.getReturnType());
-        if (psiClass != null && JBColor.class.getName().equals(psiClass.getQualifiedName())) {
-          return true;
-        }
+        return psiClass != null && JBColor.class.getName().equals(psiClass.getQualifiedName());
       }
     }
     return false;
   }
 
   @Nullable
-  private static Color getColor(List<UExpression> args) {
+  private static Color getColor(List<? extends UExpression> args) {
     try {
       ColorConstructors type = args.isEmpty() ? null : getConstructorType(args.size(), args.get(0).getExpressionType());
       if (type != null) {
@@ -201,6 +201,7 @@ public class JavaColorProvider implements ElementColorProvider {
               argumentList.add(factory.createExpressionFromText("true", null));
               replaceInt(expr[0], color.getRGB() | color.getAlpha() << 24, true, true);
             }
+            return;
           case INT_BOOL:
             if ("true".equals(expr[1].getText())) {
               replaceInt(expr[0], color.getRGB() | color.getAlpha() << 24, true, true);
@@ -267,9 +268,9 @@ public class JavaColorProvider implements ElementColorProvider {
         text = "0x";
         Color c = new Color(newValue, hasAlpha);
         if (hasAlpha) {
-          text += Integer.toHexString(c.getAlpha()).toUpperCase();
+          text += StringUtil.toUpperCase(Integer.toHexString(c.getAlpha()));
         }
-        text += ColorUtil.toHex(c).toUpperCase();
+        text += StringUtil.toUpperCase(ColorUtil.toHex(c));
       }
       else {
         text = Integer.toString(newValue);

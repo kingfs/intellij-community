@@ -3,23 +3,23 @@ package com.intellij.codeInspection;
 
 import com.intellij.analysis.JvmAnalysisBundle;
 import com.intellij.codeInspection.util.SpecialAnnotationsUtil;
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.roots.ProjectFileIndex;
-import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.psi.PsiAnnotation;
 import com.intellij.psi.PsiElement;
-import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiModifierListOwner;
-import com.intellij.psi.PsiReference;
 import com.siyeh.ig.ui.ExternalizableStringSet;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.uast.UElement;
 
 import javax.swing.*;
 import java.awt.*;
 import java.util.List;
 
+import static com.intellij.codeInspection.deprecation.DeprecationInspectionBase.getPresentableName;
+
 public class UnstableApiUsageInspection extends AnnotatedElementInspectionBase {
   public final List<String> unstableApiAnnotations = new ExternalizableStringSet(
     "org.jetbrains.annotations.ApiStatus.Experimental",
+    "org.jetbrains.annotations.ApiStatus.Internal",
     "com.google.common.annotations.Beta",
     "io.reactivex.annotations.Beta",
     "io.reactivex.annotations.Experimental",
@@ -35,15 +35,24 @@ public class UnstableApiUsageInspection extends AnnotatedElementInspectionBase {
     return unstableApiAnnotations;
   }
 
+  @NotNull
   @Override
-  protected void createProblem(@NotNull PsiReference reference, @NotNull ProblemsHolder holder) {
-    String message = JvmAnalysisBundle.message("jvm.inspections.unstable.api.usage.description", getReferenceText(reference));
-    holder.registerProblem(reference, message, ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
-  }
-
-  @Override
-  protected boolean shouldProcessElement(@NotNull PsiModifierListOwner element) {
-    return isLibraryElement(element);
+  protected AnnotatedApiUsageProcessor buildAnnotatedApiUsageProcessor(@NotNull ProblemsHolder holder) {
+    return new AnnotatedApiUsageProcessor() {
+      @Override
+      public void processAnnotatedTarget(@NotNull UElement sourceNode,
+                                         @NotNull PsiModifierListOwner annotatedTarget,
+                                         @NotNull List<? extends PsiAnnotation> annotations) {
+        if (!AnnotatedElementInspectionBase.isLibraryElement(annotatedTarget)) {
+          return;
+        }
+        String message = JvmAnalysisBundle.message("jvm.inspections.unstable.api.usage.description", getPresentableName(annotatedTarget));
+        PsiElement elementToHighlight = sourceNode.getSourcePsi();
+        if (elementToHighlight != null) {
+          holder.registerProblem(elementToHighlight, message, ProblemHighlightType.GENERIC_ERROR_OR_WARNING);
+        }
+      }
+    };
   }
 
   @NotNull
@@ -59,21 +68,5 @@ public class UnstableApiUsageInspection extends AnnotatedElementInspectionBase {
     panel.add(checkboxPanel, BorderLayout.NORTH);
     panel.add(annotationsListControl, BorderLayout.CENTER);
     return panel;
-  }
-
-  private static boolean isLibraryElement(@NotNull PsiElement element) {
-    if (ApplicationManager.getApplication().isUnitTestMode()) {
-      return true;
-    }
-
-    PsiFile containingPsiFile = element.getContainingFile();
-    if (containingPsiFile == null) {
-      return false;
-    }
-    VirtualFile containingVirtualFile = containingPsiFile.getVirtualFile();
-    if (containingVirtualFile == null) {
-      return false;
-    }
-    return ProjectFileIndex.getInstance(element.getProject()).isInLibraryClasses(containingVirtualFile);
   }
 }

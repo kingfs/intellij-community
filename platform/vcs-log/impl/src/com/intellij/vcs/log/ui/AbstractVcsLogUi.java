@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui;
 
 import com.google.common.util.concurrent.ListenableFuture;
@@ -27,6 +13,7 @@ import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.NamedRunnable;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.IdeFocusManager;
@@ -36,6 +23,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.data.VcsLogData;
+import com.intellij.vcs.log.history.ReachableNodesUtilKt;
 import com.intellij.vcs.log.impl.VcsLogImpl;
 import com.intellij.vcs.log.impl.VcsLogUiProperties;
 import com.intellij.vcs.log.ui.highlighters.VcsLogHighlighterFactory;
@@ -49,7 +37,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
-import java.util.ArrayList;
 import java.util.Collection;
 
 public abstract class AbstractVcsLogUi implements VcsLogUi, Disposable {
@@ -64,7 +51,7 @@ public abstract class AbstractVcsLogUi implements VcsLogUi, Disposable {
   @NotNull protected final VcsLog myLog;
   @NotNull protected final VisiblePackRefresher myRefresher;
 
-  @NotNull protected final Collection<VcsLogListener> myLogListeners = ContainerUtil.newArrayList();
+  @NotNull protected final Collection<VcsLogListener> myLogListeners = ContainerUtil.createLockFreeCopyOnWriteList();
   @NotNull protected final VisiblePackChangeListener myVisiblePackChangeListener;
 
   @NotNull protected VisiblePack myVisiblePack;
@@ -117,6 +104,18 @@ public abstract class AbstractVcsLogUi implements VcsLogUi, Disposable {
 
     fireFilterChangeEvent(myVisiblePack, permGraphChanged);
     getTable().repaint();
+  }
+
+  public void jumpToNearestCommit(@NotNull Hash hash, @NotNull VirtualFile root) {
+    jumpTo(hash, (model, h) -> {
+      if (!myLogData.getStorage().containsCommit(new CommitId(h, root))) return GraphTableModel.COMMIT_NOT_FOUND;
+      int commitIndex = myLogData.getCommitIndex(h, root);
+      Integer rowIndex = myVisiblePack.getVisibleGraph().getVisibleRowIndex(commitIndex);
+      if (rowIndex == null) {
+        rowIndex = ReachableNodesUtilKt.findVisibleAncestorRow(commitIndex, myVisiblePack);
+      }
+      return rowIndex == null ? GraphTableModel.COMMIT_DOES_NOT_MATCH : rowIndex;
+    }, SettableFuture.create());
   }
 
   protected abstract void onVisiblePackUpdated(boolean permGraphChanged);
@@ -182,17 +181,23 @@ public abstract class AbstractVcsLogUi implements VcsLogUi, Disposable {
     return future;
   }
 
-  public void jumpToCommit(@NotNull Hash commitHash, @NotNull VirtualFile root, @NotNull SettableFuture<Boolean> future) {
+  public void jumpToCommit(@NotNull Hash commitHash, @NotNull VirtualFile root, @NotNull SettableFuture<? super Boolean> future) {
     jumpTo(commitHash, (model, hash) -> model.getRowOfCommit(hash, root), future);
   }
 
-  public void jumpToCommitByPartOfHash(@NotNull String commitHash, @NotNull SettableFuture<Boolean> future) {
-    jumpTo(commitHash, GraphTableModel::getRowOfCommitByPartOfHash, future);
+  public void jumpToCommitByPartOfHash(@NotNull String commitHash, @NotNull SettableFuture<? super Boolean> future) {
+    String trimmed = StringUtil.trim(commitHash, ch -> !StringUtil.containsChar("()'\"`", ch));
+    if (!VcsLogUtil.HASH_REGEX.matcher(trimmed).matches()) {
+      VcsBalloonProblemNotifier.showOverChangesView(myProject, "Commit or reference '" + commitHash + "' not found", MessageType.WARNING);
+      future.set(false);
+      return;
+    }
+    jumpTo(trimmed, GraphTableModel::getRowOfCommitByPartOfHash, future);
   }
 
   protected <T> void jumpTo(@NotNull final T commitId,
                             @NotNull final PairFunction<GraphTableModel, T, Integer> rowGetter,
-                            @NotNull final SettableFuture<Boolean> future) {
+                            @NotNull final SettableFuture<? super Boolean> future) {
     if (future.isCancelled()) return;
 
     GraphTableModel model = getTable().getModel();
@@ -262,9 +267,8 @@ public abstract class AbstractVcsLogUi implements VcsLogUi, Disposable {
 
   protected void fireFilterChangeEvent(@NotNull VisiblePack visiblePack, boolean refresh) {
     ApplicationManager.getApplication().assertIsDispatchThread();
-    Collection<VcsLogListener> logListeners = new ArrayList<>(myLogListeners);
 
-    for (VcsLogListener listener : logListeners) {
+    for (VcsLogListener listener : myLogListeners) {
       listener.onChange(visiblePack, refresh);
     }
   }
@@ -273,7 +277,7 @@ public abstract class AbstractVcsLogUi implements VcsLogUi, Disposable {
     invokeOnChange(runnable, Conditions.alwaysTrue());
   }
 
-  protected void invokeOnChange(@NotNull Runnable runnable, @NotNull Condition<VcsLogDataPack> condition) {
+  protected void invokeOnChange(@NotNull Runnable runnable, @NotNull Condition<? super VcsLogDataPack> condition) {
     addLogListener(new VcsLogListener() {
       @Override
       public void onChange(@NotNull VcsLogDataPack dataPack, boolean refreshHappened) {

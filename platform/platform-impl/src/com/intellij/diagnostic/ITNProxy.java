@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.diagnostic;
 
 import com.intellij.errorreport.error.InternalEAPException;
@@ -21,6 +21,7 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.security.CompositeX509TrustManager;
+import com.intellij.util.io.DigestUtil;
 import com.intellij.util.io.HttpRequests;
 import com.intellij.util.net.NetUtils;
 import com.intellij.util.net.ssl.CertificateUtil;
@@ -28,18 +29,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.net.ssl.*;
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.CertificateFactory;
@@ -47,10 +43,10 @@ import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
+import java.util.zip.GZIPOutputStream;
 
 /**
  * @author stathik
- * @since Aug 4, 2003
  */
 class ITNProxy {
   private static final String DEFAULT_USER = "idea_anonymous";
@@ -62,7 +58,7 @@ class ITNProxy {
   private static final NotNullLazyValue<Map<String, String>> TEMPLATE = AtomicNotNullLazyValue.createValue(() -> {
     Map<String, String> template = new LinkedHashMap<>();
 
-    template.put("protocol.version", "1");
+    template.put("protocol.version", "1.1");
     template.put("os.name", SystemInfo.OS_NAME);
     template.put("java.version", SystemInfo.JAVA_VERSION);
     template.put("java.vm.vendor", SystemInfo.JAVA_VENDOR);
@@ -118,14 +114,16 @@ class ITNProxy {
   static class ErrorBean {
     final IdeaLoggingEvent event;
     final String comment;
+    final String pluginId;
     final String pluginName;
     final String pluginVersion;
     final String lastActionId;
     final int previousException;
 
-    ErrorBean(IdeaLoggingEvent event, String comment, String pluginName, String pluginVersion, String lastActionId, int previousException) {
+    ErrorBean(IdeaLoggingEvent event, String comment, String pluginId, String pluginName, String pluginVersion, String lastActionId, int previousException) {
       this.event = event;
       this.comment = comment;
+      this.pluginId = pluginId;
       this.pluginName = pluginName;
       this.pluginVersion = pluginVersion;
       this.lastActionId = lastActionId;
@@ -212,6 +210,7 @@ class ITNProxy {
     append(builder, "update.channel.status", updateSettings.getSelectedChannelStatus().getCode());
     append(builder, "update.ignored.builds", StringUtil.join(updateSettings.getIgnoredBuildNumbers(), ","));
 
+    append(builder, "plugin.id", error.pluginId);
     append(builder, "plugin.name", error.pluginName);
     append(builder, "plugin.version", error.pluginVersion);
     append(builder, "last.action", error.lastActionId);
@@ -252,6 +251,10 @@ class ITNProxy {
       if (messageObj.getAssigneeId() != null) {
         append(builder, "assignee.id", Integer.toString(messageObj.getAssigneeId()));
       }
+      append(builder, "assignee.list.visible", Boolean.toString(messageObj.isAssigneeVisible()));
+      if (messageObj.getDevelopersTimestamp() != null) {
+        append(builder, "assignee.list.timestamp", Long.toString(messageObj.getDevelopersTimestamp()));
+      }
     }
 
     return builder.toString().getBytes(StandardCharsets.UTF_8);
@@ -279,14 +282,22 @@ class ITNProxy {
       connection.setHostnameVerifier(new EaHostnameVerifier());
     }
 
+    ByteArrayOutputStream outputByteStream = new ByteArrayOutputStream(bytes.length);
+    try (GZIPOutputStream gzip = new GZIPOutputStream(outputByteStream)) {
+      gzip.write(bytes);
+    }
+
+    byte[] compressedBytes = outputByteStream.toByteArray();
+
     connection.setRequestMethod("POST");
     connection.setDoInput(true);
     connection.setDoOutput(true);
     connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded; charset=" + StandardCharsets.UTF_8.name());
-    connection.setRequestProperty("Content-Length", Integer.toString(bytes.length));
+    connection.setRequestProperty("Content-Length", Integer.toString(compressedBytes.length));
+    connection.setRequestProperty("Content-Encoding", "gzip");
 
     try (OutputStream out = connection.getOutputStream()) {
-      out.write(bytes);
+      out.write(compressedBytes);
     }
 
     return connection;
@@ -327,7 +338,7 @@ class ITNProxy {
           Certificate ca = certificates[certificates.length - 1];
           if (ca instanceof X509Certificate) {
             String cn = CertificateUtil.getCommonName((X509Certificate)ca);
-            byte[] digest = MessageDigest.getInstance("SHA-1").digest(ca.getEncoded());
+            byte[] digest = DigestUtil.sha1().digest(ca.getEncoded());
             StringBuilder fp = new StringBuilder(2 * digest.length);
             for (byte b : digest) fp.append(Integer.toHexString(b & 0xFF));
             if (JB_CA_CN.equals(cn) && JB_CA_FP.equals(fp.toString())) {
@@ -336,7 +347,7 @@ class ITNProxy {
           }
         }
       }
-      catch (SSLPeerUnverifiedException | CertificateEncodingException | NoSuchAlgorithmException ignored) { }
+      catch (SSLPeerUnverifiedException | CertificateEncodingException ignored) { }
 
       return false;
     }

@@ -1,6 +1,7 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.commands
 
+import com.google.common.annotations.VisibleForTesting
 import com.intellij.CommonBundle
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
@@ -11,12 +12,14 @@ import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.components.panels.Wrapper
 import com.intellij.ui.layout.*
+import com.intellij.util.ArrayUtil
 import com.intellij.util.AuthData
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import git4idea.remote.InteractiveGitHttpAuthDataProvider
 import java.awt.event.ActionEvent
 import javax.swing.AbstractAction
+import javax.swing.Action
 import javax.swing.JComponent
 
 
@@ -24,11 +27,16 @@ class GitHttpLoginDialog @JvmOverloads constructor(project: Project,
                                                    private val url: String,
                                                    rememberPassword: Boolean = true,
                                                    username: String? = null,
-                                                   editableUsername: Boolean = true) : DialogWrapper(project, true) {
+                                                   editableUsername: Boolean = true,
+                                                   private val showActionForCredHelper: Boolean = false) : DialogWrapper(project, true) {
   private val usernameField = JBTextField(username).apply { isEditable = editableUsername }
   private val passwordField = JBPasswordField()
   private val rememberCheckbox = JBCheckBox(CommonBundle.message("checkbox.remember.password"), rememberPassword)
   private val additionalProvidersButton = JBOptionButton(null, null).apply { isVisible = false }
+
+  companion object {
+    const val USE_CREDENTIAL_HELPER_CODE = NEXT_USER_EXIT_CODE
+  }
 
   var externalAuthData: AuthData? = null
     private set
@@ -46,6 +54,21 @@ class GitHttpLoginDialog @JvmOverloads constructor(project: Project,
       row("Password:") { passwordField() }
       row {
         rememberCheckbox()
+      }
+    }
+  }
+
+  override fun createActions(): Array<Action> {
+    if (showActionForCredHelper) {
+      return ArrayUtil.prepend(createUsingCredHelperAction(), super.createActions())
+    }
+    return super.createActions()
+  }
+
+  private fun createUsingCredHelperAction(): AbstractAction {
+    return object : AbstractAction("I'm Using Credential Helper") {
+      override fun actionPerformed(e: ActionEvent?) {
+        close(USE_CREDENTIAL_HELPER_CODE, false)
       }
     }
   }
@@ -86,8 +109,25 @@ class GitHttpLoginDialog @JvmOverloads constructor(project: Project,
     additionalProvidersButton.isVisible = true
   }
 
-  val username: String get() = usernameField.text
-  val password: String get() = String(passwordField.password!!)
-  val rememberPassword: Boolean get() = rememberCheckbox.isSelected
+  @set:VisibleForTesting
+  var username: String
+    get() = usernameField.text
+    internal set(value) {
+      usernameField.text = value
+    }
+
+  @set:VisibleForTesting
+  var password: String
+    get() = String(passwordField.password!!)
+    internal set(value) {
+      passwordField.text = value
+    }
+
+  @set:VisibleForTesting
+  var rememberPassword: Boolean
+    get() = rememberCheckbox.isSelected
+    internal set(value) {
+      rememberCheckbox.isSelected = value
+    }
 }
 

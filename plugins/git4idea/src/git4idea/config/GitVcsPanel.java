@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.config;
 
 import com.intellij.dvcs.branch.DvcsSyncSettings;
@@ -11,12 +11,14 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.ComboBox;
+import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsBundle;
 import com.intellij.ui.EnumComboBoxModel;
-import com.intellij.ui.ListCellRendererWrapper;
+import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBTextField;
@@ -32,23 +34,19 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
-import javax.swing.text.NumberFormatter;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
-import java.text.NumberFormat;
 import java.util.List;
 import java.util.Objects;
 
 import static com.intellij.util.containers.ContainerUtil.sorted;
+import static java.util.Objects.requireNonNull;
 
 /**
  * Git VCS configuration panel
  */
 public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSettingsHolder> {
-
-  private static final String IDEA_SSH_NAME = GitBundle.getString("git.vcs.config.ssh.mode.idea"); // IDEA ssh value
-  private static final String NATIVE_SSH_NAME = GitBundle.getString("git.vcs.config.ssh.mode.native"); // Native SSH value
 
   @NotNull private final Project myProject;
   @NotNull private final GitExecutableManager myExecutableManager;
@@ -59,7 +57,6 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
   private JComponent myRootPanel;
   private TextFieldWithBrowseButton myGitField;
   private JBCheckBox myProjectGitPathCheckBox;
-  private JComboBox<String> mySSHExecutableComboBox; // Type of SSH executable to use
   private JCheckBox myAutoUpdateIfPushRejected;
   private JBCheckBox mySyncControl;
   private JCheckBox myAutoCommitOnCherryPick;
@@ -68,22 +65,20 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
   private JCheckBox myWarnAboutDetachedHead;
   private JTextField myProtectedBranchesField;
   private JBLabel myProtectedBranchesLabel;
-  private JComboBox myUpdateMethodComboBox;
-  private JCheckBox myUpdateBranchInfoCheckBox;
-  private JFormattedTextField myBranchUpdateTimeField;
-  private JPanel myBranchTimePanel;
+  private JComboBox<UpdateMethod> myUpdateMethodComboBox;
   private JBLabel mySupportedBranchUpLabel;
-  private JPanel myIncomingOutgoingSettingPanel;
   private JBCheckBox myPreviewPushOnCommitAndPush;
   private JBCheckBox myPreviewPushProtectedOnly;
   private JPanel myPreviewPushProtectedOnlyBorder;
+  private JComboBox<GitIncomingCheckStrategy> myIncomingStrategyComboBox;
+  private JPanel myCheckIncomingPanel;
+  // TODO: add tooltip: Do not use credential helpers when using git from IDE. Only works with Git version >=2.9.0
+  private JBCheckBox myUseCredHelperCheckbox;
+
 
   public GitVcsPanel(@NotNull Project project, @NotNull GitExecutableManager executableManager) {
     myProject = project;
     myExecutableManager = executableManager;
-    mySSHExecutableComboBox.addItem(IDEA_SSH_NAME);
-    mySSHExecutableComboBox.addItem(NATIVE_SSH_NAME);
-    mySSHExecutableComboBox.setSelectedItem(IDEA_SSH_NAME);
     myTestButton.addActionListener(e -> testExecutable());
     myGitField.addBrowseFolderListener(GitBundle.getString("find.git.title"), GitBundle.getString("find.git.description"), project,
                                        FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor());
@@ -97,7 +92,6 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
     }
     mySyncControl.setToolTipText(DvcsBundle.message("sync.setting.description", "Git"));
     myProtectedBranchesLabel.setLabelFor(myProtectedBranchesField);
-    myUpdateBranchInfoCheckBox.addItemListener(e -> UIUtil.setEnabled(myBranchTimePanel, myUpdateBranchInfoCheckBox.isSelected(), true));
     myPreviewPushOnCommitAndPush.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent e) {
@@ -120,6 +114,7 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
 
       @Override
       public void run(@NotNull ProgressIndicator indicator) {
+        myExecutableManager.dropVersionCache(pathToGit);
         myVersion = myExecutableManager.identifyVersion(pathToGit);
       }
 
@@ -185,22 +180,34 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
     String projectSettingsPathToGit = projectSettings.getPathToGit();
     myGitField.setText(ObjectUtils.coalesce(projectSettingsPathToGit, myApplicationGitPath));
     myProjectGitPathCheckBox.setSelected(projectSettingsPathToGit != null);
-    mySSHExecutableComboBox.setSelectedItem(applicationSettings.isUseIdeaSsh() ? IDEA_SSH_NAME : NATIVE_SSH_NAME);
     myAutoUpdateIfPushRejected.setSelected(projectSettings.autoUpdateIfPushRejected());
     mySyncControl.setSelected(projectSettings.getSyncSetting() == DvcsSyncSettings.Value.SYNC);
-    myAutoCommitOnCherryPick.setSelected(projectSettings.isAutoCommitOnCherryPick());
+    myAutoCommitOnCherryPick.setSelected(applicationSettings.isAutoCommitOnCherryPick());
+    myUseCredHelperCheckbox.setSelected(applicationSettings.isUseCredentialHelper());
     myAddCherryPickSuffix.setSelected(projectSettings.shouldAddSuffixToCherryPicksOfPublishedCommits());
     myWarnAboutCrlf.setSelected(projectSettings.warnAboutCrlf());
     myWarnAboutDetachedHead.setSelected(projectSettings.warnAboutDetachedHead());
-    myUpdateMethodComboBox.setSelectedItem(projectSettings.getUpdateType());
+    myUpdateMethodComboBox.setSelectedItem(projectSettings.getUpdateMethod());
     myProtectedBranchesField.setText(ParametersListUtil.COLON_LINE_JOINER.fun(sharedSettings.getForcePushProhibitedPatterns()));
-    boolean branchInfoSupported = isBranchInfoSupported();
-    myUpdateBranchInfoCheckBox.setSelected(branchInfoSupported && projectSettings.shouldUpdateBranchInfo());
-    myUpdateBranchInfoCheckBox.setEnabled(branchInfoSupported);
-    myBranchUpdateTimeField.setValue(projectSettings.getBranchInfoUpdateTime());
+    myIncomingStrategyComboBox.setSelectedItem(projectSettings.getIncomingCheckStrategy());
+    updateBranchInfoPanel();
     myPreviewPushOnCommitAndPush.setSelected(projectSettings.shouldPreviewPushOnCommitAndPush());
     myPreviewPushProtectedOnly.setSelected(projectSettings.isPreviewPushProtectedOnly());
     updateEnabled();
+  }
+
+  private void updateBranchInfoPanel() {
+    UIUtil.setEnabled(myCheckIncomingPanel, Registry.is("git.update.incoming.outgoing.info") && isBranchInfoSupported(), true);
+    updateBranchSupportedHint();
+  }
+
+  private void updateBranchSupportedHint() {
+    boolean branchInfoSupported = isBranchInfoSupported();
+    mySupportedBranchUpLabel.setVisible(!branchInfoSupported);
+    mySupportedBranchUpLabel
+      .setForeground(!branchInfoSupported && myIncomingStrategyComboBox.getSelectedItem() != GitIncomingCheckStrategy.Never
+                     ? DialogWrapper.ERROR_FOREGROUND_COLOR
+                     : UIUtil.getContextHelpForeground());
   }
 
   private boolean isBranchInfoSupported() {
@@ -214,17 +221,17 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
     GitSharedSettings sharedSettings = settings.getSharedSettings();
 
     return isGitPathModified(applicationSettings, projectSettings) ||
-           applicationSettings.isUseIdeaSsh() != IDEA_SSH_NAME.equals(mySSHExecutableComboBox.getSelectedItem()) ||
            !projectSettings.autoUpdateIfPushRejected() == myAutoUpdateIfPushRejected.isSelected() ||
            ((projectSettings.getSyncSetting() == DvcsSyncSettings.Value.SYNC) != mySyncControl.isSelected() ||
-            projectSettings.isAutoCommitOnCherryPick() != myAutoCommitOnCherryPick.isSelected() ||
+            applicationSettings.isAutoCommitOnCherryPick() != myAutoCommitOnCherryPick.isSelected() ||
+            applicationSettings.isUseCredentialHelper() != myUseCredHelperCheckbox.isSelected() ||
             projectSettings.shouldAddSuffixToCherryPicksOfPublishedCommits() != myAddCherryPickSuffix.isSelected() ||
             projectSettings.warnAboutCrlf() != myWarnAboutCrlf.isSelected() ||
             projectSettings.warnAboutDetachedHead() != myWarnAboutDetachedHead.isSelected() ||
             projectSettings.shouldPreviewPushOnCommitAndPush() != myPreviewPushOnCommitAndPush.isSelected() ||
             projectSettings.isPreviewPushProtectedOnly() != myPreviewPushProtectedOnly.isSelected() ||
-            projectSettings.getUpdateType() != myUpdateMethodComboBox.getModel().getSelectedItem() ||
-            isUpdateBranchSettingsModified(projectSettings) ||
+            projectSettings.getUpdateMethod() != myUpdateMethodComboBox.getModel().getSelectedItem() ||
+            projectSettings.getIncomingCheckStrategy() != myIncomingStrategyComboBox.getSelectedItem() ||
             !sorted(sharedSettings.getForcePushProhibitedPatterns()).equals(sorted(getProtectedBranchesPatterns())));
   }
 
@@ -250,17 +257,14 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
       projectSettings.setPathToGit(null);
     }
 
-    applicationSettings.setIdeaSsh(IDEA_SSH_NAME.equals(mySSHExecutableComboBox.getSelectedItem()) ?
-                                   GitVcsApplicationSettings.SshExecutable.BUILT_IN :
-                                   GitVcsApplicationSettings.SshExecutable.NATIVE);
-
     projectSettings.setAutoUpdateIfPushRejected(myAutoUpdateIfPushRejected.isSelected());
     projectSettings.setSyncSetting(mySyncControl.isSelected() ? DvcsSyncSettings.Value.SYNC : DvcsSyncSettings.Value.DONT_SYNC);
-    projectSettings.setAutoCommitOnCherryPick(myAutoCommitOnCherryPick.isSelected());
+    applicationSettings.setAutoCommitOnCherryPick(myAutoCommitOnCherryPick.isSelected());
+    applicationSettings.setUseCredentialHelper(myUseCredHelperCheckbox.isSelected());
     projectSettings.setAddSuffixToCherryPicks(myAddCherryPickSuffix.isSelected());
     projectSettings.setWarnAboutCrlf(myWarnAboutCrlf.isSelected());
     projectSettings.setWarnAboutDetachedHead(myWarnAboutDetachedHead.isSelected());
-    projectSettings.setUpdateType((UpdateMethod)myUpdateMethodComboBox.getSelectedItem());
+    projectSettings.setUpdateMethod((UpdateMethod)myUpdateMethodComboBox.getSelectedItem());
     projectSettings.setPreviewPushOnCommitAndPush(myPreviewPushOnCommitAndPush.isSelected());
     projectSettings.setPreviewPushProtectedOnly(myPreviewPushProtectedOnly.isSelected());
 
@@ -288,27 +292,14 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
   }
 
   private void applyBranchUpdateInfo(@NotNull GitVcsSettings projectSettings) {
-    boolean branchInfoSupported = isBranchInfoSupported();
-    myUpdateBranchInfoCheckBox.setEnabled(branchInfoSupported);
-    if (!branchInfoSupported) {
-      myUpdateBranchInfoCheckBox.setSelected(false);
-    }
-    if (isUpdateBranchSettingsModified(projectSettings)) {
-      projectSettings.setBranchInfoUpdateTime((Integer)myBranchUpdateTimeField.getValue());
-      projectSettings.setUpdateBranchInfo(myUpdateBranchInfoCheckBox.isSelected());
-      GitBranchIncomingOutgoingManager incomingOutgoingManager = GitBranchIncomingOutgoingManager.getInstance(myProject);
-      incomingOutgoingManager.stopScheduling();
-      if (projectSettings.shouldUpdateBranchInfo()) {
-        incomingOutgoingManager.startScheduling();
-      }
+    if (!Registry.is("git.update.incoming.outgoing.info")) return;
+    updateBranchInfoPanel();
+    GitIncomingCheckStrategy selectedStrategy = requireNonNull((GitIncomingCheckStrategy)myIncomingStrategyComboBox.getSelectedItem());
+    if (projectSettings.getIncomingCheckStrategy() != selectedStrategy) {
+      projectSettings.setIncomingCheckStrategy(selectedStrategy);
+      GitBranchIncomingOutgoingManager.getInstance(myProject).updateIncomingScheduling();
     }
   }
-
-  private boolean isUpdateBranchSettingsModified(@NotNull GitVcsSettings projectSettings) {
-    return projectSettings.getBranchInfoUpdateTime() != (Integer)myBranchUpdateTimeField.getValue() ||
-           projectSettings.shouldUpdateBranchInfo() != myUpdateBranchInfoCheckBox.isSelected();
-  }
-
 
   @NotNull
   private List<String> getProtectedBranchesPatterns() {
@@ -320,19 +311,10 @@ public class GitVcsPanel implements ConfigurableUi<GitVcsConfigurable.GitVcsSett
     textField.getEmptyText().setText("Auto-detected: " + myExecutableManager.getDetectedExecutable());
     myGitField = new TextFieldWithBrowseButton(textField);
     myProtectedBranchesField = new ExpandableTextField(ParametersListUtil.COLON_LINE_PARSER, ParametersListUtil.COLON_LINE_JOINER);
-    myUpdateMethodComboBox = new ComboBox(new EnumComboBoxModel<>(UpdateMethod.class));
-    myUpdateMethodComboBox.setRenderer(new ListCellRendererWrapper<UpdateMethod>() {
-      @Override
-      public void customize(JList list, UpdateMethod value, int index, boolean selected, boolean hasFocus) {
-        setText(StringUtil.capitalize(StringUtil.toLowerCase(value.name().replace('_', ' '))));
-      }
-    });
-    myIncomingOutgoingSettingPanel = new JPanel(new BorderLayout());
-    myIncomingOutgoingSettingPanel.setVisible(false);
-    NumberFormatter numberFormatter = new NumberFormatter(NumberFormat.getIntegerInstance());
-    numberFormatter.setMinimum(1);
-    numberFormatter.setAllowsInvalid(true);
-    myBranchUpdateTimeField = new JFormattedTextField(numberFormatter);
+    myUpdateMethodComboBox = new ComboBox<>(new EnumComboBoxModel<>(UpdateMethod.class));
+    myUpdateMethodComboBox.setRenderer(SimpleListCellRenderer.create("", value ->
+      StringUtil.capitalize(StringUtil.toLowerCase(value.name().replace('_', ' ')))));
+    myIncomingStrategyComboBox = new ComboBox<>(new EnumComboBoxModel<>(GitIncomingCheckStrategy.class));
     mySupportedBranchUpLabel = new JBLabel("Supported from Git 2.9+");
     mySupportedBranchUpLabel.setBorder(JBUI.Borders.emptyLeft(2));
   }

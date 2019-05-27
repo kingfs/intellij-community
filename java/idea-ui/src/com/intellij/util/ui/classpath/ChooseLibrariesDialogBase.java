@@ -169,14 +169,14 @@ public abstract class ChooseLibrariesDialogBase extends DialogWrapper {
   protected JComponent createCenterPanel() {
     myBuilder = new SimpleTreeBuilder(myTree, new DefaultTreeModel(new DefaultMutableTreeNode()),
                                         new MyStructure(getProject()),
-                                        WeightBasedComparator.FULL_INSTANCE);
+                                        WeightBasedComparator.FULL_INSTANCE) {
+      // unique class to simplify search through the logs
+    };
     myBuilder.initRootNode();
 
     myTree.setDragEnabled(false);
 
     myTree.setShowsRootHandles(true);
-    UIUtil.setLineStyleAngled(myTree);
-
     myTree.setRootVisible(false);
     myTree.addTreeSelectionListener(new TreeSelectionListener() {
       @Override

@@ -1,89 +1,120 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.io;
 
 import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
-import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.apache.commons.compress.compressors.CompressorException;
+import org.apache.commons.compress.compressors.CompressorStreamFactory;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Enumeration;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-public abstract class Decompressor<Stream> {
-  public static class Tar extends Decompressor<TarArchiveInputStream> {
+import static com.intellij.util.BitUtil.isSet;
+
+public abstract class Decompressor {
+  /**
+   * The Tar decompressor automatically detects the compression of an input file/stream.
+   */
+  public static class Tar extends Decompressor {
     public Tar(@NotNull File file) {
       mySource = file;
     }
 
-    public Tar(@NotNull TarArchiveInputStream stream) {
+    public Tar(@NotNull InputStream stream) {
       mySource = stream;
+    }
+
+    public Tar withSymlinks() {
+      symlinks = true;
+      return this;
     }
 
     //<editor-fold desc="Implementation">
     private final Object mySource;
+    private TarArchiveInputStream myStream;
+    private boolean symlinks;
 
     @Override
-    protected TarArchiveInputStream openStream() throws IOException {
-      return mySource instanceof TarArchiveInputStream
-             ? (TarArchiveInputStream)mySource
-             : new TarArchiveInputStream(new GzipCompressorInputStream(new FileInputStream(((File)mySource))));
+    protected void openStream() throws IOException {
+      InputStream input = new BufferedInputStream(mySource instanceof File ? new FileInputStream(((File)mySource)) : (InputStream)mySource);
+      try {
+        input = new CompressorStreamFactory().createCompressorInputStream(input);
+      }
+      catch (CompressorException e) {
+        Throwable cause = e.getCause();
+        if (cause instanceof IOException) throw (IOException)cause;
+      }
+      myStream = new TarArchiveInputStream(input);
     }
 
     @Override
-    protected Entry nextEntry(TarArchiveInputStream tar) throws IOException {
-      TarArchiveEntry tarEntry = tar.getNextTarEntry();
-      return tarEntry == null ? null : new Entry(tarEntry.getName(), tarEntry.isDirectory());
+    @SuppressWarnings("OctalInteger")
+    protected Entry nextEntry() throws IOException {
+      TarArchiveEntry te;
+      while ((te = myStream.getNextTarEntry()) != null && !(te.isFile() || te.isDirectory() || te.isSymbolicLink() && symlinks)) /* skips unsupported */;
+      return te == null ? null : new Entry(te.getName(), type(te), isSet(te.getMode(), 0200), isSet(te.getMode(), 0100), te.getLinkName());
+    }
+
+    private static Type type(TarArchiveEntry te) {
+      return te.isSymbolicLink() ? Type.SYMLINK : te.isDirectory() ? Type.DIR : Type.FILE;
     }
 
     @Override
-    protected InputStream openEntryStream(TarArchiveInputStream stream, Entry entry) {
-      return stream;
+    protected InputStream openEntryStream(Entry entry) {
+      return myStream;
     }
 
     @Override
     protected void closeEntryStream(InputStream stream) { }
 
     @Override
-    protected void closeStream(TarArchiveInputStream tar) throws IOException {
+    protected void closeStream() throws IOException {
       if (mySource instanceof File) {
-        tar.close();
+        myStream.close();
+        myStream = null;
       }
     }
     //</editor-fold>
   }
 
-  public static class Zip extends Decompressor<ZipFile> {
+  public static class Zip extends Decompressor {
     public Zip(@NotNull File file) {
       mySource = file;
     }
 
     //<editor-fold desc="Implementation">
     private final File mySource;
+    private ZipFile myZip;
     private Enumeration<? extends ZipEntry> myEntries;
     private ZipEntry myEntry;
 
     @Override
-    protected ZipFile openStream() throws IOException {
-      return new ZipFile(mySource);
+    protected void openStream() throws IOException {
+      myZip = new ZipFile(mySource);
+      myEntries = myZip.entries();
     }
 
     @Override
-    protected Entry nextEntry(ZipFile zip) {
-      if (myEntries == null) myEntries = zip.entries();
+    protected Entry nextEntry() {
       myEntry = myEntries.hasMoreElements() ? myEntries.nextElement() : null;
       return myEntry == null ? null : new Entry(myEntry.getName(), myEntry.isDirectory());
     }
 
     @Override
-    protected InputStream openEntryStream(ZipFile zip, Entry entry) throws IOException {
-      return zip.getInputStream(myEntry);
+    protected InputStream openEntryStream(Entry entry) throws IOException {
+      return myZip.getInputStream(myEntry);
     }
 
     @Override
@@ -92,8 +123,9 @@ public abstract class Decompressor<Stream> {
     }
 
     @Override
-    protected void closeStream(ZipFile zip) throws IOException {
-      zip.close();
+    protected void closeStream() throws IOException {
+      myZip.close();
+      myZip = null;
     }
     //</editor-fold>
   }
@@ -102,51 +134,71 @@ public abstract class Decompressor<Stream> {
   private boolean myOverwrite = true;
   private Consumer<? super File> myConsumer;
 
-  public Decompressor<Stream> filter(@Nullable Condition<? super String> filter) {
+  public Decompressor filter(@Nullable Condition<? super String> filter) {
     myFilter = filter;
     return this;
   }
 
-  public Decompressor<Stream> overwrite(boolean overwrite) {
+  public Decompressor overwrite(boolean overwrite) {
     myOverwrite = overwrite;
     return this;
   }
 
-  public Decompressor<Stream> postprocessor(@Nullable Consumer<? super File> consumer) {
+  public Decompressor postprocessor(@Nullable Consumer<? super File> consumer) {
     myConsumer = consumer;
     return this;
   }
 
   public final void extract(@NotNull File outputDir) throws IOException {
-    Stream stream = openStream();
+    openStream();
     try {
       Entry entry;
-      while ((entry = nextEntry(stream)) != null) {
+      while ((entry = nextEntry()) != null) {
         String name = entry.name;
-        if (myFilter != null && !myFilter.value(name)) {
-          continue;
+
+        if (myFilter != null) {
+          String entryName = entry.type == Type.DIR && !StringUtil.endsWithChar(name, '/') ? name + '/' : name;
+          if (!myFilter.value(entryName)) {
+            continue;
+          }
         }
 
         File outputFile = entryFile(outputDir, name);
 
-        if (entry.isDirectory) {
-          FileUtil.createDirectory(outputFile);
-        }
-        else if (!outputFile.exists() || myOverwrite) {
-          InputStream inputStream = openEntryStream(stream, entry);
-          try {
+        switch (entry.type) {
+          case DIR:
+            FileUtil.createDirectory(outputFile);
+            break;
+
+          case FILE:
+            if (!outputFile.exists() || myOverwrite) {
+              InputStream inputStream = openEntryStream(entry);
+              try {
+                FileUtil.createParentDirs(outputFile);
+                try (FileOutputStream outputStream = new FileOutputStream(outputFile)) {
+                  FileUtil.copy(inputStream, outputStream);
+                }
+                if (!entry.isWritable && !outputFile.setWritable(false, false)) {
+                  throw new IOException("Can't make file read-only: " + outputFile);
+                }
+                if (entry.isExecutable && SystemInfo.isUnix && !outputFile.setExecutable(true, true)) {
+                  throw new IOException("Can't make file executable: " + outputFile);
+                }
+              }
+              finally {
+                closeEntryStream(inputStream);
+              }
+            }
+            break;
+
+          case SYMLINK:
+            if (StringUtil.isEmpty(entry.linkTarget) ||
+                !FileUtil.isAncestor(outputDir, new File(FileUtil.toCanonicalPath(outputFile.getParent() + '/' + entry.linkTarget)), true)) {
+              throw new IOException("Invalid symlink entry: " + name + " -> " + entry.linkTarget);
+            }
             FileUtil.createParentDirs(outputFile);
-            FileOutputStream outputStream = new FileOutputStream(outputFile);
-            try {
-              FileUtil.copy(inputStream, outputStream);
-            }
-            finally {
-              outputStream.close();
-            }
-          }
-          finally {
-            closeEntryStream(inputStream);
-          }
+            Files.createSymbolicLink(outputFile.toPath(), Paths.get(entry.linkTarget));
+            break;
         }
 
         if (myConsumer != null) {
@@ -155,28 +207,40 @@ public abstract class Decompressor<Stream> {
       }
     }
     finally {
-      closeStream(stream);
+      closeStream();
     }
   }
 
   //<editor-fold desc="Internal interface">
   protected Decompressor() { }
 
-  private static class Entry {
-    private final String name;
-    private final boolean isDirectory;
+  private enum Type {FILE, DIR, SYMLINK}
 
-    Entry(String name, boolean isDirectory) {
+  protected static class Entry {
+    final String name;
+    final Type type;
+    final boolean isWritable;
+    final boolean isExecutable;
+    final String linkTarget;
+
+    protected Entry(String name, boolean isDirectory) {
+      this(name, isDirectory ? Type.DIR : Type.FILE, true, false, null);
+    }
+
+    protected Entry(String name, Type type, boolean isWritable, boolean isExecutable, String linkTarget) {
       this.name = name;
-      this.isDirectory = isDirectory;
+      this.type = type;
+      this.isWritable = isWritable;
+      this.isExecutable = isExecutable;
+      this.linkTarget = linkTarget;
     }
   }
 
-  protected abstract Stream openStream() throws IOException;
-  protected abstract Entry nextEntry(Stream stream) throws IOException;
-  protected abstract InputStream openEntryStream(Stream stream, Entry entry) throws IOException;
+  protected abstract void openStream() throws IOException;
+  protected abstract Entry nextEntry() throws IOException;
+  protected abstract InputStream openEntryStream(Entry entry) throws IOException;
   protected abstract void closeEntryStream(InputStream stream) throws IOException;
-  protected abstract void closeStream(Stream stream) throws IOException;
+  protected abstract void closeStream() throws IOException;
   //</editor-fold>
 
   @NotNull

@@ -29,7 +29,7 @@ class CheckerFrameworkNullityUtil {
             return new NullabilityAnnotationInfo(anno, Nullability.NULLABLE, true);
           }
           if (instance.getNotNulls().contains(valueClass.getQualifiedName())) {
-            return new NullabilityAnnotationInfo(anno, Nullability.NULLABLE, true);
+            return new NullabilityAnnotationInfo(anno, Nullability.NOT_NULL, true);
           }
         }
       }
@@ -57,6 +57,7 @@ class CheckerFrameworkNullityUtil {
       if (type == PsiAnnotation.TargetType.FIELD) return locationNames.contains("FIELD");
       if (type == PsiAnnotation.TargetType.METHOD) return locationNames.contains("RETURN");
       if (type == PsiAnnotation.TargetType.PARAMETER) return locationNames.contains("PARAMETER");
+      if (type == PsiAnnotation.TargetType.LOCAL_VARIABLE) return locationNames.contains("LOCAL_VARIABLE");
     }
     return false;
   }

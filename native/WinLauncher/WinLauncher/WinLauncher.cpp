@@ -1,5 +1,5 @@
 /*
-* Copyright 2000-2018 JetBrains s.r.o.
+* Copyright 2000-2019 JetBrains s.r.o.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -298,6 +298,7 @@ bool LocateJVM()
   if (FindJVMInSettings()) return true;
 
   std::vector<std::string> jrePaths;
+  if(need64BitJRE) jrePaths.push_back(GetAdjacentDir("jbr"));
   if(need64BitJRE) jrePaths.push_back(GetAdjacentDir("jre64"));
   jrePaths.push_back(GetAdjacentDir("jre32"));
   jrePaths.push_back(GetAdjacentDir("jre"));
@@ -564,6 +565,9 @@ bool LoadVMOptions()
   vmOptionLines.push_back(std::string("-Djb.vmOptionsFile=") + EncodeWideACP(used));
 
   if (!AddClassPathOptions(vmOptionLines)) return false;
+  std::string dllName(jvmPath);
+  std::string binDirs = dllName + "\\bin;" + dllName + "\\bin\\server";
+  vmOptionLines.push_back(std::string("-Djava.library.path=") + binDirs);
   AddPredefinedVMOptions(vmOptionLines);
 
   vmOptionCount = vmOptionLines.size();

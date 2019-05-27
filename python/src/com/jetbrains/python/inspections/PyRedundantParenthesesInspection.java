@@ -83,6 +83,7 @@ public class PyRedundantParenthesesInspection extends PyInspection {
     @Override
     public void visitPyParenthesizedExpression(final PyParenthesizedExpression node) {
       if (node.textContains('\n')) return;
+      if (node.getParent() instanceof PyParenthesizedExpression) return;
       final PyExpression expression = node.getContainedExpression();
       if (expression == null) return;
       final PyYieldExpression yieldExpression = PsiTreeUtil.getParentOfType(expression, PyYieldExpression.class, false);
@@ -96,6 +97,12 @@ public class PyRedundantParenthesesInspection extends PyInspection {
           if (parent instanceof PyBinaryExpression) {
             if (((PyBinaryExpression)parent).getOperator() == PyTokenTypes.PERC) return;
           }
+        }
+
+        if (expression instanceof PyNumericLiteralExpression &&
+            ((PyNumericLiteralExpression)expression).isIntegerLiteral() &&
+            node.getParent() instanceof PyReferenceExpression) {
+          return;
         }
 
         if (node.getParent() instanceof PyPrintStatement) {

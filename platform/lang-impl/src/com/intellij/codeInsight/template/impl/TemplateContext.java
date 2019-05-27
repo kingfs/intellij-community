@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.impl;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -28,7 +28,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class TemplateContext {
-  private final Map<String, Boolean> myContextStates = ContainerUtil.newTroveMap();
+  private final Map<String, Boolean> myContextStates = new THashMap<>();
 
   private static final ClearableLazyValue<Map<String, String>> INTERN_MAP = new ClearableLazyValue<Map<String, String>>() {
     private final AtomicBoolean isListenerAdded = new AtomicBoolean();
@@ -52,7 +52,7 @@ public class TemplateContext {
           public void extensionRemoved(@NotNull TemplateContextType extension, @Nullable PluginDescriptor pluginDescriptor) {
             drop();
           }
-        });
+        }, false, null);
       }
 
       return TemplateManagerImpl.getAllContextTypes().stream()
@@ -151,7 +151,7 @@ public class TemplateContext {
 
   @VisibleForTesting
   @Nullable
-  public Element writeTemplateContext(@Nullable TemplateContext defaultContext, @NotNull Lazy<Map<String, TemplateContextType>> idToType) {
+  public Element writeTemplateContext(@Nullable TemplateContext defaultContext, @NotNull Lazy<? extends Map<String, TemplateContextType>> idToType) {
     if (myContextStates.isEmpty()) {
       return null;
     }

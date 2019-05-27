@@ -1,6 +1,7 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.completion;
 
+import com.intellij.codeInsight.completion.impl.CamelHumpMatcher;
 import com.intellij.codeInsight.generation.*;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.codeInsight.lookup.LookupElementBuilder;
@@ -10,6 +11,7 @@ import com.intellij.openapi.application.AccessToken;
 import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.util.Iconable;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.infos.CandidateInfo;
@@ -19,15 +21,13 @@ import com.intellij.ui.RowIcon;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.VisibilityUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.FList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.java.generate.exception.GenerateCodeException;
 
 import javax.swing.*;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 import static com.intellij.patterns.PlatformPatterns.psiElement;
 
@@ -48,14 +48,19 @@ public class JavaGenerateMemberCompletionContributor {
       PsiElement prevLeaf = PsiTreeUtil.prevVisibleLeaf(position);
       PsiModifierList modifierList = PsiTreeUtil.getParentOfType(prevLeaf, PsiModifierList.class);
       if (modifierList != null) {
-        result = result.withPrefixMatcher(position.getContainingFile().getText().substring(modifierList.getTextRange().getStartOffset(), parameters.getOffset()));
+        String fileText = position.getContainingFile().getText();
+        result = result.withPrefixMatcher(new NoMiddleMatchesAfterSpace(
+          fileText.substring(modifierList.getTextRange().getStartOffset(), parameters.getOffset())));
       }
       suggestGeneratedMethods(result, position, modifierList);
     } else if (psiElement(PsiIdentifier.class)
       .withParents(PsiJavaCodeReferenceElement.class, PsiAnnotation.class, PsiModifierList.class, PsiClass.class).accepts(position)) {
       PsiAnnotation annotation = ObjectUtils.assertNotNull(PsiTreeUtil.getParentOfType(position, PsiAnnotation.class));
       int annoStart = annotation.getTextRange().getStartOffset();
-      suggestGeneratedMethods(result.withPrefixMatcher(annotation.getText().substring(0, parameters.getOffset() - annoStart)), position, (PsiModifierList)annotation.getParent());
+      suggestGeneratedMethods(
+        result.withPrefixMatcher(new NoMiddleMatchesAfterSpace(annotation.getText().substring(0, parameters.getOffset() - annoStart))),
+        position,
+        (PsiModifierList)annotation.getParent());
     }
 
   }
@@ -63,7 +68,7 @@ public class JavaGenerateMemberCompletionContributor {
   private static void suggestGeneratedMethods(CompletionResultSet result, PsiElement position, @Nullable PsiModifierList modifierList) {
     PsiClass parent = CompletionUtil.getOriginalElement(ObjectUtils.assertNotNull(PsiTreeUtil.getParentOfType(position, PsiClass.class)));
     if (parent != null) {
-      Set<MethodSignature> addedSignatures = ContainerUtil.newHashSet();
+      Set<MethodSignature> addedSignatures = new HashSet<>();
       addGetterSetterElements(result, parent, addedSignatures);
       boolean generateDefaultMethods = modifierList != null && modifierList.hasModifierProperty(PsiModifier.DEFAULT);
       addSuperSignatureElements(parent, true, result, addedSignatures, generateDefaultMethods);
@@ -95,7 +100,7 @@ public class JavaGenerateMemberCompletionContributor {
               insertGenerationInfos(context, Collections.singletonList(new PsiGenerationInfo<>(prototype)));
             }
           }, false, parent));
-          
+
           if (count++ > 100) return;
         }
       }
@@ -207,5 +212,30 @@ public class JavaGenerateMemberCompletionContributor {
   @NotNull
   private static String getShortParameterName(PsiSubstitutor substitutor, PsiParameter p) {
     return PsiNameHelper.getShortClassName(substitutor.substitute(p.getType()).getPresentableText(false));
+  }
+
+  private static class NoMiddleMatchesAfterSpace extends CamelHumpMatcher {
+    NoMiddleMatchesAfterSpace(String prefix) {
+      super(prefix);
+    }
+
+    @Override
+    public boolean prefixMatches(@NotNull LookupElement element) {
+      if (!super.prefixMatches(element)) return false;
+
+      if (!myPrefix.contains(" ")) return true;
+
+      String signature = element.getLookupString();
+      FList<TextRange> fragments = matchingFragments(signature);
+      return fragments == null || fragments.stream().noneMatch(f -> isMiddleMatch(signature, f));
+
+    }
+
+    private static boolean isMiddleMatch(String signature, TextRange fragment) {
+      int start = fragment.getStartOffset();
+      return start > 0 &&
+             Character.isJavaIdentifierPart(signature.charAt(start)) &&
+             Character.isJavaIdentifierPart(signature.charAt(start - 1));
+    }
   }
 }

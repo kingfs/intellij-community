@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.openapi.diff.impl.settings;
 
@@ -27,13 +27,11 @@ import com.intellij.openapi.editor.event.EditorMouseEvent;
 import com.intellij.openapi.editor.event.EditorMouseMotionListener;
 import com.intellij.openapi.editor.ex.DocumentEx;
 import com.intellij.openapi.editor.ex.EditorEx;
-import com.intellij.openapi.editor.ex.util.EditorUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.IdeBorderFactory;
 import com.intellij.util.EventDispatcher;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -109,7 +107,7 @@ class DiffPreviewPanel implements PreviewPanel {
     @NotNull
     @Override
     public List<String> getContentTitles() {
-      return ContainerUtil.list(null, null, null);
+      return Arrays.asList(null, null, null);
     }
 
     @Nullable
@@ -165,9 +163,10 @@ class DiffPreviewPanel implements PreviewPanel {
     @Override
     public void mouseMoved(@NotNull EditorMouseEvent e) {
       int line = getLineNumber(mySide, e);
-      if (getChange(mySide, line) != null || getFoldRegion(mySide, line) != null) {
-        EditorUtil.setHandCursor(e.getEditor());
-      }
+      Cursor cursor = getChange(mySide, line) != null || getFoldRegion(mySide, line) != null
+                      ? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                      : null;
+      ((EditorEx)e.getEditor()).setCustomCursor(DiffPreviewPanel.class, cursor);
     }
   }
 
@@ -217,7 +216,9 @@ class DiffPreviewPanel implements PreviewPanel {
     for (SimpleThreesideDiffChange change : myViewer.getChanges()) {
       int startLine = change.getStartLine(side);
       int endLine = change.getEndLine(side);
-      if (DiffUtil.isSelectedByLine(line, startLine, endLine)) return change;
+      if (DiffUtil.isSelectedByLine(line, startLine, endLine) && change.isChange(side)) {
+        return change;
+      }
     }
     return null;
   }

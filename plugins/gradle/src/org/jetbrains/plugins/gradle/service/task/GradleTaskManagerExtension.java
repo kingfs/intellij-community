@@ -23,13 +23,11 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.gradle.settings.GradleExecutionSettings;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /**
  * @author Vladislav.Soroka
- * @since 11/5/13
  */
 public interface GradleTaskManagerExtension {
 
@@ -56,7 +54,7 @@ public interface GradleTaskManagerExtension {
                                @Nullable final GradleExecutionSettings settings,
                                @Nullable final String jvmAgentSetup,
                                @NotNull final ExternalSystemTaskNotificationListener listener) throws ExternalSystemException {
-    List<String> vmOptions = settings != null ? new ArrayList<>(settings.getVmOptions()) : Collections.emptyList();
+    List<String> vmOptions = settings != null ? settings.getJvmArguments() : Collections.emptyList();
     List<String> arguments = settings != null ? settings.getArguments() : Collections.emptyList();
     return executeTasks(id, taskNames, projectPath, settings, vmOptions, arguments, jvmAgentSetup, listener);
   }

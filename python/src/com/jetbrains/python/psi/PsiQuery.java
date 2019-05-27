@@ -19,6 +19,7 @@ import com.google.common.collect.FluentIterable;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.extenstions.PsiElementExtKt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -74,7 +75,7 @@ public final class PsiQuery<T extends PsiElement> {
   }
 
   @NotNull
-  public static <T extends PsiElement> PsiQuery<T> createFromQueries(@NotNull final List<PsiQuery<? extends T>> queriesWithElements) {
+  public static <T extends PsiElement> PsiQuery<T> createFromQueries(@NotNull final List<? extends PsiQuery<? extends T>> queriesWithElements) {
     final Set<T> result = new LinkedHashSet<>();
     queriesWithElements.forEach(o -> result.addAll(o.getElements()));
     return new PsiQuery<>(new ArrayList<>(result));
@@ -91,18 +92,18 @@ public final class PsiQuery<T extends PsiElement> {
   }
 
   @NotNull
-  public PsiQuery<T> filter(@NotNull final Predicate<T> filter) {
+  public PsiQuery<T> filter(@NotNull final Predicate<? super T> filter) {
     return new PsiQuery<>(asStream().filter(filter).collect(Collectors.toList()));
   }
 
   @NotNull
-  public <R extends PsiElement> PsiQuery<R> map(@NotNull final Function<T, R> map) {
+  public <R extends PsiElement> PsiQuery<R> map(@NotNull final Function<? super T, ? extends R> map) {
     return new PsiQuery<>(asStream().map(map).collect(Collectors.toList()));
   }
 
   @NotNull
   public <R extends PsiElement, F_R extends T> PsiQuery<R> map(@NotNull final PsiFilter<F_R> preFilter,
-                                                               @NotNull final Function<F_R, R> map) {
+                                                               @NotNull final Function<? super F_R, ? extends R> map) {
     return filter(preFilter).map(map);
   }
 
@@ -141,9 +142,7 @@ public final class PsiQuery<T extends PsiElement> {
                                                                   @NotNull final PsiFilter<R> filter) {
     final Set<R> result = new LinkedHashSet<>(); // Set to get rid of duplicates but preserve order
     asStream()
-      .map(o -> elementsProducer.apply(o)
-        .stream().filter(o2 -> !o2.equals(o)) // Filter out same element in case of siblings
-        .collect(Collectors.toList()))
+      .map(o -> ContainerUtil.filter(elementsProducer.apply(o), o2 -> !o2.equals(o)))
       .forEach(result::addAll);
     return new PsiQuery<>(new ArrayList<>(filter.filter(result)));
   }

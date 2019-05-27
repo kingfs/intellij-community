@@ -1,6 +1,4 @@
-/*
- * Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.actions;
 
 import com.intellij.icons.AllIcons;
@@ -11,7 +9,6 @@ import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.ide.util.PsiNavigationSupport;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
@@ -34,18 +31,15 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 
 public class OpenFileAction extends AnAction implements DumbAware {
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
-    final Project eventProject = e.getProject();
-    ApplicationManager.getApplication().invokeLater(() -> prepareFileChooserAndOpen(eventProject));
-  }
-
-  private void prepareFileChooserAndOpen(final Project eventProject) {
-    final boolean showFiles = eventProject != null || PlatformProjectOpenProcessor.getInstanceIfItExists() != null;
+    final Project project = e.getProject();
+    final boolean showFiles = project != null || PlatformProjectOpenProcessor.getInstanceIfItExists() != null;
     final FileChooserDescriptor descriptor = showFiles ? new ProjectOrFileChooserDescriptor() : new ProjectOnlyFileChooserDescriptor();
 
     VirtualFile toSelect = null;
@@ -55,15 +49,15 @@ public class OpenFileAction extends AnAction implements DumbAware {
 
     descriptor.putUserData(PathChooserDialog.PREFER_LAST_OVER_EXPLICIT, toSelect == null && showFiles);
 
-    FileChooser.chooseFiles(descriptor, eventProject, toSelect != null ? toSelect : getPathToSelect(), files -> {
+    FileChooser.chooseFiles(descriptor, project, toSelect != null ? toSelect : getPathToSelect(), files -> {
       for (VirtualFile file : files) {
         if (!descriptor.isFileSelectable(file)) {
           String message = IdeBundle.message("error.dir.contains.no.project", file.getPresentableUrl());
-          Messages.showInfoMessage(eventProject, message, IdeBundle.message("title.cannot.open.project"));
+          Messages.showInfoMessage(project, message, IdeBundle.message("title.cannot.open.project"));
           return;
         }
       }
-      doOpenFile(eventProject, files);
+      doOpenFile(project, files);
     });
   }
 
@@ -73,13 +67,18 @@ public class OpenFileAction extends AnAction implements DumbAware {
   }
 
   @Override
+  public boolean startInTransaction() {
+    return true;
+  }
+
+  @Override
   public void update(@NotNull AnActionEvent e) {
     if (NewWelcomeScreen.isNewWelcomeScreen(e)) {
       e.getPresentation().setIcon(AllIcons.Actions.Menu_open);
     }
   }
 
-  private static void doOpenFile(@Nullable Project project, @NotNull List<VirtualFile> result) {
+  private static void doOpenFile(@Nullable Project project, @NotNull List<? extends VirtualFile> result) {
     for (VirtualFile file : result) {
       if (file.isDirectory()) {
         Project openedProject;
@@ -137,7 +136,7 @@ public class OpenFileAction extends AnAction implements DumbAware {
   }
 
   public static void openFile(VirtualFile file, @NotNull Project project) {
-    NonProjectFileWritingAccessProvider.allowWriting(file);
+    NonProjectFileWritingAccessProvider.allowWriting(Collections.singletonList(file));
     PsiNavigationSupport.getInstance().createNavigatable(project, file, -1).navigate(true);
   }
 

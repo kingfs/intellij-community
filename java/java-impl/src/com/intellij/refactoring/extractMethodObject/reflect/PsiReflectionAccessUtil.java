@@ -1,14 +1,11 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.refactoring.extractMethodObject.reflect;
 
-import com.intellij.codeInsight.PsiEquivalenceUtil;
-import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
-import com.intellij.util.ArrayUtil;
 import com.siyeh.ig.psiutils.ExpectedTypeUtils;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
@@ -33,7 +30,14 @@ class PsiReflectionAccessUtil {
     if (psiClass == null) return false;
 
     // currently, we use dummy psi class "_Array_" to represent arrays which is an inner of package-private _Dummy_ class.
-    if (isArrayClass(psiClass)) return true;
+    if (PsiUtil.isArrayClass(psiClass)) return true;
+    PsiFile containingFile = psiClass.getContainingFile();
+    if (containingFile instanceof PsiJavaFile) {
+      if (((PsiJavaFile)containingFile).getPackageName().isEmpty()) {
+        // consider classes in the default package as inaccessible
+        return false;
+      }
+    }
     while (psiClass != null) {
       if (!psiClass.hasModifierProperty(PsiModifier.PUBLIC)) {
         return false;
@@ -43,6 +47,18 @@ class PsiReflectionAccessUtil {
     }
 
     return true;
+  }
+
+  public static boolean isAccessibleMethodReference(@NotNull PsiMethodReferenceExpression methodReference) {
+    PsiElement method = methodReference.resolve();
+    if (!(method instanceof PsiMethod)) {
+      return true; // referent is accessible by default
+    }
+    else {
+      PsiTypeElement qualifierType = methodReference.getQualifierType();
+      boolean qualifierAccessible = qualifierType == null || isAccessibleType(qualifierType.getType());
+      return qualifierAccessible && isAccessibleMember((PsiMember)method);
+    }
   }
 
   @Nullable
@@ -65,10 +81,7 @@ class PsiReflectionAccessUtil {
     String expectedType = tryGetWeakestAccessibleExpectedType(expression);
     if (expectedType != null) return expectedType;
 
-    PsiType nearestAccessibleBaseType = nearestAccessedType(type);
-    if (nearestAccessibleBaseType != null) return nearestAccessibleBaseType.getCanonicalText();
-
-    return nearestAccessibleBaseClass(PsiTypesUtil.getPsiClass(type));
+    return type != null ? nearestAccessibleType(type).getCanonicalText() : null;
   }
 
   @Nullable
@@ -76,7 +89,7 @@ class PsiReflectionAccessUtil {
     String expectedType = tryGetWeakestAccessibleExpectedType(expression);
     if (expectedType != null) return expectedType;
 
-    return nearestAccessibleBaseClass(psiClass);
+    return nearestAccessibleBaseClassName(psiClass);
   }
 
   @Nullable
@@ -85,7 +98,7 @@ class PsiReflectionAccessUtil {
     PsiType realType = expression.getType();
     if (expectedType != null && realType != null) {
       for (PsiType type: getAllAssignableSupertypes(realType, expectedType)) {
-        if (isAccessible(type)) {
+        if (isAccessibleType(type)) {
           return type.getCanonicalText();
         }
       }
@@ -132,14 +145,18 @@ class PsiReflectionAccessUtil {
     return name;
   }
 
-  private static boolean isAccessible(@NotNull PsiType type) {
+  public static boolean isAccessibleType(@NotNull PsiType type) {
+    if (type instanceof PsiArrayType) {
+      return isAccessibleType(type.getDeepComponentType());
+    }
+
     return TypeConversionUtil.isPrimitiveAndNotNull(type) || isAccessible(PsiTypesUtil.getPsiClass(type));
   }
 
-  @Nullable
-  private static PsiType nearestAccessedType(@Nullable PsiType type) {
-    while (type != null && !isAccessible(type)) {
-      type = ArrayUtil.getFirstElement(type.getSuperTypes());
+  @NotNull
+  public static PsiType nearestAccessibleType(@NotNull PsiType type) {
+    while (!isAccessibleType(type)) {
+      type = type.getSuperTypes()[0];
     }
 
     return type;
@@ -147,17 +164,11 @@ class PsiReflectionAccessUtil {
 
   @Contract("null -> null")
   @Nullable
-  private static String nearestAccessibleBaseClass(@Nullable PsiClass psiClass) {
-    while (psiClass != null && !psiClass.hasModifierProperty(PsiModifier.PUBLIC)) {
+  private static String nearestAccessibleBaseClassName(@Nullable PsiClass psiClass) {
+    while (psiClass != null && !isAccessible(psiClass)) {
       psiClass = psiClass.getSuperClass();
     }
 
     return psiClass == null ? null : psiClass.getQualifiedName();
-  }
-
-  private static boolean isArrayClass(@NotNull PsiClass psiClass) {
-    Project project = psiClass.getProject();
-    PsiClass arrayClass = JavaPsiFacade.getElementFactory(project).getArrayClass(PsiUtil.getLanguageLevel(psiClass));
-    return PsiEquivalenceUtil.areElementsEquivalent(psiClass, arrayClass);
   }
 }

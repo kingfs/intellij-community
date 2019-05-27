@@ -11,20 +11,23 @@ import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.ElementColorProvider;
 import com.intellij.openapi.editor.markup.GutterIconRenderer;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.util.PsiUtilBase;
 import com.intellij.util.Function;
 import com.intellij.util.FunctionUtil;
 import com.intellij.util.ui.ColorIcon;
 import com.intellij.util.ui.JBUI;
-import com.intellij.util.ui.TwoColorsIcon;
+import com.intellij.util.ui.ColorsIcon;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
 import java.awt.*;
-import java.util.Collection;
 import java.util.List;
 
+/**
+ * @author Konstantin Bulenkov
+ */
 public final class ColorLineMarkerProvider extends LineMarkerProviderDescriptor {
   public static final ColorLineMarkerProvider INSTANCE = new ColorLineMarkerProvider();
 
@@ -41,10 +44,6 @@ public final class ColorLineMarkerProvider extends LineMarkerProviderDescriptor 
       }
     }
     return null;
-  }
-
-  @Override
-  public void collectSlowLineMarkers(@NotNull List<PsiElement> elements, @NotNull Collection<LineMarkerInfo> result) {
   }
 
   @Override
@@ -73,9 +72,14 @@ public final class ColorLineMarkerProvider extends LineMarkerProviderDescriptor 
 
               final Editor editor = PsiUtilBase.findEditor(elt);
               assert editor != null;
-              final Color c = ColorChooser.chooseColor(editor.getProject(), editor.getComponent(), "Choose Color", color, true);
-              if (c != null) {
-                WriteAction.run(() -> colorProvider.setColorTo(elt, c));
+
+              if (Registry.is("ide.new.color.picker")) {
+                ColorPicker.showColorPickerPopup(color, (c, l) -> WriteAction.run(() -> colorProvider.setColorTo(elt, c)));
+              } else {
+                final Color c = ColorChooser.chooseColor(editor.getProject(), editor.getComponent(), "Choose Color", color, true);
+                if (c != null) {
+                  WriteAction.run(() -> colorProvider.setColorTo(elt, c));
+                }
               }
             },
             GutterIconRenderer.Alignment.LEFT);
@@ -89,10 +93,7 @@ public final class ColorLineMarkerProvider extends LineMarkerProviderDescriptor 
 
     @Override
     public Icon getCommonIcon(@NotNull List<MergeableLineMarkerInfo> infos) {
-      if (infos.size() == 2 && infos.get(0) instanceof MyInfo && infos.get(1) instanceof MyInfo) {
-        return JBUI.scale(new TwoColorsIcon(12, ((MyInfo)infos.get(0)).myColor, ((MyInfo)infos.get(1)).myColor));
-      }
-      return AllIcons.Gutter.Colors;
+      return JBUI.scale(new ColorsIcon(12, infos.stream().map(_info -> ((MyInfo)_info).myColor).toArray(Color[]::new)));
     }
 
     @NotNull

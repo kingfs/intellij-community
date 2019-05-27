@@ -1,13 +1,15 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.wm.impl.welcomeScreen;
 
 import com.intellij.diagnostic.IdeMessagePanel;
 import com.intellij.diagnostic.MessagePool;
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
-import com.intellij.ide.MacOSApplicationProvider;
 import com.intellij.ide.RecentProjectsManager;
 import com.intellij.ide.dnd.FileCopyPasteUtil;
+import com.intellij.ide.impl.ProjectUtil;
+import com.intellij.ide.plugins.InstalledPluginsManagerMain;
+import com.intellij.jdkEx.JdkEx;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.impl.IdeNotificationArea;
 import com.intellij.openapi.Disposable;
@@ -26,8 +28,11 @@ import com.intellij.openapi.ui.popup.StackingPopupDispatcher;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.*;
+import com.intellij.openapi.wm.impl.IdeFrameDecorator;
 import com.intellij.openapi.wm.impl.IdeFrameImpl;
 import com.intellij.openapi.wm.impl.IdeGlassPaneImpl;
+import com.intellij.openapi.wm.impl.customFrameDecorations.header.CustomFrameDialogContent;
+import com.intellij.openapi.wm.impl.customFrameDecorations.header.CustomFrameViewHolder;
 import com.intellij.ui.*;
 import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.ui.components.JBList;
@@ -39,7 +44,6 @@ import com.intellij.ui.mac.TouchbarDataKeys;
 import com.intellij.ui.popup.PopupFactoryImpl;
 import com.intellij.ui.popup.list.GroupedItemsListRenderer;
 import com.intellij.util.Function;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.MouseEventAdapter;
@@ -57,6 +61,7 @@ import javax.swing.event.ListDataListener;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
 import java.awt.*;
+import java.awt.datatransfer.Transferable;
 import java.awt.dnd.*;
 import java.awt.event.*;
 import java.io.File;
@@ -95,12 +100,23 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
 
     setGlassPane(glassPane);
     glassPane.setVisible(false);
-    //setUndecorated(true);
-    setContentPane(myScreen.getWelcomePanel());
+
+    int defaultHeight = DEFAULT_HEIGHT;
+    if (IdeFrameDecorator.isCustomDecoration()) {
+      CustomFrameViewHolder holder =
+        CustomFrameDialogContent.getCustomContentHolder(this, myScreen.getWelcomePanel(), UIManager.getColor("WelcomeScreen.background"));
+      setContentPane(holder.getContent());
+
+      defaultHeight+=holder.getHeaderHeight();
+    } else {
+      setContentPane(myScreen.getWelcomePanel());
+    }
+
     setTitle(getWelcomeFrameTitle());
     AppUIUtil.updateWindowIcon(this);
     final int width = RecentProjectsManager.getInstance().getRecentProjectsActions(false).length == 0 ? 666 : MAX_DEFAULT_WIDTH;
-    getRootPane().setPreferredSize(JBUI.size(width, DEFAULT_HEIGHT));
+
+    getRootPane().setPreferredSize(JBUI.size(width, defaultHeight));
     setResizable(false);
 
     Dimension size = getPreferredSize();
@@ -135,6 +151,14 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
     Disposer.register(ApplicationManager.getApplication(), this);
 
     UIUtil.decorateWindowHeader(getRootPane());
+  }
+
+  @Override
+  public void addNotify() {
+    if (IdeFrameDecorator.isCustomDecoration()) {
+      JdkEx.setHasCustomDecoration(this);
+    }
+    super.addNotify();
   }
 
   @Override
@@ -198,7 +222,10 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
     if (Boolean.getBoolean("ide.ui.version.in.title")) {
       title += ' ' + ApplicationInfo.getInstance().getFullVersion();
     }
-    title += IdeFrameImpl.getElevationSuffix();
+    String suffix = IdeFrameImpl.getSuperUserSuffix();
+    if (suffix != null) {
+      title += ' ' + suffix;
+    }
     return title;
   }
 
@@ -281,9 +308,13 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
         public void drop(DropTargetDropEvent e) {
           setDnd(false);
           e.acceptDrop(DnDConstants.ACTION_COPY_OR_MOVE);
-          List<File> list = FileCopyPasteUtil.getFileList(e.getTransferable());
+          Transferable transferable = e.getTransferable();
+          List<File> list = FileCopyPasteUtil.getFileList(transferable);
           if (list != null && list.size() > 0) {
-            MacOSApplicationProvider.tryOpenFileList(null, list, "WelcomeFrame");
+            InstalledPluginsManagerMain.PluginDropHandler pluginHandler = new InstalledPluginsManagerMain.PluginDropHandler();
+            if (!pluginHandler.canHandle(transferable, null) || !pluginHandler.handleDrop(transferable, null, null)) {
+              ProjectUtil.tryOpenFileList(null, list, "WelcomeFrame");
+            }
             e.dropComplete(true);
             return;
           }
@@ -310,16 +341,16 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
       super.paint(g);
       if (inDnd) {
         Rectangle bounds = getBounds();
-        Color background = JBColor.namedColor("DragAndDrop.backgroundColor", new Color(225, 235, 245));
+        Color background = JBColor.namedColor("DragAndDrop.areaBackground", new Color(225, 235, 245));
         g.setColor(new Color(background.getRed(), background.getGreen(), background.getBlue(), 206));
         g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
 
-        Color backgroundBorder = JBColor.namedColor("DragAndDrop.backgroundBorderColor", new Color(137, 178, 222));
+        Color backgroundBorder = JBColor.namedColor("DragAndDrop.areaBorderColor", new Color(137, 178, 222));
         g.setColor(backgroundBorder);
         g.drawRect(bounds.x, bounds.y, bounds.width, bounds.height);
         g.drawRect(bounds.x + 1 , bounds.y + 1, bounds.width - 2, bounds.height - 2);
 
-        Color foreground = JBColor.namedColor("DragAndDrop.foregroundColor", Gray._120);
+        Color foreground = JBColor.namedColor("DragAndDrop.areaForeground", Gray._120);
         g.setColor(foreground);
         Font labelFont = UIUtil.getLabelFont();
         Font font = labelFont.deriveFont(labelFont.getSize() + 5.0f);
@@ -441,7 +472,7 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
       return panel;
     }
 
-    private JComponent createActionLink(String text, Icon icon, Ref<ActionLink> ref, AnAction action) {
+    private JComponent createActionLink(String text, Icon icon, Ref<? super ActionLink> ref, AnAction action) {
       ActionLink link = new ActionLink(text, icon, action);
       ref.set(link);
       // Don't allow focus, as the containing panel is going to focusable.
@@ -475,7 +506,7 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
             text = text.substring(0, text.length() - 3);
           }
           Icon icon = presentation.getIcon();
-          if (icon.getIconHeight() != JBUI.scale(16) || icon.getIconWidth() != JBUI.scale(16)) {
+          if (icon == null || icon.getIconHeight() != JBUI.scale(16) || icon.getIconWidth() != JBUI.scale(16)) {
             icon = JBUI.scale(EmptyIcon.create(16));
           }
           action = wrapGroups(action);
@@ -946,7 +977,7 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
     bottomPanel.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new JBColor(Gray._217, Gray._81)));
     main.add(bottomPanel, BorderLayout.SOUTH);
 
-    final HashMap<Object, JPanel> panelsMap = ContainerUtil.newHashMap();
+    final HashMap<Object, JPanel> panelsMap = new HashMap<>();
     ListSelectionListener selectionListener = e -> {
       if (e.getValueIsAdjusting()) {
         // Update when a change has been finalized.
@@ -1045,7 +1076,7 @@ public class FlatWelcomeFrame extends JFrame implements IdeFrame, Disposable, Ac
   }
 
   private static List<AnAction> flattenActionGroups(@NotNull final ActionGroup action) {
-    final ArrayList<AnAction> groups = ContainerUtil.newArrayList();
+    final ArrayList<AnAction> groups = new ArrayList<>();
     String groupName;
     for (AnAction anAction : action.getChildren(null)) {
       if (anAction instanceof ActionGroup) {

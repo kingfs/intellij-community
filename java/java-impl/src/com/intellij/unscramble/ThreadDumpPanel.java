@@ -171,7 +171,7 @@ public class ThreadDumpPanel extends JPanel implements DataProvider {
     model.clear();
     int selectedIndex = 0;
     int index = 0;
-    List<ThreadState> threadStates = UISettings.getInstance().getMergeEqualStackTraces() ? myMergedThreadDump : myThreadDump;
+    List<ThreadState> threadStates = UISettings.getInstance().getState().getMergeEqualStackTraces() ? myMergedThreadDump : myThreadDump;
     for (ThreadState state : threadStates) {
       if (StringUtil.containsIgnoreCase(state.getStackTrace(), text) || StringUtil.containsIgnoreCase(state.getName(), text)) {
         //noinspection unchecked
@@ -329,10 +329,10 @@ public class ThreadDumpPanel extends JPanel implements DataProvider {
   }
   private static class CopyToClipboardAction extends DumbAwareAction {
     private static final NotificationGroup GROUP = NotificationGroup.toolWindowGroup("Analyze thread dump", ToolWindowId.RUN, false);
-    private final List<ThreadState> myThreadDump;
+    private final List<? extends ThreadState> myThreadDump;
     private final Project myProject;
 
-    private CopyToClipboardAction(List<ThreadState> threadDump, Project project) {
+    private CopyToClipboardAction(List<? extends ThreadState> threadDump, Project project) {
       super("Copy to Clipboard", "Copy whole thread dump to clipboard", PlatformIcons.COPY_ICON);
       myThreadDump = threadDump;
       myProject = project;
@@ -380,25 +380,25 @@ public class ThreadDumpPanel extends JPanel implements DataProvider {
 
     @Override
     public boolean isSelected(@NotNull AnActionEvent e) {
-      return UISettings.getInstance().getMergeEqualStackTraces();
+      return UISettings.getInstance().getState().getMergeEqualStackTraces();
     }
 
     @Override
     public void setSelected(@NotNull AnActionEvent e, boolean state) {
-      UISettings.getInstance().setMergeEqualStackTraces(state);
+      UISettings.getInstance().getState().setMergeEqualStackTraces(state);
       updateThreadList();
     }
   }
 
-  public static ExporterToTextFile createToFileExporter(Project project, List<ThreadState> threadStates) {
+  public static ExporterToTextFile createToFileExporter(Project project, List<? extends ThreadState> threadStates) {
     return new MyToFileExporter(project, threadStates);
   }
 
   private static class MyToFileExporter implements ExporterToTextFile {
     private final Project myProject;
-    private final List<ThreadState> myThreadStates;
+    private final List<? extends ThreadState> myThreadStates;
 
-    private MyToFileExporter(Project project, List<ThreadState> threadStates) {
+    private MyToFileExporter(Project project, List<? extends ThreadState> threadStates) {
       myProject = project;
       myThreadStates = threadStates;
     }

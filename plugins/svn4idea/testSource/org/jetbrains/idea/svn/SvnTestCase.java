@@ -1,11 +1,13 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.svn;
 
+import com.intellij.diagnostic.ThreadDumper;
 import com.intellij.execution.process.ProcessOutput;
 import com.intellij.ide.startup.impl.StartupManagerImpl;
 import com.intellij.openapi.actionSystem.ActionManager;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.Presentation;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
@@ -23,6 +25,7 @@ import com.intellij.openapi.vcs.rollback.RollbackProgressListener;
 import com.intellij.openapi.vcs.update.CommonUpdateProjectAction;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.testFramework.ApplicationRule;
+import com.intellij.testFramework.RunAll;
 import com.intellij.testFramework.fixtures.IdeaTestFixtureFactory;
 import com.intellij.testFramework.fixtures.TempDirTestFixture;
 import com.intellij.testFramework.vcs.AbstractJunitVcsTestCase;
@@ -33,6 +36,7 @@ import com.intellij.util.Processor;
 import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.io.ZipUtil;
+import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.idea.svn.actions.CreateExternalAction;
@@ -172,32 +176,42 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase {
     final Semaphore semaphore = new Semaphore();
     semaphore.down();
     ((SvnFileUrlMappingImpl) vcs.getSvnFileUrlMapping()).realRefresh(() -> semaphore.up());
-    semaphore.waitFor();
+    if (ApplicationManager.getApplication().isDispatchThread()) {
+      long start = System.currentTimeMillis();
+      while (true) {
+        UIUtil.dispatchAllInvocationEvents();
+        if (semaphore.waitFor(50)) break;
+        if (System.currentTimeMillis() - start > 60_000) {
+          throw new AssertionError("Couldn't await SVN mapping refresh\n" + ThreadDumper.dumpThreadsToString());
+        }
+      }
+    }
+    else {
+      semaphore.waitFor();
+    }
   }
 
   protected void refreshChanges() {
     dirtyScopeManager.markEverythingDirty();
-    changeListManager.ensureUpToDate(false);
+    changeListManager.ensureUpToDate();
   }
 
   protected void waitChangesAndAnnotations() {
-    changeListManager.ensureUpToDate(false);
+    changeListManager.ensureUpToDate();
     ((VcsAnnotationLocalChangesListenerImpl)vcsManager.getAnnotationLocalChangesListener()).calmDown();
   }
 
   @NotNull
   protected Set<String> commit(@NotNull List<Change> changes, @NotNull String message) {
     Set<String> feedback = new HashSet<>();
-    //noinspection unchecked
-    throwIfNotEmpty((List)vcs.getCheckinEnvironment().commit(changes, message, nullConstant(), feedback));
+    throwIfNotEmpty(vcs.getCheckinEnvironment().commit(changes, message, nullConstant(), feedback));
     return feedback;
   }
 
   protected void rollback(@NotNull List<Change> changes) {
     List<VcsException> exceptions = new ArrayList<>();
     vcs.createRollbackEnvironment().rollbackChanges(changes, exceptions, RollbackProgressListener.EMPTY);
-    //noinspection unchecked
-    throwIfNotEmpty((List)exceptions);
+    throwIfNotEmpty(exceptions);
   }
 
   @Override
@@ -207,15 +221,28 @@ public abstract class SvnTestCase extends AbstractJunitVcsTestCase {
 
   @After
   public void tearDown() throws Exception {
-    runInEdtAndWait(() -> {
-      tearDownProject();
+    runInEdtAndWait(
+      () -> new RunAll(
+        this::waitChangeListManager,
+        this::tearDownProject,
+        this::tearDownTempDirectoryFixture,
+        () -> resetCanonicalTempPathCache(ORIGINAL_TEMP_DIRECTORY)
+      ).run()
+    );
+  }
 
-      if (myTempDirFixture != null) {
-        myTempDirFixture.tearDown();
-        myTempDirFixture = null;
-      }
-      resetCanonicalTempPathCache(ORIGINAL_TEMP_DIRECTORY);
-    });
+  private void waitChangeListManager() {
+    if (changeListManager != null) {
+      changeListManager.forceStopInTestMode();
+      changeListManager.waitEverythingDoneInTestMode();
+    }
+  }
+
+  private void tearDownTempDirectoryFixture() throws Exception {
+    if (myTempDirFixture != null) {
+      myTempDirFixture.tearDown();
+      myTempDirFixture = null;
+    }
   }
 
   protected ProcessOutput runSvn(String... commandLine) throws IOException {

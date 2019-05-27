@@ -19,14 +19,16 @@ import com.intellij.execution.RunManager;
 import com.intellij.execution.RunnerAndConfigurationSettings;
 import org.jetbrains.annotations.NotNull;
 
-/**
- * @author Nikolay Matveev
- */
 public class RunConfigurationTypeUsagesCollector extends AbstractRunConfigurationTypeUsagesCollector {
   @NotNull
   @Override
   public String getGroupId() {
-    return "statistics.run.configuration.type";
+    return "run.configuration.type";
+  }
+
+  @Override
+  public int getVersion() {
+    return 3;
   }
 
   @Override

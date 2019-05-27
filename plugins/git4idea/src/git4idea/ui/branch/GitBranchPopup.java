@@ -23,14 +23,14 @@ import com.intellij.dvcs.ui.BranchActionGroup;
 import com.intellij.dvcs.ui.LightActionGroup;
 import com.intellij.dvcs.ui.RootAction;
 import com.intellij.icons.AllIcons;
-import com.intellij.openapi.actionSystem.ActionGroup;
-import com.intellij.openapi.actionSystem.AnAction;
-import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.actionSystem.EmptyAction;
+import com.intellij.openapi.actionSystem.*;
+import com.intellij.openapi.options.ShowSettingsUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
+import com.intellij.util.Consumer;
 import com.intellij.util.containers.ContainerUtil;
+import git4idea.GitVcs;
 import git4idea.branch.GitBranchIncomingOutgoingManager;
 import git4idea.config.GitVcsSettings;
 import git4idea.rebase.GitRebaseSpec;
@@ -108,18 +108,26 @@ class GitBranchPopup extends DvcsBranchPopup<GitRepository> {
           preselectActionCondition, DIMENSION_SERVICE_KEY);
 
     final GitBranchIncomingOutgoingManager gitBranchIncomingOutgoingManager = GitBranchIncomingOutgoingManager.getInstance(myProject);
-    if (gitBranchIncomingOutgoingManager.hasAuthenticationProblems()) {
-      AnAction updateBranchInfoWithAuthenticationAction =
-        new DumbAwareAction("Authentication failed. Click to retry", null, AllIcons.General.Warning) {
-          @Override
-          public void actionPerformed(@NotNull AnActionEvent e) {
-            gitBranchIncomingOutgoingManager.forceUpdateBranches(true);
-            myPopup.cancel();
-          }
-        };
-      updateBranchInfoWithAuthenticationAction.getTemplatePresentation().setHoveredIcon(AllIcons.General.Warning);
-      myPopup.addToolbarAction(updateBranchInfoWithAuthenticationAction, false);
+    if (gitBranchIncomingOutgoingManager.shouldCheckIncoming() && !gitBranchIncomingOutgoingManager.supportsIncomingOutgoing()) {
+      myPopup.addToolbarAction(
+        createWarningAction("Update checks not supported. Git 2.9+ required",
+                            e -> ShowSettingsUtil.getInstance().showSettingsDialog(myProject, GitVcs.NAME)), false);
     }
+    else if (gitBranchIncomingOutgoingManager.shouldCheckIncoming() && gitBranchIncomingOutgoingManager.hasAuthenticationProblems()) {
+      myPopup.addToolbarAction(createWarningAction("Update checks failed. Click to retry", e -> {
+        gitBranchIncomingOutgoingManager.forceUpdateBranchesToPull();
+        myPopup.cancel();
+      }), false);
+    }
+  }
+
+  @NotNull
+  private static AnAction createWarningAction(@NotNull String text, @NotNull Consumer<? super AnActionEvent> actionEventConsumer) {
+    AnAction updateBranchInfoWithAuthenticationAction = DumbAwareAction.create(text, actionEventConsumer);
+    Presentation presentation = updateBranchInfoWithAuthenticationAction.getTemplatePresentation();
+    presentation.setIcon(AllIcons.General.Warning);
+    presentation.setHoveredIcon(AllIcons.General.Warning);
+    return updateBranchInfoWithAuthenticationAction;
   }
 
   @Override
@@ -162,7 +170,7 @@ class GitBranchPopup extends DvcsBranchPopup<GitRepository> {
   }
 
   @Nullable
-  private GitBranchPopupActions.LocalBranchActions createLocalBranchActions(@NotNull List<GitRepository> allRepositories,
+  private GitBranchPopupActions.LocalBranchActions createLocalBranchActions(@NotNull List<? extends GitRepository> allRepositories,
                                                                             @NotNull String branch) {
     List<GitRepository> repositories = filterRepositoriesNotOnThisBranch(branch, allRepositories);
     return repositories.isEmpty()
@@ -175,10 +183,9 @@ class GitBranchPopup extends DvcsBranchPopup<GitRepository> {
   protected LightActionGroup createRepositoriesActions() {
     LightActionGroup popupGroup = new LightActionGroup(false);
     popupGroup.addSeparator("Repositories");
-    List<ActionGroup> rootActions = DvcsUtil.sortRepositories(myRepositoryManager.getRepositories()).stream()
-      .map(
-        repo -> new RootAction<>(repo, new GitBranchPopupActions(repo.getProject(), repo).createActions(), getDisplayableBranchText(repo)))
-      .collect(toList());
+    List<ActionGroup> rootActions = map(DvcsUtil.sortRepositories(myRepositoryManager.getRepositories()),
+                                        repo -> new RootAction<>(repo, new GitBranchPopupActions(repo.getProject(), repo)
+                                          .createActions(), getDisplayableBranchText(repo)));
     wrapWithMoreActionIfNeeded(myProject, popupGroup, rootActions, rootActions.size() > MAX_NUM ? DEFAULT_NUM : MAX_NUM,
                                SHOW_ALL_REPOSITORIES);
     return popupGroup;

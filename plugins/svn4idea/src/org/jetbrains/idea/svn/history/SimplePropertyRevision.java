@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.svn.history;
 
 import com.intellij.openapi.vcs.FilePath;
@@ -10,7 +10,7 @@ import org.jetbrains.idea.svn.properties.PropertyData;
 
 import java.util.List;
 
-import static org.jetbrains.idea.svn.actions.ShowPropertiesDiffAction.toSortedStringPresentation;
+import static org.jetbrains.idea.svn.history.SvnLazyPropertyContentRevision.toSortedStringPresentation;
 
 public class SimplePropertyRevision implements ContentRevision, PropertyRevision {
   private final List<PropertyData> myProperty;
@@ -45,6 +45,7 @@ public class SimplePropertyRevision implements ContentRevision, PropertyRevision
   @NotNull
   public VcsRevisionNumber getRevisionNumber() {
     return new VcsRevisionNumber() {
+      @NotNull
       @Override
       public String asString() {
         return myRevision;

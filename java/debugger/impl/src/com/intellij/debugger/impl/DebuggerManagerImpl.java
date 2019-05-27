@@ -1,8 +1,9 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.debugger.impl;
 
 import com.intellij.debugger.*;
 import com.intellij.debugger.engine.*;
+import com.intellij.debugger.settings.DebuggerSettings;
 import com.intellij.debugger.ui.breakpoints.BreakpointManager;
 import com.intellij.debugger.ui.tree.render.BatchEvaluator;
 import com.intellij.execution.ExecutionException;
@@ -45,7 +46,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   public static final String LOCALHOST_ADDRESS_FALLBACK = "127.0.0.1";
 
   private final Project myProject;
-  private final HashMap<ProcessHandler, DebuggerSession> mySessions = new HashMap<>();
+  private final Map<ProcessHandler, DebuggerSession> mySessions = new HashMap<>();
   private final BreakpointManager myBreakpointManager;
   private final List<NameMapper> myNameMappers = ContainerUtil.createLockFreeCopyOnWriteList();
   private final List<Function<DebugProcess, PositionManager>> myCustomPositionManagerFactories = new SmartList<>();
@@ -56,7 +57,6 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   private final DebuggerContextListener mySessionListener = new DebuggerContextListener() {
     @Override
     public void changeEvent(@NotNull DebuggerContextImpl newContext, DebuggerSession.Event event) {
-
       final DebuggerSession session = newContext.getDebuggerSession();
       if (event == DebuggerSession.Event.PAUSE && myDebuggerStateManager.myDebuggerSession != session) {
         // if paused in non-active session; switch current session
@@ -68,10 +68,10 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
         myDebuggerStateManager.fireStateChanged(newContext, event);
       }
       if (event == DebuggerSession.Event.ATTACHED) {
-        myDispatcher.getMulticaster().sessionAttached(session);
+        getEventPublisher().sessionAttached(session);
       }
       else if (event == DebuggerSession.Event.DETACHED) {
-        myDispatcher.getMulticaster().sessionDetached(session);
+        getEventPublisher().sessionDetached(session);
       }
       else if (event == DebuggerSession.Event.DISPOSE) {
         dispose(session);
@@ -82,6 +82,11 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
       }
     }
   };
+
+  @NotNull
+  private DebuggerManagerListener getEventPublisher() {
+    return myProject.getMessageBus().syncPublisher(DebuggerManagerListener.TOPIC);
+  }
 
   @Override
   public void addClassNameMapper(final NameMapper mapper) {
@@ -105,12 +110,12 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
   }
 
   @Override
-  public void addDebuggerManagerListener(DebuggerManagerListener listener) {
+  public void addDebuggerManagerListener(@NotNull DebuggerManagerListener listener) {
     myDispatcher.addListener(listener);
   }
 
   @Override
-  public void removeDebuggerManagerListener(DebuggerManagerListener listener) {
+  public void removeDebuggerManagerListener(@NotNull DebuggerManagerListener listener) {
     myDispatcher.removeListener(listener);
   }
 
@@ -125,6 +130,8 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
           getBreakpointManager().updateBreakpointsUI();
         }
       });
+
+      busConnection.subscribe(DebuggerManagerListener.TOPIC, myDispatcher.getMulticaster());
     }
     myBreakpointManager.addListeners(busConnection);
   }
@@ -224,7 +231,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
         }
       });
     }
-    myDispatcher.getMulticaster().sessionCreated(session);
+    getEventPublisher().sessionCreated(session);
 
     if (debugProcess.isDetached() || debugProcess.isDetaching()) {
       session.dispose();
@@ -347,6 +354,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     return new RemoteConnectionBuilder(debuggerInServerMode, transport, debugPort)
       .checkValidity(checkValidity)
       .asyncAgent(addAsyncDebuggerAgent)
+      .memoryAgent(DebuggerSettings.getInstance().ENABLE_MEMORY_AGENT)
       .create(parameters);
   }
 
@@ -384,7 +392,7 @@ public class DebuggerManagerImpl extends DebuggerManagerEx implements Persistent
     synchronized (mySessions) {
       DebuggerSession removed = mySessions.remove(processHandler);
       LOG.assertTrue(removed != null);
-      myDispatcher.getMulticaster().sessionRemoved(session);
+      getEventPublisher().sessionRemoved(session);
     }
   }
 }

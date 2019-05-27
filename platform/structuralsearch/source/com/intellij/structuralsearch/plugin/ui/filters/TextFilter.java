@@ -40,7 +40,7 @@ public class TextFilter extends FilterAction {
   }
 
   @Override
-  public boolean isApplicable(List<PsiElement> nodes, boolean completePattern, boolean target) {
+  public boolean isApplicable(List<? extends PsiElement> nodes, boolean completePattern, boolean target) {
     final StructuralSearchProfile profile = myTable.getProfile();
     showHierarchy = profile.isApplicableConstraint(UIUtil.TEXT_HIERARCHY, nodes, completePattern, target);
     return profile.isApplicableConstraint(UIUtil.TEXT, nodes, completePattern, target);
@@ -58,7 +58,7 @@ public class TextFilter extends FilterAction {
 
   @Override
   public FilterEditor getEditor() {
-    return new FilterEditor(myTable.getConstraint()) {
+    return new FilterEditor(myTable.getConstraint(), myTable.getConstraintChangedCallback()) {
 
       private final EditorTextField myTextField = UIUtil.createRegexComponent("", myTable.getProject());
       private final JCheckBox myWordsCheckBox = new JCheckBox("Words", false);

@@ -18,6 +18,7 @@ import com.intellij.openapi.editor.impl.softwrap.mapping.SoftWrapAwareDocumentPa
 import com.intellij.openapi.util.Segment;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.util.DocumentUtil;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
@@ -39,7 +40,6 @@ import java.util.List;
  * Not thread-safe.
  *
  * @author Denis Zhdanov
- * @since Jun 8, 2010 12:47:32 PM
  */
 public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
   implements SoftWrapModelEx, PrioritizedInternalDocumentListener, FoldingListener,
@@ -48,7 +48,7 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
 
   private static final Logger LOG = Logger.getInstance(SoftWrapModelImpl.class);
 
-  private final List<SoftWrapChangeListener>  mySoftWrapListeners = new ArrayList<>();
+  private final List<SoftWrapChangeListener> mySoftWrapListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   /**
    * There is a possible case that particular activity performs batch fold regions operations (addition, removal etc).
@@ -98,6 +98,7 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
   private boolean myDirty;
 
   private boolean myForceAdditionalColumns;
+  private boolean myAfterLineEndInlayUpdated;
 
   SoftWrapModelImpl(@NotNull EditorImpl editor) {
     myEditor = editor;
@@ -397,6 +398,7 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
 
   @Override
   public void beforeDocumentChange(@NotNull DocumentEvent event) {
+    myAfterLineEndInlayUpdated = false;
     if (myBulkUpdateInProgress) {
       return;
     }
@@ -417,7 +419,7 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
     if (!isSoftWrappingEnabled()) {
       return;
     }
-    myApplianceManager.documentChanged(event);
+    myApplianceManager.documentChanged(event, myAfterLineEndInlayUpdated);
   }
 
   @Override
@@ -472,14 +474,23 @@ public class SoftWrapModelImpl extends InlayModel.SimpleAdapter
 
   @Override
   public void onUpdated(@NotNull Inlay inlay) {
-    if (myEditor.getDocument().isInEventsHandling() || myEditor.getDocument().isInBulkUpdate() ||
-        inlay.getVerticalAlignment() != Inlay.VerticalAlignment.INLINE) return;
+    if (myEditor.getDocument().isInBulkUpdate() ||
+        inlay.getPlacement() != Inlay.Placement.INLINE && inlay.getPlacement() != Inlay.Placement.AFTER_LINE_END) return;
     if (!isSoftWrappingEnabled()) {
       myDirty = true;
       return;
     }
     if (!myDirty) {
+      if (myEditor.getDocument().isInEventsHandling()) {
+        if (inlay.getPlacement() == Inlay.Placement.AFTER_LINE_END) {
+          myAfterLineEndInlayUpdated = true;
+        }
+        return;
+      }
       int offset = inlay.getOffset();
+      if (inlay.getPlacement() == Inlay.Placement.AFTER_LINE_END) {
+        offset = DocumentUtil.getLineEndOffset(offset, myEditor.getDocument());
+      }
       myApplianceManager.recalculate(Collections.singletonList(new TextRange(offset, offset)));
     }
   }

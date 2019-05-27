@@ -241,6 +241,10 @@ class NormalCompletionOrderingTest extends CompletionSortingTestCase {
     checkPreferredItems(0, "return", "rLocal", "rParam", "rMethod")
   }
 
+  void testPreferReturnBeforeExpression2() {
+    checkPreferredItems(0, "return", "retainAll")
+  }
+
   void testPreferReturnInSingleStatementPlace() {
     checkPreferredItems 0, "return", "registerKeyboardAction"
   }
@@ -865,6 +869,10 @@ class Foo {
 
   void testDispreferMultiMethodInterfaceAfterNew() {
     checkPreferredItems 1, 'Intf', 'IntfImpl'
+  }
+
+  void testDispreferAlreadyCalledBuilderMethods() {
+    checkPreferredItems 0, 'addInt', 'append', 'c', 'd', 'mayCallManyTimes', 'putLong'
   }
 
   void testPreferPrintln() {

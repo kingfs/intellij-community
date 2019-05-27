@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -36,8 +36,8 @@ public class MoveFieldAssignmentToInitializerInspection extends AbstractBaseJava
     return new JavaElementVisitor() {
       @Override
       public void visitAssignmentExpression(PsiAssignmentExpression assignment) {
-        PsiElement parent = assignment.getParent();
-        if (!(parent instanceof PsiExpressionStatement)) return;
+        if (!assignment.getOperationTokenType().equals(JavaTokenType.EQ)) return;
+        if (assignment.getParent() instanceof PsiExpressionList || !ExpressionUtils.isVoidContext(assignment)) return;
         PsiField field = getAssignedField(assignment);
         if (field == null || field.hasInitializer()) return;
         PsiClass psiClass = field.getContainingClass();
@@ -169,7 +169,8 @@ public class MoveFieldAssignmentToInitializerInspection extends AbstractBaseJava
         if (assignmentExpression == null) return;
         PsiExpression rValue = assignmentExpression.getRExpression();
         PsiMember member = PsiTreeUtil.getParentOfType(assignmentExpression, PsiMember.class);
-        if (member instanceof PsiClassInitializer || member instanceof PsiMethod && ((PsiMethod)member).isConstructor()) {
+        if ((member instanceof PsiClassInitializer || member instanceof PsiMethod && ((PsiMethod)member).isConstructor()) &&
+            ExpressionUtils.isVoidContext(assignmentExpression) && assignmentExpression.getOperationTokenType().equals(JavaTokenType.EQ)) {
           // ignore usages other than initializing
           if (rValue == null || !EquivalenceChecker.getCanonicalPsiEquivalence().expressionsAreEquivalent(rValue, expression)) {
             result.set(Boolean.FALSE);
@@ -218,12 +219,11 @@ public class MoveFieldAssignmentToInitializerInspection extends AbstractBaseJava
 
       CommentTracker ct = new CommentTracker();
       // Should not reach here if getRExpression is null: isInitializedWithSameExpression would return false
-      PsiExpression initializer = Objects.requireNonNull(assignment.getRExpression());
-      field.setInitializer(ct.markUnchanged(initializer));
+      field.setInitializer(ct.markUnchanged(assignment.getRExpression()));
 
       PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
       if (comments != null) {
-        PsiCodeBlock block = factory.createCodeBlockFromText("{" + comments + "}", initializer);
+        PsiCodeBlock block = factory.createCodeBlockFromText("{" + comments + "}", assignment);
         for(PsiElement child : block.getChildren()) {
           if(child instanceof PsiComment || child instanceof PsiWhiteSpace) {
             field.getParent().addBefore(child, field);
@@ -234,16 +234,20 @@ public class MoveFieldAssignmentToInitializerInspection extends AbstractBaseJava
       PsiModifierListOwner owner = enclosingMethodOrClassInitializer(assignment, field);
 
       for (PsiAssignmentExpression assignmentExpression : assignments) {
-        PsiElement statement = assignmentExpression.getParent();
-        PsiElement parent = statement.getParent();
-        if (parent instanceof PsiIfStatement ||
-            parent instanceof PsiWhileStatement ||
-            parent instanceof PsiForStatement ||
-            parent instanceof PsiForeachStatement) {
-          ct.replace(statement, ";");
-        }
-        else {
-          ct.delete(statement);
+        PsiElement parent = assignmentExpression.getParent();
+        if (parent instanceof PsiExpressionStatement) {
+          PsiElement grandParent = parent.getParent();
+          if (grandParent instanceof PsiIfStatement || grandParent instanceof PsiLoopStatement) {
+            ct.replace(parent, ";");
+          }
+          else if (grandParent instanceof PsiSwitchLabeledRuleStatement) {
+            ct.replace(parent, "{}");
+          }
+          else {
+            ct.delete(parent);
+          }
+        } else if (parent instanceof PsiLambdaExpression) {
+          ct.replace(assignmentExpression, factory.createCodeBlock());
         }
         ct.insertCommentsBefore(field);
         // if we replace/delete several assignments we want to restore comments at each place separately

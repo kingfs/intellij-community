@@ -9,6 +9,7 @@ import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
 import com.intellij.openapi.ui.popup.ListPopup;
 import com.intellij.openapi.util.Computable;
+import com.intellij.ui.JBColor;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.breadcrumbs.Breadcrumbs;
 import com.intellij.util.ObjectUtils;
@@ -16,6 +17,7 @@ import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.UIUtilities;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
@@ -40,7 +42,7 @@ public class TabHeaderComponent extends JComponent {
 
   public TabHeaderComponent(@NotNull DefaultActionGroup actions, @NotNull TabHeaderListener listener) {
     myListener = listener;
-    add(myToolbarComponent = createToolbar(actions));
+    add(myToolbarComponent = createToolbar("Manage Repositories, Configure Proxy or Install Plugin from Disk", actions));
     setBackground(JBUI.CurrentTheme.ToolWindow.headerBackground());
     setOpaque(true);
 
@@ -88,34 +90,22 @@ public class TabHeaderComponent extends JComponent {
   }
 
   private void addTabSelectionAction(@NotNull String actionId, @NotNull Runnable callback) {
-    AnAction action = ActionManager.getInstance().getAction(actionId);
-    if (action == null) {
-      return;
-    }
-
-    AnAction localAction = new AnAction() {
-      @Override
-      public void actionPerformed(@NotNull AnActionEvent e) {
-        if (isShowing() && !myTabs.isEmpty()) {
-          callback.run();
-        }
+    EventHandler.addGlobalAction(this, actionId, () -> {
+      if (!myTabs.isEmpty()) {
+        callback.run();
       }
-    };
-    localAction.copyShortcutFrom(action);
-    localAction.registerCustomShortcutSet(getRootPane(), null);
+    });
   }
 
   @NotNull
-  private static JComponent createToolbar(@NotNull DefaultActionGroup actions) {
+  public static JComponent createToolbar(@Nullable String tooltip, @NotNull DefaultActionGroup actions) {
     DefaultActionGroup toolbarActionGroup = new DefaultActionGroup();
     ActionToolbar toolbar =
       ActionManager.getInstance().createActionToolbar(ActionPlaces.NAVIGATION_BAR_TOOLBAR, toolbarActionGroup, true);
     toolbar.setReservePlaceAutoPopupIcon(false);
     toolbar.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
     JComponent toolbarComponent = toolbar.getComponent();
-    toolbarActionGroup.add(new DumbAwareAction(null,
-                                               "Manage Repositories, Configure Proxy or Install Plugin from Disk",
-                                               AllIcons.General.GearPlain) {
+    toolbarActionGroup.add(new DumbAwareAction(null, tooltip, AllIcons.General.GearPlain) {
       @Override
       public void actionPerformed(@NotNull AnActionEvent e) {
         ListPopup actionGroupPopup = JBPopupFactory.getInstance().
@@ -212,6 +202,22 @@ public class TabHeaderComponent extends JComponent {
     return -1;
   }
 
+  private Color mySelectedForeground;
+
+  @NotNull
+  private Color getSelectedForeground() {
+    if (mySelectedForeground == null) {
+      mySelectedForeground = JBColor.namedColor("Plugins.Tab.selectedForeground", getForeground());
+    }
+    return mySelectedForeground;
+  }
+
+  private static final Color SELECTED_BG_COLOR =
+    JBColor.namedColor("Plugins.Tab.selectedBackground", JBUI.CurrentTheme.ToolWindow.tabSelectedBackground());
+
+  private static final Color HOVER_BG_COLOR =
+    JBColor.namedColor("Plugins.Tab.hoverBackground", JBUI.CurrentTheme.ToolWindow.tabHoveredBackground());
+
   @Override
   protected void paintComponent(Graphics g) {
     UISettings.setupAntialiasing(g);
@@ -226,11 +232,9 @@ public class TabHeaderComponent extends JComponent {
     for (int i = 0, size = myTabs.size(); i < size; i++) {
       if (mySelectionTab == i || myHoverTab == i) {
         Rectangle bounds = mySizeInfo.tabs[i];
-        g.setColor(mySelectionTab == i
-                   ? JBUI.CurrentTheme.ToolWindow.tabSelectedBackground()
-                   : JBUI.CurrentTheme.ToolWindow.tabHoveredBackground());
+        g.setColor(mySelectionTab == i ? SELECTED_BG_COLOR : HOVER_BG_COLOR);
         g.fillRect(x + bounds.x, 0, bounds.width, height);
-        g.setColor(getForeground());
+        g.setColor(mySelectionTab == i ? getSelectedForeground() : getForeground());
       }
 
       g.drawString(myTabs.get(i).compute(), x + mySizeInfo.tabTitleX[i], tabTitleY);

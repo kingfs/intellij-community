@@ -17,6 +17,7 @@ import com.intellij.openapi.fileTypes.ex.FileTypeManagerEx;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtilRt;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.project.ProjectKt;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.SystemProperties;
@@ -220,11 +221,16 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
   @NotNull
   public FileTemplate[] getInternalTemplates() {
     List<InternalTemplateBean> internalTemplateBeans = InternalTemplateBean.EP_NAME.getExtensionList();
-    FileTemplate[] result = new FileTemplate[internalTemplateBeans.size()];
-    for(int i=0; i<internalTemplateBeans.size(); i++) {
-      result [i] = getInternalTemplate(internalTemplateBeans.get(i).name);
+    List<FileTemplate> result = new ArrayList<>(internalTemplateBeans.size());
+    for (InternalTemplateBean bean : internalTemplateBeans) {
+      try {
+        result.add(getInternalTemplate(bean.name));
+      }
+      catch (Exception e) {
+        LOG.error(e);
+      }
     }
-    return result;
+    return result.toArray(FileTemplate.EMPTY_ARRAY);
   }
 
   @NotNull
@@ -258,7 +264,7 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
         return bean.subject;
       }
     }
-    return templateName.toLowerCase();
+    return StringUtil.toLowerCase(templateName);
   }
 
   @NotNull
@@ -342,7 +348,7 @@ public class FileTemplateManagerImpl extends FileTemplateManager implements Pers
   }
 
   @Override
-  public void setTemplates(@NotNull String templatesCategory, @NotNull Collection<FileTemplate> templates) {
+  public void setTemplates(@NotNull String templatesCategory, @NotNull Collection<? extends FileTemplate> templates) {
     for (FTManager manager : getAllManagers()) {
       if (templatesCategory.equals(manager.getName())) {
         manager.updateTemplates(templates);

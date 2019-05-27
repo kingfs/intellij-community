@@ -11,13 +11,13 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 
 
 public abstract class BeforeAfterActionMetaData implements BeforeAfterMetaData {
@@ -55,7 +55,7 @@ public abstract class BeforeAfterActionMetaData implements BeforeAfterMetaData {
   @NotNull
   private static TextDescriptor[] retrieveURLs(@NotNull URL descriptionDirectory, @NotNull String prefix, @NotNull String suffix)
     throws MalformedURLException {
-    List<TextDescriptor> urls = new ArrayList<>();
+    Set<TextDescriptor> urls = new LinkedHashSet<>();
     final FileType[] fileTypes = FileTypeManager.getInstance().getRegisteredFileTypes();
     for (FileType fileType : fileTypes) {
       final List<FileNameMatcher> matchers = FileTypeManager.getInstance().getAssociations(fileType);
@@ -64,9 +64,9 @@ public abstract class BeforeAfterActionMetaData implements BeforeAfterMetaData {
           final ExactFileNameMatcher exactFileNameMatcher = (ExactFileNameMatcher)matcher;
           final String fileName = StringUtil.trimStart(exactFileNameMatcher.getFileName(), ".");
           URL url = new URL(descriptionDirectory.toExternalForm() + "/" + prefix + "." + fileName + suffix);
-          final File file = new File(url.getFile());
-          if (!file.exists()) continue;
-          urls.add(new ResourceTextDescriptor(url));
+
+          if (checkUrl(url, urls))
+            break;
         }
         else if (matcher instanceof ExtensionFileNameMatcher) {
           final ExtensionFileNameMatcher extensionFileNameMatcher = (ExtensionFileNameMatcher)matcher;
@@ -75,9 +75,8 @@ public abstract class BeforeAfterActionMetaData implements BeforeAfterMetaData {
             URL url = new URL(descriptionDirectory.toExternalForm() + "/"
                               + prefix + "." + extension + (i == 0 ? "" : Integer.toString(i))
                               + suffix);
-            final File file = new File(url.getFile());
-            if (!file.exists()) break;
-            urls.add(new ResourceTextDescriptor(url));
+            if (!checkUrl(url, urls))
+              break;
           }
         }
       }
@@ -105,6 +104,16 @@ public abstract class BeforeAfterActionMetaData implements BeforeAfterMetaData {
       return EMPTY_EXAMPLE;
     }
     return urls.toArray(new TextDescriptor[0]);
+  }
+
+  private static boolean checkUrl(URL url, Set<? super TextDescriptor> urls) {
+    try (InputStream ignored = url.openStream()) {
+      urls.add(new ResourceTextDescriptor(url));
+      return true;
+    }
+    catch (IOException e) {
+      return false;
+    }
   }
 
   @Override

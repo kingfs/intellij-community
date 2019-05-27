@@ -20,11 +20,13 @@
 package com.intellij.psi.impl.source.resolve;
 
 import com.intellij.openapi.components.ServiceManager;
+import com.intellij.openapi.diagnostic.Attachment;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.NotNullLazyKey;
 import com.intellij.openapi.util.RecursionGuard;
+import com.intellij.openapi.util.RecursionManager;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.AnyPsiChangeListener;
 import com.intellij.psi.impl.PsiManagerImpl;
@@ -37,7 +39,6 @@ import com.intellij.util.ConcurrencyUtil;
 import com.intellij.util.Function;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.messages.MessageBus;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -47,8 +48,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class JavaResolveCache {
-  private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.source.resolve.JavaResolveCache");
-
+  private static final Logger LOG = Logger.getInstance(JavaResolveCache.class);
   private static final NotNullLazyKey<JavaResolveCache, Project> INSTANCE_KEY = ServiceManager.createLazyKey(JavaResolveCache.class);
 
   public static JavaResolveCache getInstance(Project project) {
@@ -81,8 +81,8 @@ public class JavaResolveCache {
   }
 
   @Nullable
-  public <T extends PsiExpression> PsiType getType(@NotNull T expr, @NotNull Function<T, PsiType> f) {
-    final boolean isOverloadCheck = MethodCandidateInfo.isOverloadCheck() || LambdaUtil.isLambdaParameterCheck();
+  public <T extends PsiExpression> PsiType getType(@NotNull T expr, @NotNull Function<? super T, ? extends PsiType> f) {
+    final boolean isOverloadCheck = MethodCandidateInfo.isOverloadCheck();
     final boolean polyExpression = PsiPolyExpressionUtil.isPolyExpression(expr);
 
     ConcurrentMap<PsiExpression, PsiType> map = myCalculatedTypes.get();
@@ -90,7 +90,7 @@ public class JavaResolveCache {
 
     PsiType type = isOverloadCheck && polyExpression ? null : map.get(expr);
     if (type == null) {
-      final RecursionGuard.StackStamp dStackStamp = PsiDiamondType.ourDiamondGuard.markStack();
+      RecursionGuard.StackStamp dStackStamp = RecursionManager.markStack();
       type = f.fun(expr);
       if (!dStackStamp.mayCacheNow()) {
         return type;
@@ -102,7 +102,10 @@ public class JavaResolveCache {
       }
 
       if (type == null) type = TypeConversionUtil.NULL_TYPE;
-      map.put(expr, type);
+      PsiType alreadyCached = map.put(expr, type);
+      if (alreadyCached != null && !type.equals(alreadyCached)) {
+        reportUnstableType(expr, type, alreadyCached);
+      }
 
       if (type instanceof PsiClassReferenceType) {
         // convert reference-based class type to the PsiImmediateClassType, since the reference may become invalid
@@ -115,18 +118,14 @@ public class JavaResolveCache {
       }
     }
 
-    if (!type.isValid()) {
-      if (expr.isValid()) {
-        PsiJavaCodeReferenceElement refInside = type instanceof PsiClassReferenceType ? ((PsiClassReferenceType)type).getReference() : null;
-        @NonNls String typeinfo = type + " (" + type.getClass() + ")" + (refInside == null ? "" : "; ref inside: "+refInside + " ("+refInside.getClass()+") valid:"+refInside.isValid());
-        LOG.error("Type is invalid: " + typeinfo + "; expr: '" + expr + "' (" + expr.getClass() + ") is valid");
-      }
-      else {
-        LOG.error("Expression: '"+expr+"' is invalid, must not be used for getType()");
-      }
-    }
-
     return type == TypeConversionUtil.NULL_TYPE ? null : type;
+  }
+
+  private static <T extends PsiExpression> void reportUnstableType(@NotNull PsiExpression expr, @NotNull PsiType type, @NotNull PsiType alreadyCached) {
+    PsiFile file = expr.getContainingFile();
+    LOG.error("Different types returned for the same PSI " + expr.getTextRange() + " on different threads: "
+              + type + " != " + alreadyCached,
+              new Attachment(file.getName(), file.getText()));
   }
 
   @Nullable

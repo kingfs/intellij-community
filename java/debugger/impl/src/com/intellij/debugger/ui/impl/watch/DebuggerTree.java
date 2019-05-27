@@ -15,7 +15,6 @@ import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.debugger.engine.events.DebuggerContextCommandImpl;
-import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
 import com.intellij.debugger.impl.DebuggerContextImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
 import com.intellij.debugger.impl.PrioritizedTask;
@@ -350,24 +349,6 @@ public abstract class DebuggerTree extends DebuggerTreeBase implements DataProvi
     return myEditedNode != null ? null : super.createToolTip(e);
   }
 
-  protected abstract static class RefreshDebuggerTreeCommand extends SuspendContextCommandImpl {
-    private final DebuggerContextImpl myDebuggerContext;
-
-    @Override
-    public Priority getPriority() {
-      return Priority.NORMAL;
-    }
-
-    public RefreshDebuggerTreeCommand(DebuggerContextImpl context) {
-      super(context.getSuspendContext());
-      myDebuggerContext = context;
-    }
-
-    public final DebuggerContextImpl getDebuggerContext() {
-      return myDebuggerContext;
-    }
-  }
-
   public DebuggerContextImpl getDebuggerContext() {
     return myDebuggerContext;
   }
@@ -558,7 +539,7 @@ public abstract class DebuggerTree extends DebuggerTreeBase implements DataProvi
     public void initChildrenArrayRenderer(ArrayRenderer renderer, int arrayLength) {}
 
     @Override
-    public void setChildren(final List<DebuggerTreeNode> children) {
+    public void setChildren(final List<? extends DebuggerTreeNode> children) {
       for (DebuggerTreeNode child : children) {
         if (child instanceof DebuggerTreeNodeImpl) {
           myChildren.add(((DebuggerTreeNodeImpl)child));

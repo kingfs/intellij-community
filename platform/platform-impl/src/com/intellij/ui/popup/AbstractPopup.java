@@ -32,10 +32,8 @@ import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.mac.touchbar.TouchBarsManager;
 import com.intellij.ui.speedSearch.SpeedSearch;
-import com.intellij.util.Alarm;
-import com.intellij.util.BooleanFunction;
-import com.intellij.util.IJSwingUtilities;
-import com.intellij.util.Processor;
+import com.intellij.util.*;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.WeakList;
 import com.intellij.util.ui.*;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
@@ -46,10 +44,9 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.*;
+import java.util.function.Supplier;
 
 import static java.awt.AWTEvent.MOUSE_EVENT_MASK;
 import static java.awt.AWTEvent.MOUSE_MOTION_EVENT_MASK;
@@ -121,9 +118,11 @@ public class AbstractPopup implements JBPopup {
   InputEvent myDisposeEvent;
 
   private Runnable myFinalRunnable;
-  @Nullable private BooleanFunction<KeyEvent> myKeyEventHandler;
+  private Runnable myOkHandler;
+  @Nullable private BooleanFunction<? super KeyEvent> myKeyEventHandler;
 
   protected boolean myOk;
+  private final List<Runnable> myResizeListeners = new ArrayList<>();
 
   private static final WeakList<JBPopup> all = new WeakList<>();
 
@@ -156,15 +155,20 @@ public class AbstractPopup implements JBPopup {
   private boolean myMayBeParent;
   private JLabel myAdComponent;
   private boolean myDisposed;
+  private boolean myNormalWindowLevel;
 
   private UiActivity myActivityKey;
   private Disposable myProjectDisposable;
 
   private volatile State myState = State.NEW;
 
+  void setNormalWindowLevel(boolean normalWindowLevel) {
+    myNormalWindowLevel = normalWindowLevel;
+  }
+
   private enum State {NEW, INIT, SHOWING, SHOWN, CANCEL, DISPOSE}
 
-  private void debugState(String message, State... states) {
+  private void debugState(@NotNull String message, @NotNull State... states) {
     if (LOG.isDebugEnabled()) {
       LOG.debug(hashCode() + " - " + message);
       if (!ApplicationManager.getApplication().isDispatchThread()) {
@@ -181,6 +185,7 @@ public class AbstractPopup implements JBPopup {
 
   protected AbstractPopup() { }
 
+  @NotNull
   protected AbstractPopup init(Project project,
                      @NotNull JComponent component,
                      @Nullable JComponent preferredFocusedComponent,
@@ -219,7 +224,7 @@ public class AbstractPopup implements JBPopup {
                      boolean showBorder,
                      Color borderColor,
                      boolean cancelOnWindowDeactivation,
-                     @Nullable BooleanFunction<KeyEvent> keyEventHandler) {
+                     @Nullable BooleanFunction<? super KeyEvent> keyEventHandler) {
     assert !requestFocus || focusable : "Incorrect argument combination: requestFocus=true focusable=false";
 
     all.add(this);
@@ -266,7 +271,7 @@ public class AbstractPopup implements JBPopup {
 
       if (pinCallback != null) {
         myCaption.setButtonComponent(new InplaceButton(
-          new IconButton("Open as Tool Window", 
+          new IconButton("Open as Tool Window",
                          AllIcons.General.Pin_tab, AllIcons.General.Pin_tab,
                          IconLoader.getDisabledIcon(AllIcons.General.Pin_tab)),
           e -> pinCallback.process(this)
@@ -344,11 +349,6 @@ public class AbstractPopup implements JBPopup {
     }
   }
 
-  @Deprecated
-  public static void suppressMacCornerFor(JComponent popupComponent) {
-  }
-
-
   public String getDimensionServiceKey() {
     return myDimensionServiceKey;
   }
@@ -369,21 +369,14 @@ public class AbstractPopup implements JBPopup {
   @Override
   public void setAdText(@NotNull final String s, int alignment) {
     if (myAdComponent == null) {
-      myAdComponent = HintUtil.createAdComponent(s, JBUI.Borders.empty(1, 5), alignment);
-      JPanel wrapper = new JPanel(new BorderLayout()) {
-        @Override
-        protected void paintComponent(Graphics g) {
-          g.setColor(Gray._135);
-          UIUtil.drawLine(g, 0, 0, getWidth(), 0);
-          super.paintComponent(g);
-        }
-      };
+      myAdComponent = HintUtil.createAdComponent(s, JBUI.CurrentTheme.Advertiser.border(), alignment);
+      JPanel wrapper = new JPanel(new BorderLayout());
       wrapper.setOpaque(false);
-      wrapper.setBorder(JBUI.Borders.emptyTop(1));
       wrapper.add(myAdComponent, BorderLayout.CENTER);
       myContent.add(wrapper, BorderLayout.SOUTH);
       pack(false, true);
-    } else {
+    }
+    else {
       myAdComponent.setText(s);
       myAdComponent.setHorizontalAlignment(alignment);
     }
@@ -393,7 +386,7 @@ public class AbstractPopup implements JBPopup {
     return getCenterOf(aContainer, content.getPreferredSize());
   }
 
-  private static Point getCenterOf(final Component aContainer, final Dimension contentSize) {
+  private static Point getCenterOf(@NotNull Component aContainer, @NotNull Dimension contentSize) {
     final JComponent component = getTargetComponent(aContainer);
 
     Rectangle visibleBounds = component != null
@@ -408,6 +401,7 @@ public class AbstractPopup implements JBPopup {
 
   @Override
   public void showCenteredInCurrentWindow(@NotNull Project project) {
+    if (UiInterceptors.tryIntercept(this)) return;
     Window window = null;
 
     Component focusedComponent = getWndManager().getFocusedComponent(project);
@@ -441,6 +435,7 @@ public class AbstractPopup implements JBPopup {
 
   @Override
   public void show(@NotNull RelativePoint aPoint) {
+    if (UiInterceptors.tryIntercept(this)) return;
     HelpTooltip.setMasterPopup(aPoint.getOriginalComponent(), this);
     Point screenPoint = aPoint.getScreenPoint();
     show(aPoint.getComponent(), screenPoint.x, screenPoint.y, false);
@@ -451,9 +446,19 @@ public class AbstractPopup implements JBPopup {
     show(owner, point.x, point.y, false);
   }
 
+  @NotNull
+  @Override
+  public Point getBestPositionFor(@NotNull DataContext dataContext) {
+    final Editor editor = CommonDataKeys.EDITOR.getData(dataContext);
+    if (editor != null && editor.getComponent().isShowing()) {
+      return getBestPositionFor(editor).getScreenPoint();
+    }
+    return relativePointByQuickSearch(dataContext).getScreenPoint();
+  }
+
   @Override
   public void showInBestPositionFor(@NotNull DataContext dataContext) {
-    final Editor editor = CommonDataKeys.EDITOR.getData(dataContext);
+    final Editor editor = CommonDataKeys.EDITOR_EVEN_IF_INACTIVE.getData(dataContext);
     if (editor != null && editor.getComponent().isShowing()) {
       showInBestPositionFor(editor);
     }
@@ -475,7 +480,8 @@ public class AbstractPopup implements JBPopup {
     }
   }
 
-  private RelativePoint relativePointByQuickSearch(final DataContext dataContext) {
+  @NotNull
+  private RelativePoint relativePointByQuickSearch(@NotNull DataContext dataContext) {
     Rectangle dominantArea = PlatformDataKeys.DOMINANT_HINT_AREA_RECTANGLE.getData(dataContext);
 
     if (dominantArea != null) {
@@ -499,56 +505,100 @@ public class AbstractPopup implements JBPopup {
         return relativePointWithDominantRectangle(layeredPane, dominantArea);
       }
     }
+    RelativePoint location;
+    Component contextComponent = dataContext.getData(PlatformDataKeys.CONTEXT_COMPONENT);
+    if (contextComponent == myComponent) {
+      location = new RelativePoint(myComponent, new Point());
+    }
+    else {
+      location = JBPopupFactory.getInstance().guessBestPopupLocation(dataContext);
+    }
+    if (myLocateWithinScreen) {
+      Point screenPoint = location.getScreenPoint();
+      Rectangle rectangle = new Rectangle(screenPoint, getSizeForPositioning());
+      Rectangle screen = ScreenUtil.getScreenRectangle(screenPoint);
+      ScreenUtil.moveToFit(rectangle, screen, null);
+      location = new RelativePoint(rectangle.getLocation()).getPointOn(location.getComponent());
+    }
+    return location;
+  }
 
-    return JBPopupFactory.getInstance().guessBestPopupLocation(dataContext);
+  private Dimension getSizeForPositioning() {
+    Dimension size = getSize();
+    if (size == null && myDimensionServiceKey != null) {
+      size = DimensionService.getInstance().getSize(myDimensionServiceKey, myProject);
+    }
+    if (size == null) {
+      size = myContent.getPreferredSize();
+    }
+    return size;
   }
 
   @Override
   public void showInBestPositionFor(@NotNull Editor editor) {
+    // Intercept before the following assert; otherwise assertion may fail
+    if (UiInterceptors.tryIntercept(this)) return;
     assert editor.getComponent().isShowing() : "Editor must be showing on the screen";
 
     // Set the accessible parent so that screen readers don't announce
     // a window context change -- the tooltip is "logically" hosted
     // inside the component (e.g. editor) it appears on top of.
     AccessibleContextUtil.setParent((Component)myComponent, editor.getContentComponent());
+    show(getBestPositionFor(editor));
+  }
+
+  @NotNull
+  private RelativePoint getBestPositionFor(@NotNull Editor editor) {
     DataContext context = ((EditorEx)editor).getDataContext();
     Rectangle dominantArea = PlatformDataKeys.DOMINANT_HINT_AREA_RECTANGLE.getData(context);
     if (dominantArea != null && !myRequestFocus) {
       final JLayeredPane layeredPane = editor.getContentComponent().getRootPane().getLayeredPane();
-      show(relativePointWithDominantRectangle(layeredPane, dominantArea));
+      return relativePointWithDominantRectangle(layeredPane, dominantArea);
     }
     else {
-      show(guessBestPopupLocation(editor));
+      return guessBestPopupLocation(editor);
     }
   }
 
   @NotNull
   private RelativePoint guessBestPopupLocation(@NotNull Editor editor) {
     RelativePoint preferredLocation = JBPopupFactory.getInstance().guessBestPopupLocation(editor);
-    if (myDimensionServiceKey == null) {
-      return preferredLocation;
+    Dimension targetSize = getSizeForPositioning();
+    Point preferredPoint = preferredLocation.getScreenPoint();
+    Point result = getLocationAboveEditorLineIfPopupIsClippedAtTheBottom(preferredPoint, targetSize, editor);
+    if (myLocateWithinScreen) {
+      Rectangle rectangle = new Rectangle(result, targetSize);
+      Rectangle screen = ScreenUtil.getScreenRectangle(preferredPoint);
+      ScreenUtil.moveToFit(rectangle, screen, null);
+      result = rectangle.getLocation();
     }
-    Dimension preferredSize = DimensionService.getInstance().getSize(myDimensionServiceKey, myProject);
-    if (preferredSize == null) {
-      return preferredLocation;
+    return toRelativePoint(result, preferredLocation.getComponent());
+  }
+
+  @NotNull
+  private static RelativePoint toRelativePoint(@NotNull Point screenPoint, @Nullable Component component) {
+    if (component == null) {
+      return RelativePoint.fromScreen(screenPoint);
     }
-    Rectangle preferredBounds = new Rectangle(preferredLocation.getScreenPoint(), preferredSize);
+    SwingUtilities.convertPointFromScreen(screenPoint, component);
+    return new RelativePoint(component, screenPoint);
+  }
+
+  @NotNull
+  private static Point getLocationAboveEditorLineIfPopupIsClippedAtTheBottom(@NotNull Point originalLocation,
+                                                                             @NotNull Dimension popupSize,
+                                                                             @NotNull Editor editor) {
+    Rectangle preferredBounds = new Rectangle(originalLocation, popupSize);
     Rectangle adjustedBounds = new Rectangle(preferredBounds);
     ScreenUtil.moveRectangleToFitTheScreen(adjustedBounds);
     if (preferredBounds.y - adjustedBounds.y <= 0) {
-      return preferredLocation;
+      return originalLocation;
     }
-    int adjustedY = preferredBounds.y - editor.getLineHeight() - preferredSize.height;
+    int adjustedY = preferredBounds.y - editor.getLineHeight() - popupSize.height;
     if (adjustedY < 0) {
-      return preferredLocation;
+      return originalLocation;
     }
-    Point point = new Point(preferredBounds.x, adjustedY);
-    Component component = preferredLocation.getComponent();
-    if (component == null) {
-      return RelativePoint.fromScreen(point);
-    }
-    SwingUtilities.convertPointFromScreen(point, component);
-    return new RelativePoint(component, point);
+    return new Point(preferredBounds.x, adjustedY);
   }
 
   protected void addPopupListener(JBPopupListener listener) {
@@ -556,37 +606,48 @@ public class AbstractPopup implements JBPopup {
   }
 
   private RelativePoint relativePointWithDominantRectangle(final JLayeredPane layeredPane, final Rectangle bounds) {
-    Dimension preferredSize = getPreferredContentSize();
-    final Point leftTopCorner = new Point(bounds.x + bounds.width, bounds.y);
-    final Point leftTopCornerScreen = (Point)leftTopCorner.clone();
-    SwingUtilities.convertPointToScreen(leftTopCornerScreen, layeredPane);
-    final RelativePoint relativePoint;
-    if (!ScreenUtil.isOutsideOnTheRightOFScreen(
-      new Rectangle(leftTopCornerScreen.x, leftTopCornerScreen.y, preferredSize.width, preferredSize.height))) {
-      relativePoint = new RelativePoint(layeredPane, leftTopCorner);
+    Dimension size = getSizeForPositioning();
+    List<Supplier<Point>> optionsToTry = Arrays.asList(() -> new Point(bounds.x + bounds.width, bounds.y),
+                                                       () -> new Point(bounds.x - size.width, bounds.y));
+    for (Supplier<Point> option : optionsToTry) {
+      Point location = option.get();
+      SwingUtilities.convertPointToScreen(location, layeredPane);
+      Point adjustedLocation = fitToScreenAdjustingVertically(location, size);
+      if (adjustedLocation != null) return new RelativePoint(adjustedLocation).getPointOn(layeredPane);
+    }
+
+    setDimensionServiceKey(null); // going to cut width
+    Point rightTopCorner = new Point(bounds.x + bounds.width, bounds.y);
+    final Point rightTopCornerScreen = (Point)rightTopCorner.clone();
+    SwingUtilities.convertPointToScreen(rightTopCornerScreen, layeredPane);
+    Rectangle screen = ScreenUtil.getScreenRectangle(rightTopCornerScreen.x, rightTopCornerScreen.y);
+    final int spaceOnTheLeft = bounds.x;
+    final int spaceOnTheRight = screen.x + screen.width - rightTopCornerScreen.x;
+    if (spaceOnTheLeft > spaceOnTheRight) {
+      myComponent.setPreferredSize(new Dimension(spaceOnTheLeft, Math.max(size.height, JBUI.scale(200))));
+      return new RelativePoint(layeredPane, new Point(0, bounds.y));
     }
     else {
-      if (bounds.x > preferredSize.width) {
-        relativePoint = new RelativePoint(layeredPane, new Point(bounds.x - preferredSize.width, bounds.y));
-      }
-      else {
-        setDimensionServiceKey(null); // going to cut width
-        Rectangle screen = ScreenUtil.getScreenRectangle(leftTopCornerScreen.x, leftTopCornerScreen.y);
-        final int spaceOnTheLeft = bounds.x;
-        final int spaceOnTheRight = screen.x + screen.width - leftTopCornerScreen.x;
-        if (spaceOnTheLeft > spaceOnTheRight) {
-          relativePoint = new RelativePoint(layeredPane, new Point(0, bounds.y));
-          myComponent.setPreferredSize(new Dimension(spaceOnTheLeft, Math.max(preferredSize.height, JBUI.scale(200))));
-        }
-        else {
-          relativePoint = new RelativePoint(layeredPane, leftTopCorner);
-          myComponent.setPreferredSize(new Dimension(spaceOnTheRight, Math.max(preferredSize.height, JBUI.scale(200))));
-        }
-      }
+      myComponent.setPreferredSize(new Dimension(spaceOnTheRight, Math.max(size.height, JBUI.scale(200))));
+      return new RelativePoint(layeredPane, rightTopCorner);
     }
-    return relativePoint;
   }
 
+  // positions are relative to screen
+  @Nullable
+  private static Point fitToScreenAdjustingVertically(@NotNull Point position, @NotNull Dimension size) {
+    Rectangle screenRectangle = ScreenUtil.getScreenRectangle(position);
+    Rectangle rectangle = new Rectangle(position, size);
+    if (rectangle.height > screenRectangle.height ||
+        rectangle.x < screenRectangle.x ||
+        rectangle.x + rectangle.width > screenRectangle.x + screenRectangle.width) {
+      return null;
+    }
+    ScreenUtil.moveToFit(rectangle, screenRectangle, null);
+    return rectangle.getLocation();
+  }
+
+  @NotNull
   private Dimension getPreferredContentSize() {
     if (myForcedSize != null) {
       return myForcedSize;
@@ -601,6 +662,7 @@ public class AbstractPopup implements JBPopup {
   @Override
   public final void closeOk(@Nullable InputEvent e) {
     setOk(true);
+    myFinalRunnable = FunctionUtil.composeRunnables(myOkHandler, myFinalRunnable);
     cancel(e);
   }
 
@@ -630,9 +692,7 @@ public class AbstractPopup implements JBPopup {
         myState = State.SHOWN;
         return;
       }
-      Dimension size = myContent.getSize();
-      JBInsets.removeFrom(size, myContent.getInsets());
-      storeDimensionSize(size);
+      storeDimensionSize();
       if (myUseDimServiceForXYLocation) {
         final JRootPane root = myComponent.getRootPane();
         if (root != null) {
@@ -692,11 +752,12 @@ public class AbstractPopup implements JBPopup {
   }
 
   @Override
-  public void show(final Component owner) {
+  public void show(@NotNull final Component owner) {
     show(owner, -1, -1, true);
   }
 
-  public void show(Component owner, int aScreenX, int aScreenY, final boolean considerForcedXY) {
+  public void show(@NotNull Component owner, int aScreenX, int aScreenY, final boolean considerForcedXY) {
+    if (UiInterceptors.tryIntercept(this)) return;
     if (ApplicationManagerEx.getApplicationEx() != null && ApplicationManager.getApplication().isHeadlessEnvironment()) return;
     if (isDisposed()) {
       throw new IllegalStateException("Popup was already disposed. Recreate a new instance to show again");
@@ -708,7 +769,6 @@ public class AbstractPopup implements JBPopup {
     debugState("show popup", State.INIT);
     myState = State.SHOWING;
 
-    installWindowHook(this);
     installProjectDisposer();
     addActivity();
 
@@ -721,6 +781,7 @@ public class AbstractPopup implements JBPopup {
     }
 
     prepareToShow();
+    installWindowHook(this);
 
     Dimension sizeToSet = null;
 
@@ -866,6 +927,11 @@ public class AbstractPopup implements JBPopup {
             super.setCursor(content, cursor);
           }
         }
+
+        @Override
+        protected void notifyResized() {
+          myResizeListeners.forEach(Runnable::run);
+        }
       };
       glass.addMousePreprocessor(resizeListener, this);
       glass.addMouseMotionPreprocessor(resizeListener, this);
@@ -954,6 +1020,9 @@ public class AbstractPopup implements JBPopup {
     myContent.getRootPane().putClientProperty("SIMPLE_WINDOW", "SIMPLE_WINDOW".equals(data) || popupIsSimpleWindow);
 
     myWindow = window;
+    if (myNormalWindowLevel) {
+      myWindow.setType(Window.Type.NORMAL);
+    }
     setMinimumSize(myMinSize);
 
     final Disposable tb = TouchBarsManager.showPopupBar(this, myContent);
@@ -987,7 +1056,7 @@ public class AbstractPopup implements JBPopup {
         removeActivity();
         return;
       }
-      if (myPreferredFocusedComponent != null && myInStack && myFocusable) {
+      if ((myPreferredFocusedComponent instanceof AbstractButton || myPreferredFocusedComponent instanceof JTextField) && myFocusable) {
         IJSwingUtilities.moveMousePointerOn(myPreferredFocusedComponent);
       }
 
@@ -1079,13 +1148,6 @@ public class AbstractPopup implements JBPopup {
     };
     myContent.addMouseListener(mouseAdapter);
     Disposer.register(this, () -> myContent.removeMouseListener(mouseAdapter));
-
-    myContent.registerKeyboardAction(__ -> {
-      if (myCancelKeyEnabled) {
-        cancel();
-      }
-    }, KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), JComponent.WHEN_IN_FOCUSED_WINDOW);
-
 
     myContent.addKeyListener(mySpeedSearch);
 
@@ -1224,6 +1286,7 @@ public class AbstractPopup implements JBPopup {
     return new PopupComponent.Factory.AwtDefault();
   }
 
+  @NotNull
   @Override
   public JComponent getContent() {
     return myContent;
@@ -1293,10 +1356,9 @@ public class AbstractPopup implements JBPopup {
     return myComponent;
   }
 
-  public void setProject(Project project) {
-    myProject = project;
+  public Project getProject() {
+    return myProject;
   }
-
 
   @Override
   public void dispose() {
@@ -1404,8 +1466,10 @@ public class AbstractPopup implements JBPopup {
     }
   }
 
-  private void storeDimensionSize(final Dimension size) {
+  public void storeDimensionSize() {
     if (myDimensionServiceKey != null) {
+      Dimension size = myContent.getSize();
+      JBInsets.removeFrom(size, myContent.getInsets());
       DimensionService.getInstance().setSize(myDimensionServiceKey, size, myProject);
     }
   }
@@ -1467,7 +1531,7 @@ public class AbstractPopup implements JBPopup {
       switch (event.getID()) {
         case WINDOW_ACTIVATED:
         case WINDOW_GAINED_FOCUS:
-          if (myCancelOnWindow && myPopup != null && !myPopup.isPopupWindow(((WindowEvent)event).getWindow())) {
+          if (myCancelOnWindow && myPopup != null && isCancelNeeded((WindowEvent)event, myPopup.getWindow())) {
             cancel();
           }
           break;
@@ -1495,11 +1559,15 @@ public class AbstractPopup implements JBPopup {
   }
 
   @Override
-  public void setLocation(@NotNull final Point screenPoint) {
+  public void setLocation(@NotNull Point screenPoint) {
     if (myPopup == null) {
       myForcedLocation = screenPoint;
     }
     else if (!isBusy()) {
+      final Insets insets = myContent.getInsets();
+      if (insets != null && (insets.top != 0 || insets.left != 0)) {
+        screenPoint = new Point(screenPoint.x - insets.left, screenPoint.y - insets.top);
+      }
       moveTo(myContent, screenPoint, myLocateByContent ? myHeaderPanel.getPreferredSize() : null);
     }
   }
@@ -1526,20 +1594,26 @@ public class AbstractPopup implements JBPopup {
     return window;
   }
 
+  @NotNull
   @Override
   public Point getLocationOnScreen() {
-    Point screenPoint = myContent.getLocation();
-    SwingUtilities.convertPointToScreen(screenPoint, myContent);
-    return fixLocateByContent(screenPoint, false);
+    Window window = getContentWindow(myContent);
+    Point screenPoint = window == null ? new Point() : window.getLocation();
+    fixLocateByContent(screenPoint, false);
+    Insets insets = myContent.getInsets();
+    if (insets != null) {
+      screenPoint.x += insets.left;
+      screenPoint.y += insets.top;
+    }
+    return screenPoint;
   }
-
 
   @Override
   public void setSize(@NotNull final Dimension size) {
     setSize(size, true);
   }
 
-  private void setSize(Dimension size, boolean adjustByContent) {
+  private void setSize(@NotNull Dimension size, boolean adjustByContent) {
     if (isBusy()) return;
 
     Dimension toSet = new Dimension(size);
@@ -1593,7 +1667,7 @@ public class AbstractPopup implements JBPopup {
   }
 
   @Override
-  public void setCaption(String title) {
+  public void setCaption(@NotNull String title) {
     if (myCaption instanceof TitlePanel) {
       ((TitlePanel)myCaption).setText(title);
     }
@@ -1638,7 +1712,7 @@ public class AbstractPopup implements JBPopup {
         final Window window = getPopupWindow();
         if (window != null) {
           myRestoreWindowSize = window.getSize();
-          window.setVisible(true);
+          window.setVisible(false);
         }
       }
     }
@@ -1653,7 +1727,7 @@ public class AbstractPopup implements JBPopup {
   }
 
   @Override
-  public <T> T getUserData(final Class<T> userDataClass) {
+  public <T> T getUserData(@NotNull final Class<T> userDataClass) {
     if (myUserData != null) {
       for (Object o : myUserData) {
         if (userDataClass.isInstance(o)) {
@@ -1790,6 +1864,10 @@ public class AbstractPopup implements JBPopup {
     }
   }
 
+  public void setOkHandler(Runnable okHandler) {
+    myOkHandler = okHandler;
+  }
+
   @Override
   public void setFinalRunnable(Runnable finalRunnable) {
     myFinalRunnable = finalRunnable;
@@ -1808,9 +1886,9 @@ public class AbstractPopup implements JBPopup {
 
   @Override
   public boolean dispatchKeyEvent(@NotNull KeyEvent e) {
-    BooleanFunction<KeyEvent> handler = myKeyEventHandler;
-    if (handler != null) {
-      return handler.fun(e);
+    BooleanFunction<? super KeyEvent> handler = myKeyEventHandler;
+    if (handler != null && handler.fun(e)) {
+      return true;
     }
     if (isCloseRequest(e) && myCancelKeyEnabled && !mySpeedSearch.isHoldingFilter()) {
       cancel(e);
@@ -1873,7 +1951,7 @@ public class AbstractPopup implements JBPopup {
 
   @NotNull
   public static List<JBPopup> getChildPopups(@NotNull final Component component) {
-    return all.toStrongList().stream().filter(popup -> {
+    return ContainerUtil.filter(all.toStrongList(), popup -> {
       Component owner = popup.getOwner();
       while (owner != null) {
         if (owner.equals(component)) {
@@ -1882,6 +1960,28 @@ public class AbstractPopup implements JBPopup {
         owner = owner.getParent();
       }
       return false;
-    }).collect(Collectors.toList());
+    });
+  }
+
+  @Override
+  public boolean canShow() {
+    return myState == State.INIT;
+  }
+
+  /**
+   * Passed listener will be notified if popup is resized by user (using mouse)
+   */
+  public void addResizeListener(@NotNull Runnable runnable, @NotNull Disposable parentDisposable) {
+    myResizeListeners.add(runnable);
+    Disposer.register(parentDisposable, () -> myResizeListeners.remove(runnable));
+  }
+
+  /**
+   * @return {@code true} if focus moved to a popup window or its child window
+   */
+  private static boolean isCancelNeeded(@NotNull WindowEvent event, Window window) {
+    if (window == null) return true;
+    Window focused = event.getWindow();
+    return focused != window && (focused == null || window != focused.getOwner());
   }
 }

@@ -1,10 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.util.registry;
 
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.Disposer;
-import com.intellij.ui.ColorUtil;
+import com.intellij.ui.ColorHexUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -18,7 +18,6 @@ import java.util.MissingResourceException;
  * @author Konstantin Bulenkov
  */
 public class RegistryValue {
-
   private final Registry myRegistry;
   private final String myKey;
   @Nullable private final RegistryKeyDescriptor myKeyDescriptor;
@@ -93,7 +92,7 @@ public class RegistryValue {
   Color asColor(Color defaultValue) {
     final String s = get(myKey, null, true);
     if (s != null) {
-      Color color = ColorUtil.fromHex(s, null);
+      Color color = ColorHexUtil.fromHex(s, null);
       if (color != null && myKey.contains("color")) {
         return color;
       }
@@ -102,7 +101,7 @@ public class RegistryValue {
         try {
           return new Color(Integer.parseInt(rgb[0]), Integer.parseInt(rgb[1]), Integer.parseInt(rgb[2]));
         }
-        catch (Exception e) {
+        catch (Exception ignored) {
         }
       }
     }
@@ -121,11 +120,15 @@ public class RegistryValue {
     if (myKeyDescriptor != null) {
       return myKeyDescriptor.isRestartRequired();
     }
-    return Boolean.valueOf(get(myKey + ".restartRequired", "false", false));
+    return Boolean.parseBoolean(get(myKey + ".restartRequired", "false", false));
   }
 
   public boolean isChangedFromDefault() {
     return isChangedFromDefault(asString());
+  }
+
+  public boolean isContributedByThirdPartyPlugin() {
+    return myKeyDescriptor != null && myKeyDescriptor.isContributedByThirdPartyPlugin();
   }
 
   boolean isChangedFromDefault(@NotNull String newValue) {
@@ -159,11 +162,11 @@ public class RegistryValue {
   }
 
   public void setValue(boolean value) {
-    setValue(Boolean.valueOf(value).toString());
+    setValue(Boolean.toString(value));
   }
 
   public void setValue(int value) {
-    setValue(Integer.valueOf(value).toString());
+    setValue(Integer.toString(value));
   }
 
   public void setValue(String value) {
@@ -184,40 +187,25 @@ public class RegistryValue {
     }
 
     myChangedSinceStart = true;
-    LOG.info("Registry value '" + myKey + "' has changed to '" + value + '"');
+    LOG.info("Registry value '" + myKey + "' has changed to '" + value + '\'');
   }
 
-  public void setValue(boolean value, Disposable parentDisposable) {
+  public void setValue(boolean value, @NotNull Disposable parentDisposable) {
     final boolean prev = asBoolean();
     setValue(value);
-    Disposer.register(parentDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        setValue(prev);
-      }
-    });
+    Disposer.register(parentDisposable, () -> setValue(prev));
   }
 
-  public void setValue(int value, Disposable parentDisposable) {
+  public void setValue(int value, @NotNull Disposable parentDisposable) {
     final int prev = asInteger();
     setValue(value);
-    Disposer.register(parentDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        setValue(prev);
-      }
-    });
+    Disposer.register(parentDisposable, () -> setValue(prev));
   }
 
-  public void setValue(String value, Disposable parentDisposable) {
+  public void setValue(String value, @NotNull Disposable parentDisposable) {
     final String prev = asString();
     setValue(value);
-    Disposer.register(parentDisposable, new Disposable() {
-      @Override
-      public void dispose() {
-        setValue(prev);
-      }
-    });
+    Disposer.register(parentDisposable, () -> setValue(prev));
   }
 
   boolean isChangedSinceAppStart() {
@@ -230,12 +218,7 @@ public class RegistryValue {
 
   public void addListener(@NotNull final RegistryValueListener listener, @NotNull Disposable parent) {
     myListeners.add(listener);
-    Disposer.register(parent, new Disposable() {
-      @Override
-      public void dispose() {
-        myListeners.remove(listener);
-      }
-    });
+    Disposer.register(parent, () -> myListeners.remove(listener));
   }
 
   @Override

@@ -56,6 +56,7 @@ import com.jetbrains.python.debugger.PyStackFrameInfo;
 import com.jetbrains.python.highlighting.PyHighlighter;
 import com.jetbrains.python.psi.LanguageLevel;
 import com.jetbrains.python.sdk.PythonSdkType;
+import com.jetbrains.python.sdk.flavors.PythonSdkFlavor;
 import com.jetbrains.python.testing.PyTestsSharedKt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -69,7 +70,7 @@ import java.util.concurrent.TimeUnit;
  * @author traff
  */
 public class PythonConsoleView extends LanguageConsoleImpl implements ObservableConsoleView, PyCodeExecutor {
-
+  static Key<Boolean> CONSOLE_KEY = new Key<>("PYDEV_CONSOLE_KEY");
   private static final Logger LOG = Logger.getInstance(PythonConsoleView.class);
   private final ConsolePromptDecorator myPromptView;
   private final boolean myTestMode;
@@ -84,29 +85,39 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
   private XStandaloneVariablesView mySplitView;
   private final ActionCallback myInitialized = new ActionCallback();
   private boolean isShowVars;
+  @Nullable private String mySdkHomePath;
 
   /**
    * @param testMode this console will be used to display test output and should support TC messages
    */
-  public PythonConsoleView(final Project project, final String title, final Sdk sdk, final boolean testMode) {
+  public PythonConsoleView(final Project project, final String title, @Nullable final Sdk sdk, final boolean testMode) {
     super(project, title, PythonLanguage.getInstance());
     myTestMode = testMode;
     isShowVars = PyConsoleOptions.getInstance(project).isShowVariableByDefault();
-    getVirtualFile().putUserData(LanguageLevel.KEY, PythonSdkType.getLanguageLevelForSdk(sdk));
+    VirtualFile virtualFile = getVirtualFile();
+    virtualFile.putUserData(LanguageLevel.KEY, PythonSdkType.getLanguageLevelForSdk(sdk));
+    virtualFile.putUserData(CONSOLE_KEY, true);
     // Mark editor as console one, to prevent autopopup completion
     getConsoleEditor().putUserData(PythonConsoleAutopopupBlockingHandler.REPL_KEY, new Object());
     getHistoryViewer().putUserData(ConsoleViewUtil.EDITOR_IS_CONSOLE_HISTORY_VIEW, true);
     super.setPrompt(null);
     setUpdateFoldingsEnabled(false);
-    myPyHighlighter = new PyHighlighter(
-      sdk != null && sdk.getVersionString() != null ? LanguageLevel.fromPythonVersion(sdk.getVersionString()) : LanguageLevel.getDefault());
+    LanguageLevel languageLevel = LanguageLevel.getDefault();
+    if (sdk != null) {
+      final PythonSdkFlavor sdkFlavor = PythonSdkFlavor.getFlavor(sdk);
+      if (sdkFlavor != null) {
+        languageLevel = sdkFlavor.getLanguageLevel(sdk);
+      }
+      mySdkHomePath = sdk.getHomePath();
+    }
+    myPyHighlighter = new PyHighlighter(languageLevel);
     myScheme = getConsoleEditor().getColorsScheme();
     PythonConsoleData data = PyConsoleUtil.getOrCreateIPythonData(getVirtualFile());
     myPromptView = new ConsolePromptDecorator(this.getConsoleEditor(), data);
   }
 
   public void setConsoleCommunication(final ConsoleCommunication communication) {
-    getFile().putCopyableUserData(PydevConsoleRunner.CONSOLE_KEY, communication);
+    getFile().putCopyableUserData(PydevConsoleRunner.CONSOLE_COMMUNICATION_KEY, communication);
 
     if (isShowVars && communication instanceof PydevConsoleCommunication) {
       showVariables((PydevConsoleCommunication)communication);
@@ -502,6 +513,10 @@ public class PythonConsoleView extends LanguageConsoleImpl implements Observable
     }
   }
 
+  @Nullable
+  public String getSdkHomePath() {
+    return mySdkHomePath;
+  }
 
   @Override
   public void setPromptAttributes(@NotNull ConsoleViewContentType textAttributes) {

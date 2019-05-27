@@ -53,7 +53,7 @@ import com.intellij.ui.RetrievableIcon;
 import com.intellij.util.IconUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.PlatformIcons;
-import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.JBCachingScalableIcon;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,6 +66,9 @@ import java.awt.geom.Rectangle2D;
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
 
+import static com.intellij.ide.ui.UISettings.setupAntialiasing;
+import static com.intellij.util.ui.JBUIScale.ScaleType.OBJ_SCALE;
+
 public class Bookmark implements Navigatable, Comparable<Bookmark> {
   static final Icon DEFAULT_ICON = new MyCheckedIcon();
 
@@ -75,6 +78,7 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
   private final Project myProject;
   private Reference<RangeHighlighterEx> myHighlighterRef;
 
+  @NotNull
   private String myDescription;
   private char myMnemonic;
   int index; // index in the list of bookmarks in the Navigate|Bookmarks|show
@@ -205,6 +209,7 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
     return myMnemonic == 0 ? DEFAULT_ICON : MnemonicIcon.getIcon(myMnemonic);
   }
 
+  @NotNull
   public String getDescription() {
     return myDescription;
   }
@@ -286,7 +291,8 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
   @Override
   public String toString() {
     StringBuilder result = new StringBuilder(getQualifiedName());
-    String description = StringUtil.escapeXml(nullizeEmptyDescription());
+    String text = nullizeEmptyDescription();
+    String description = text == null ? null : StringUtil.escapeXmlEntities(text);
     if (description != null) {
       result.append(": ").append(description);
     }
@@ -329,14 +335,15 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
     if (myMnemonic != 0) {
       result.append(" ").append(myMnemonic);
     }
-    String description = StringUtil.escapeXml(nullizeEmptyDescription());
+    String text = nullizeEmptyDescription();
+    String description = text == null ? null : StringUtil.escapeXmlEntities(text);
     if (description != null) {
       result.append(": ").append(description);
     }
     return result.toString();
   }
 
-  static class MnemonicIcon extends JBUI.CachingScalableJBIcon<MnemonicIcon> {
+  static class MnemonicIcon extends JBCachingScalableIcon<MnemonicIcon> {
     private static final MnemonicIcon[] cache = new MnemonicIcon[36];//0..9  + A..Z
     private final char myMnemonic;
 
@@ -377,6 +384,7 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
       g.drawRect(x, y, width, height);
 
       g.setColor(EditorColorsManager.getInstance().getGlobalScheme().getDefaultForeground());
+      setupAntialiasing(g);
 
       float startingFontSize = 40f;  // large font for smaller rounding error
       Font font = getBookmarkFont().deriveFont(startingFontSize);
@@ -396,7 +404,7 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
     }
 
     private int scale(int width) {
-      return (int)Math.ceil(scaleVal(width, JBUI.ScaleType.OBJ_SCALE));
+      return (int)Math.ceil(scaleVal(width, OBJ_SCALE));
     }
 
     @Override
@@ -420,7 +428,7 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
     }
   }
 
-  private static class MyCheckedIcon extends JBUI.CachingScalableJBIcon<MyCheckedIcon> implements RetrievableIcon {
+  private static class MyCheckedIcon extends JBCachingScalableIcon<MyCheckedIcon> implements RetrievableIcon {
     @NotNull
     @Override
     public Icon retrieveIcon() {
@@ -438,7 +446,7 @@ public class Bookmark implements Navigatable, Comparable<Bookmark> {
     }
 
     private int scale(int width) {
-      return (int)Math.ceil(scaleVal(width, JBUI.ScaleType.OBJ_SCALE));
+      return (int)Math.ceil(scaleVal(width, OBJ_SCALE));
     }
 
     @Override

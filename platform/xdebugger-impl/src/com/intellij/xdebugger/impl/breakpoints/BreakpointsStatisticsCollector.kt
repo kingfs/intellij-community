@@ -2,12 +2,18 @@
 package com.intellij.xdebugger.impl.breakpoints
 
 import com.intellij.internal.statistic.beans.UsageDescriptor
+import com.intellij.internal.statistic.eventLog.validator.ValidationResultType
+import com.intellij.internal.statistic.eventLog.validator.rules.EventContext
+import com.intellij.internal.statistic.eventLog.validator.rules.impl.CustomUtilsWhiteListRule
 import com.intellij.internal.statistic.service.fus.collectors.ProjectUsagesCollector
 import com.intellij.internal.statistic.service.fus.collectors.UsageDescriptorKeyValidator.ensureProperKey
 import com.intellij.internal.statistic.utils.getCountingUsage
+import com.intellij.internal.statistic.utils.getPluginInfo
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.xdebugger.breakpoints.SuspendPolicy
+import com.intellij.xdebugger.breakpoints.XBreakpointType
 import com.intellij.xdebugger.breakpoints.XLineBreakpoint
 import com.intellij.xdebugger.impl.XDebuggerManagerImpl
 import com.intellij.xdebugger.impl.XDebuggerUtilImpl
@@ -17,7 +23,7 @@ import com.intellij.xdebugger.impl.XDebuggerUtilImpl
  */
 
 class BreakpointsStatisticsCollector : ProjectUsagesCollector() {
-  override fun getGroupId(): String = "statistics.debugger.breakpoints"
+  override fun getGroupId(): String = "debugger.breakpoints"
 
   override fun getUsages(project: Project): MutableSet<UsageDescriptor> {
     return ReadAction.compute<MutableSet<UsageDescriptor>, Exception> {
@@ -27,8 +33,8 @@ class BreakpointsStatisticsCollector : ProjectUsagesCollector() {
         .filter { it.isSuspendThreadSupported() }
         .filter { breakpointManager.getBreakpointDefaults(it).getSuspendPolicy() != it.getDefaultSuspendPolicy() }
         .map {
-          UsageDescriptor(
-            ensureProperKey("not.default.suspend.${breakpointManager.getBreakpointDefaults(it).getSuspendPolicy()}.${it.getId()}"))
+          UsageDescriptor(ensureProperKey(
+            "not.default.suspend.${breakpointManager.getBreakpointDefaults(it).getSuspendPolicy()}.${getReportableTypeId(it)}"))
         }
         .toMutableSet()
 
@@ -76,5 +82,29 @@ class BreakpointsStatisticsCollector : ProjectUsagesCollector() {
 
       res
     }
+  }
+}
+
+fun getReportableTypeId(type: XBreakpointType<*, *>): String {
+  val info = getPluginInfo(type.javaClass)
+  if (info.isDevelopedByJetBrains()) return type.getId()
+  return if (info.isSafeToReport()) "custom.${info.id}" else "custom"
+}
+
+class BreakpointsUtilValidator : CustomUtilsWhiteListRule() {
+  override fun acceptRuleId(ruleId: String?): Boolean {
+    return "breakpoint" == ruleId
+  }
+
+  override fun doValidate(data: String, context: EventContext): ValidationResultType {
+    if ("custom".equals(data)) return ValidationResultType.ACCEPTED
+
+    for (breakpoint in XBreakpointType.EXTENSION_POINT_NAME.extensions) {
+      if (StringUtil.equals(breakpoint.getId(), data)) {
+        val info = getPluginInfo(breakpoint.javaClass)
+        return if (info.isDevelopedByJetBrains()) ValidationResultType.ACCEPTED else ValidationResultType.REJECTED
+      }
+    }
+    return ValidationResultType.REJECTED
   }
 }

@@ -1,11 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.fileChooser.ex;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.PasteProvider;
 import com.intellij.ide.SaveAndSyncHandler;
-import com.intellij.ide.SaveAndSyncHandlerImpl;
 import com.intellij.ide.dnd.FileCopyPasteUtil;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.ide.util.treeView.NodeRenderer;
@@ -38,6 +37,7 @@ import com.intellij.ui.treeStructure.Tree;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.IconUtil;
+import com.intellij.util.ui.EmptyIcon;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.update.MergingUpdateQueue;
@@ -64,7 +64,7 @@ import java.util.*;
 
 public class FileChooserDialogImpl extends DialogWrapper implements FileChooserDialog, PathChooserDialog, FileLookup {
   @NonNls public static final String FILE_CHOOSER_SHOW_PATH_PROPERTY = "FileChooser.ShowPath";
-  public static final String RECENT_FILES_KEY = "file.chooser.recent.files";
+  private static final String RECENT_FILES_KEY = "file.chooser.recent.files";
   public static final String DRAG_N_DROP_HINT = "Drag and drop a file into the space above to quickly locate it in the tree";
   private final FileChooserDescriptor myChooserDescriptor;
   protected FileSystemTreeImpl myFileSystemTree;
@@ -79,7 +79,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
   private MergingUpdateQueue myUiUpdater;
   private boolean myTreeIsUpdating;
 
-  public static final DataKey<PathField> PATH_FIELD = DataKey.create("PathField");
+  private static final DataKey<PathField> PATH_FIELD = DataKey.create("PathField");
 
   public FileChooserDialogImpl(@NotNull final FileChooserDescriptor descriptor, @Nullable Project project) {
     super(project, true);
@@ -108,7 +108,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
   @NotNull
   public VirtualFile[] choose(@Nullable final Project project, @NotNull final VirtualFile... toSelect) {
     init();
-    if ((myProject == null) && (project != null)) {
+    if (myProject == null && project != null) {
       myProject = project;
     }
     if (toSelect.length == 1) {
@@ -137,7 +137,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
   }
 
   @Override
-  public void choose(@Nullable VirtualFile toSelect, @NotNull Consumer<List<VirtualFile>> callback) {
+  public void choose(@Nullable VirtualFile toSelect, @NotNull Consumer<? super List<VirtualFile>> callback) {
     init();
     restoreSelection(toSelect);
     show();
@@ -159,14 +159,14 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
     }
   }
 
-  protected void storeSelection(@Nullable VirtualFile file) {
+  void storeSelection(@Nullable VirtualFile file) {
     FileChooserUtil.setLastOpenedFile(myProject, file);
     if (file != null && file.getFileSystem() instanceof LocalFileSystem) {
       saveRecent(file.getPath());
     }
   }
 
-  protected void saveRecent(String path) {
+  private void saveRecent(String path) {
     final List<String> files = new ArrayList<>(Arrays.asList(getRecentFiles()));
     files.remove(path);
     files.add(0, path);
@@ -191,7 +191,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
   }
 
 
-  protected JComponent createHistoryButton() {
+  private JComponent createHistoryButton() {
     JLabel label = new JLabel(AllIcons.Actions.Download);
     label.setToolTipText("Recent files");
     new ClickListener() {
@@ -217,23 +217,17 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
   }
 
   private void showRecentFilesPopup() {
-    final JBList files = new JBList(getRecentFiles()) {
+    final JBList<String> files = new JBList<String>(getRecentFiles()) {
       @Override
       public Dimension getPreferredSize() {
         return new Dimension(myPathTextField.getField().getWidth(), super.getPreferredSize().height);
       }
     };
-    files.setCellRenderer(new ColoredListCellRenderer() {
-      @Override
-      protected void customizeCellRenderer(@NotNull JList list, Object value, int index, boolean selected, boolean hasFocus) {
-        final String path = value.toString();
-        append(path);
-        final VirtualFile file = LocalFileSystem.getInstance().findFileByIoFile(new File(path));
-        if (file != null) {
-          setIcon(IconUtil.getIcon(file, Iconable.ICON_FLAG_READ_STATUS, null));
-        }
-      }
-    });
+    files.setCellRenderer(SimpleListCellRenderer.create((label, value, index) -> {
+      label.setText(value);
+      VirtualFile file = LocalFileSystem.getInstance().findFileByIoFile(new File(value));
+      label.setIcon(file == null ? EmptyIcon.ICON_16 : IconUtil.getIcon(file, Iconable.ICON_FLAG_READ_STATUS, null));
+    }));
     JBPopupFactory.getInstance()
       .createListPopupBuilder(files)
       .setItemChoosenCallback(
@@ -342,7 +336,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
       .subscribe(ApplicationActivationListener.TOPIC, new ApplicationActivationListener() {
         @Override
         public void applicationActivated(@NotNull IdeFrame ideFrame) {
-          ((SaveAndSyncHandlerImpl)SaveAndSyncHandler.getInstance()).maybeRefresh(ModalityState.current());
+          SaveAndSyncHandler.getInstance().maybeRefresh(ModalityState.current());
         }
       });
 
@@ -431,13 +425,10 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
     tree.addTreeExpansionListener(new FileTreeExpansionListener());
     setOKActionEnabled(false);
 
-    myFileSystemTree.addListener(new FileSystemTree.Listener() {
-      @Override
-      public void selectionChanged(@NotNull final List<? extends VirtualFile> selection) {
-        // myTreeIsUpdating makes no sense for AsyncTreeModel
-        if (myTreeIsUpdating && myFileSystemTree.getTreeBuilder() == null) myTreeIsUpdating = false;
-        updatePathFromTree(selection, false);
-      }
+    myFileSystemTree.addListener(selection -> {
+      // myTreeIsUpdating makes no sense for AsyncTreeModel
+      if (myTreeIsUpdating && myFileSystemTree.getTreeBuilder() == null) myTreeIsUpdating = false;
+      updatePathFromTree(selection, false);
     }, myDisposable);
 
     new FileDrop(tree, new FileDrop.Target() {
@@ -453,7 +444,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
 
       @Override
       public void dropFiles(final List<VirtualFile> files) {
-        if (!myChooserDescriptor.isChooseMultiple() && files.size() > 0) {
+        if (!myChooserDescriptor.isChooseMultiple() && !files.isEmpty()) {
           selectInTree(new VirtualFile[]{files.get(0)}, true, true);
         }
         else {
@@ -470,7 +461,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
     return new Tree();
   }
 
-  protected final void registerMouseListener(final ActionGroup group) {
+  private void registerMouseListener(final ActionGroup group) {
     myFileSystemTree.registerMouseListener(group);
   }
 
@@ -515,7 +506,9 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
             final String rootPath = file.getPath();
             if (myRequests.get(rootPath) == null) {
               final LocalFileSystem.WatchRequest watchRequest = LocalFileSystem.getInstance().addRootToWatch(rootPath, true);
-              myRequests.put(rootPath, watchRequest);
+              if (watchRequest != null) {
+                myRequests.put(rootPath, watchRequest);
+              }
             }
           }
         }
@@ -560,7 +553,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
         if (contents != null) {
           final List<File> fileList = FileCopyPasteUtil.getFileList(contents);
           if (fileList != null) {
-            if (fileList.size() > 0) {
+            if (!fileList.isEmpty()) {
               return fileList.get(0).getAbsolutePath();
             }
           }
@@ -631,7 +624,7 @@ public class FileChooserDialogImpl extends DialogWrapper implements FileChooserD
     if (!isToShowTextField() || myTreeIsUpdating) return;
 
     String text = "";
-    if (selection.size() > 0) {
+    if (!selection.isEmpty()) {
       text = VfsUtil.getReadableUrl(selection.get(0));
     }
     else {

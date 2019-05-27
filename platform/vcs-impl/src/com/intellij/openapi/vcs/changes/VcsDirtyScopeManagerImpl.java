@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.changes;
 
 import com.intellij.openapi.components.ProjectComponent;
@@ -9,8 +9,7 @@ import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.AbstractVcs;
 import com.intellij.openapi.vcs.FilePath;
 import com.intellij.openapi.vcs.ProjectLevelVcsManager;
-import com.intellij.openapi.vcs.VcsDirectoryMapping;
-import com.intellij.openapi.vcs.impl.DefaultVcsRootPolicy;
+import com.intellij.openapi.vcs.VcsRoot;
 import com.intellij.openapi.vcs.impl.ProjectLevelVcsManagerImpl;
 import com.intellij.openapi.vcs.impl.VcsInitObject;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -94,7 +93,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
   }
 
   @NotNull
-  private MultiMap<AbstractVcs, FilePath> groupByVcs(@Nullable final Collection<FilePath> from) {
+  private MultiMap<AbstractVcs, FilePath> groupByVcs(@Nullable final Collection<? extends FilePath> from) {
     if (from == null) return MultiMap.empty();
     MultiMap<AbstractVcs, FilePath> map = MultiMap.createSet();
     for (FilePath path : from) {
@@ -107,7 +106,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
   }
 
   @NotNull
-  private MultiMap<AbstractVcs, FilePath> groupFilesByVcs(@Nullable final Collection<VirtualFile> from) {
+  private MultiMap<AbstractVcs, FilePath> groupFilesByVcs(@Nullable final Collection<? extends VirtualFile> from) {
     if (from == null) return MultiMap.empty();
     MultiMap<AbstractVcs, FilePath> map = MultiMap.createSet();
     for (VirtualFile file : from) {
@@ -157,7 +156,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
   }
 
   @Override
-  public void filePathsDirty(@Nullable final Collection<FilePath> filesDirty, @Nullable final Collection<FilePath> dirsRecursivelyDirty) {
+  public void filePathsDirty(@Nullable final Collection<? extends FilePath> filesDirty, @Nullable final Collection<? extends FilePath> dirsRecursivelyDirty) {
     try {
       fileVcsPathsDirty(groupByVcs(filesDirty), groupByVcs(dirsRecursivelyDirty));
     }
@@ -166,7 +165,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
   }
 
   @Override
-  public void filesDirty(@Nullable final Collection<VirtualFile> filesDirty, @Nullable final Collection<VirtualFile> dirsRecursivelyDirty) {
+  public void filesDirty(@Nullable final Collection<? extends VirtualFile> filesDirty, @Nullable final Collection<? extends VirtualFile> dirsRecursivelyDirty) {
     try {
       fileVcsPathsDirty(groupFilesByVcs(filesDirty), groupFilesByVcs(dirsRecursivelyDirty));
     }
@@ -175,7 +174,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
   }
 
   @NotNull
-  private static Collection<FilePath> toFilePaths(@Nullable Collection<VirtualFile> files) {
+  private static Collection<FilePath> toFilePaths(@Nullable Collection<? extends VirtualFile> files) {
     if (files == null) return Collections.emptyList();
     return ContainerUtil.map(files, virtualFile -> VcsUtil.getFilePath(virtualFile));
   }
@@ -223,7 +222,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
     }
     Set<AbstractVcs> keys = ContainerUtil.union(files.keySet(), dirs.keySet());
 
-    Map<AbstractVcs, VcsDirtyScopeImpl> scopes = ContainerUtil.newHashMap();
+    Map<AbstractVcs, VcsDirtyScopeImpl> scopes = new HashMap<>();
     for (AbstractVcs key : keys) {
       VcsDirtyScopeImpl scope = new VcsDirtyScopeImpl(key, myProject, isEverythingDirty);
       scopes.put(key, scope);
@@ -236,15 +235,13 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
   @NotNull
   private MultiMap<AbstractVcs, FilePath> getEverythingDirtyRoots() {
     MultiMap<AbstractVcs, FilePath> dirtyRoots = MultiMap.createSet();
-    dirtyRoots.putAllValues(groupFilesByVcs(DefaultVcsRootPolicy.getInstance(myProject).getDirtyRoots()));
 
-    List<VcsDirectoryMapping> mappings = myVcsManager.getDirectoryMappings();
-    for (VcsDirectoryMapping mapping : mappings) {
-      if (!mapping.isDefaultMapping() && mapping.getVcs() != null) {
-        AbstractVcs vcs = myVcsManager.findVcsByName(mapping.getVcs());
-        if (vcs != null) {
-          dirtyRoots.putValue(vcs, VcsUtil.getFilePath(mapping.getDirectory(), true));
-        }
+    VcsRoot[] roots = myVcsManager.getAllVcsRoots();
+    for (VcsRoot root : roots) {
+      AbstractVcs vcs = root.getVcs();
+      VirtualFile path = root.getPath();
+      if (vcs != null && path != null) {
+        dirtyRoots.putValue(vcs, VcsUtil.getFilePath(path));
       }
     }
     return dirtyRoots;
@@ -259,7 +256,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
 
   @NotNull
   @Override
-  public Collection<FilePath> whatFilesDirty(@NotNull final Collection<FilePath> files) {
+  public Collection<FilePath> whatFilesDirty(@NotNull final Collection<? extends FilePath> files) {
     DirtBuilder dirtBuilder;
     DirtBuilder dirtBuilderInProgress;
     synchronized (LOCK) {
@@ -270,7 +267,7 @@ public class VcsDirtyScopeManagerImpl extends VcsDirtyScopeManager implements Pr
 
     VcsInvalidated invalidated = calculateInvalidated(dirtBuilder);
     VcsInvalidated inProgress = calculateInvalidated(dirtBuilderInProgress);
-    Collection<FilePath> result = ContainerUtil.newArrayList();
+    Collection<FilePath> result = new ArrayList<>();
     for (FilePath fp : files) {
       if (invalidated.isFileDirty(fp) || inProgress.isFileDirty(fp)) {
         result.add(fp);

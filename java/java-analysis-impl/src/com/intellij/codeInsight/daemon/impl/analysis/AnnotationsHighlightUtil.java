@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.daemon.impl.analysis;
 
 import com.intellij.codeInsight.AnnotationTargetUtil;
@@ -8,6 +8,7 @@ import com.intellij.codeInsight.daemon.impl.HighlightInfoType;
 import com.intellij.codeInsight.daemon.impl.quickfix.QuickFixAction;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.QuickFixFactory;
+import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -46,6 +47,12 @@ public class AnnotationsHighlightUtil {
   @Nullable
   static HighlightInfo checkNameValuePair(@NotNull PsiNameValuePair pair,
                                           RefCountHolder refCountHolder) {
+    PsiAnnotation annotation = PsiTreeUtil.getParentOfType(pair, PsiAnnotation.class);
+    if (annotation == null) return null;
+    PsiJavaCodeReferenceElement annotationNameReferenceElement = annotation.getNameReferenceElement();
+    if (annotationNameReferenceElement == null) return null;
+    PsiElement annotationClass = annotationNameReferenceElement.resolve();
+    if (!(annotationClass instanceof PsiClass && ((PsiClass)annotationClass).isAnnotationType())) return null;
     PsiReference ref = pair.getReference();
     if (ref == null) return null;
     PsiMethod method = (PsiMethod)ref.resolve();
@@ -55,9 +62,10 @@ public class AnnotationsHighlightUtil {
     if (method == null) {
       if (pair.getName() != null) {
         final String description = JavaErrorMessages.message("annotation.unknown.method", ref.getCanonicalText());
-        PsiElement element = ref.getElement();
-        final HighlightInfo highlightInfo =
-          HighlightInfo.newHighlightInfo(HighlightInfoType.WRONG_REF).range(element).descriptionAndTooltip(description).create();
+        final HighlightInfo highlightInfo = HighlightInfo.newHighlightInfo(HighlightInfoType.WRONG_REF)
+          .range(ref.getElement(), ref.getRangeInElement())
+          .descriptionAndTooltip(description)
+          .create();
         QuickFixAction.registerQuickFixAction(highlightInfo, QuickFixFactory.getInstance().createCreateAnnotationMethodFromUsageFix(pair));
         return highlightInfo;
       }
@@ -466,7 +474,7 @@ public class AnnotationsHighlightUtil {
       if (aClass == resolvedClass) {
         return true;
       }
-      if (!checked.add(resolvedClass) || !manager.isInProject(resolvedClass)) return false;
+      if (!checked.add(resolvedClass) || !BaseIntentionAction.canModify(resolvedClass)) return false;
       final PsiMethod[] methods = resolvedClass.getMethods();
       for (PsiMethod method : methods) {
         if (cyclicDependencies(aClass, method.getReturnType(), checked,manager)) return true;
@@ -622,6 +630,12 @@ public class AnnotationsHighlightUtil {
       }
     }
 
+    for (PsiMethod method : container.getMethods()) {
+      if (method instanceof PsiAnnotationMethod && !"value".equals(method.getName()) && ((PsiAnnotationMethod)method).getDefaultValue() == null) {
+        return JavaErrorMessages.message("annotation.container.abstract", container.getQualifiedName(), method.getName());
+      }
+    }
+
     return null;
   }
 
@@ -673,7 +687,7 @@ public class AnnotationsHighlightUtil {
     }
 
     if (enclosingClass != null) {
-      PsiClassType type = PsiElementFactory.SERVICE.getInstance(parameter.getProject()).createType(enclosingClass, PsiSubstitutor.EMPTY);
+      PsiClassType type = PsiElementFactory.getInstance(parameter.getProject()).createType(enclosingClass, PsiSubstitutor.EMPTY);
       if (!type.equals(parameter.getType())) {
         PsiElement range = ObjectUtils.notNull(parameter.getTypeElement(), parameter);
         String text = JavaErrorMessages.message("receiver.type.mismatch");

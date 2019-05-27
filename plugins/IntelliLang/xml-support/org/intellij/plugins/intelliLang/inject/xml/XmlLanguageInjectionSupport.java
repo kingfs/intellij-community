@@ -78,7 +78,7 @@ public class XmlLanguageInjectionSupport extends AbstractLanguageInjectionSuppor
 
   @Nullable
   @Override
-  public BaseInjection findCommentInjection(@NotNull PsiElement host, @Nullable Ref<PsiElement> commentRef) {
+  public BaseInjection findCommentInjection(@NotNull PsiElement host, @Nullable Ref<? super PsiElement> commentRef) {
     if (host instanceof XmlAttributeValue) return null;
     return InjectorUtils.findCommentInjection(host instanceof XmlText ? host.getParent() : host, getId(), commentRef);
   }
@@ -256,7 +256,7 @@ public class XmlLanguageInjectionSupport extends AbstractLanguageInjectionSuppor
 
   @Override
   public BaseInjection createInjection(Element element) {
-    String place = StringUtil.notNullize(element.getChildText("place"), "");
+    String place = StringUtil.notNullize(element.getChildText("place"));
     if (place.startsWith("xmlAttribute")) {
       return new XmlAttributeInjection();
     }

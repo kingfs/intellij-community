@@ -24,8 +24,6 @@ public class LibraryRuntimeClasspathScope extends GlobalSearchScope {
   private final ProjectFileIndex myIndex;
   private final ObjectIntHashMap<VirtualFile> myEntries = new ObjectIntHashMap<>();
 
-  private int myCachedHashCode;
-
   public LibraryRuntimeClasspathScope(@NotNull Project project, @NotNull Collection<? extends Module> modules) {
     super(project);
     myIndex = ProjectRootManager.getInstance(project).getFileIndex();
@@ -51,14 +49,12 @@ public class LibraryRuntimeClasspathScope extends GlobalSearchScope {
     addAll(myEntries, entry.getRootFiles(OrderRootType.SOURCES));
   }
 
-  public int hashCode() {
-    if (myCachedHashCode == 0) {
-      myCachedHashCode = myEntries.hashCode();
-    }
-
-    return myCachedHashCode;
+  @Override
+  public int calcHashCode() {
+    return myEntries.hashCode();
   }
 
+  @Override
   public boolean equals(Object object) {
     if (object == this) return true;
     if (object == null || object.getClass() != LibraryRuntimeClasspathScope.class) return false;
@@ -71,7 +67,7 @@ public class LibraryRuntimeClasspathScope extends GlobalSearchScope {
                             @NotNull final Set<? super Module> processedModules,
                             @NotNull final Set<? super Library> processedLibraries,
                             @NotNull final Set<? super Sdk> processedSdk,
-                            @NotNull Condition<OrderEntry> condition) {
+                            @NotNull Condition<? super OrderEntry> condition) {
     if (!processedModules.add(module)) return;
 
     ModuleRootManager.getInstance(module).orderEntries().recursively().satisfying(condition).process(new RootPolicy<ObjectIntHashMap<VirtualFile>>() {

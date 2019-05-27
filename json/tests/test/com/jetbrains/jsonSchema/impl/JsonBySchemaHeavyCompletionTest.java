@@ -153,5 +153,23 @@ public class JsonBySchemaHeavyCompletionTest extends JsonBySchemaHeavyCompletion
     });
   }
 
+  public void testGuessType() throws Exception {
+    baseInsertTest("guessType", "test");
+  }
 
+  public void testDontGuessType() throws Exception {
+    baseInsertTest("dontGuessType", "test");
+  }
+
+  public void testDontInsertExtraValue() throws Exception {
+    baseInsertTest("dontInsertExtraValue", "testWithValue");
+  }
+
+  public void testDontInsertExtraValueColonOnly() throws Exception {
+    baseInsertTest("dontInsertExtraValueColonOnly", "testWithValue");
+  }
+
+  public void testPreserveColon() throws Exception {
+    baseReplaceTest("preserveColon", "test");
+  }
 }

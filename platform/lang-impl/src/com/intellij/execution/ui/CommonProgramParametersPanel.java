@@ -31,12 +31,12 @@ import java.util.List;
 import java.util.function.Consumer;
 
 public class CommonProgramParametersPanel extends JPanel implements PanelWithAnchor {
-  private LabeledComponent<RawCommandLineEditor> myProgramParametersComponent;
-  private LabeledComponent<JComponent> myWorkingDirectoryComponent;
+  protected LabeledComponent<RawCommandLineEditor> myProgramParametersComponent;
+  protected LabeledComponent<JComponent> myWorkingDirectoryComponent;
   @Deprecated
   protected TextFieldWithBrowseButton myWorkingDirectoryField;
-  private MacroComboBoxWithBrowseButton myWorkingDirectoryComboBox;
-  private EnvironmentVariablesComponent myEnvVariablesComponent;
+  protected MacroComboBoxWithBrowseButton myWorkingDirectoryComboBox;
+  protected EnvironmentVariablesComponent myEnvVariablesComponent;
   protected JComponent myAnchor;
 
   private Module myModuleContext = null;
@@ -104,7 +104,7 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
       @Override
       public void actionPerformed(ActionEvent e) {
         List<String> macros = new ArrayList<>();
-        ComboBoxModel<String> model = myWorkingDirectoryComboBox.getChildComponent().getModel();
+        ComboBoxModel<String> model = myWorkingDirectoryComboBox.getModel();
         for (int i = 0; i < model.getSize(); ++i) {
           macros.add(model.getElementAt(i));
         }
@@ -150,7 +150,7 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
   }
 
   public void addWorkingDirectoryListener(Consumer<? super String> onTextChange) {
-    myWorkingDirectoryComboBox.getChildComponent().addActionListener(event -> onTextChange.accept(myWorkingDirectoryComboBox.getText()));
+    myWorkingDirectoryComboBox.addActionListener(event -> onTextChange.accept(myWorkingDirectoryComboBox.getText()));
   }
 
   public void setWorkingDirectory(String dir) {
@@ -183,7 +183,7 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
     myEnvVariablesComponent.setAnchor(anchor);
   }
 
-  public void applyTo(CommonProgramRunConfigurationParameters configuration) {
+  public void applyTo(@NotNull CommonProgramRunConfigurationParameters configuration) {
     configuration.setProgramParameters(fromTextField(myProgramParametersComponent.getComponent(), configuration));
     configuration.setWorkingDirectory(fromTextField(myWorkingDirectoryComboBox, configuration));
 
@@ -196,7 +196,7 @@ public class CommonProgramParametersPanel extends JPanel implements PanelWithAnc
     return textAccessor.getText();
   }
 
-  public void reset(CommonProgramRunConfigurationParameters configuration) {
+  public void reset(@NotNull CommonProgramRunConfigurationParameters configuration) {
     setProgramParameters(configuration.getProgramParameters());
     setWorkingDirectory(PathUtil.toSystemDependentName(configuration.getWorkingDirectory()));
 

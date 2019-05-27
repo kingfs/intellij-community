@@ -1,13 +1,15 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.execution.process;
 
+import com.intellij.execution.MachineType;
 import com.intellij.execution.process.impl.ProcessListUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.registry.Registry;
 import com.pty4j.windows.WinPtyProcess;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.jvnet.winp.WinProcess;
 
 import java.util.ArrayList;
@@ -37,6 +39,10 @@ public class OSProcessUtil {
           return WinProcessManager.kill(process, true);
         }
         else {
+          if (!process.isAlive()) {
+            logSkippedActionWithTerminatedProcess(process, "killProcessTree", null);
+            return true;
+          }
           createWinProcess(process).killRecursively();
           return true;
         }
@@ -63,7 +69,7 @@ public class OSProcessUtil {
             createWinProcess(pid).kill();
             return;
           }
-          catch (Error e) {
+          catch (Throwable e) {
             LOG.error("Failed to kill process with winp, fallback to default logic", e);
           }
         }
@@ -78,6 +84,16 @@ public class OSProcessUtil {
     }
   }
 
+  static void logSkippedActionWithTerminatedProcess(@NotNull Process process, @NotNull String actionName, @Nullable String commandLine) {
+    Integer pid = null;
+    try {
+      pid = getProcessID(process);
+    }
+    catch (Throwable ignored) {
+    }
+    LOG.info("Cannot " + actionName + " already terminated process (pid: " + pid + ", command: " + commandLine + ")");
+  }
+
   public static int getProcessID(@NotNull Process process) {
     if (SystemInfo.isWindows) {
       try {
@@ -88,7 +104,7 @@ public class OSProcessUtil {
           try {
             return createWinProcess(process).getPid();
           }
-          catch (Error e) {
+          catch (Throwable e) {
             LOG.error("Failed to get PID with winp, fallback to default logic", e);
           }
         }
@@ -107,8 +123,11 @@ public class OSProcessUtil {
 
   @SuppressWarnings("deprecation")
   @NotNull
-  private static WinProcess createWinProcess(@NotNull Process process) {
+  static WinProcess createWinProcess(@NotNull Process process) {
     if (process instanceof RunnerWinProcess) process = ((RunnerWinProcess)process).getOriginalProcess();
+    if (process instanceof WinPtyProcess) {
+      return new WinProcess(((WinPtyProcess)process).getPid());
+    }
     return new WinProcess(process);
   }
 
@@ -136,6 +155,19 @@ public class OSProcessUtil {
     }
 
     return ourPid;
+  }
+
+  @NotNull
+  public static MachineType getProcessMachineType(int pid) {
+    if (SystemInfo.isWindows) {
+      return WinProcessManager.getProcessMachineType(pid);
+    }
+    if (SystemInfo.isLinux) {
+      return UnixProcessManager.getProcessMachineType(pid);
+    }
+    else {
+      throw new IllegalStateException("getProcessMachineType() is not implemented for macOS processes");
+    }
   }
 
   /** @deprecated trivial; use {@link #getProcessList()} directly (to be removed in IDEA 2019) */

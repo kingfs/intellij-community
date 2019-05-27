@@ -1,9 +1,8 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.extensions;
 
 import com.intellij.openapi.util.Couple;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.graph.CachingSemiGraph;
 import com.intellij.util.graph.DFSTBuilder;
 import com.intellij.util.graph.GraphGenerator;
@@ -105,30 +104,38 @@ public class LoadingOrder {
     return new LoadingOrder(AFTER_STR + id);
   }
 
-  public static void sort(@NotNull Orderable... orderable) {
-    sort(Arrays.asList(orderable));
+  public static void sort(@NotNull Orderable[] orderable) {
+    if (orderable.length > 1) {
+      sort(Arrays.asList(orderable));
+    }
   }
 
   public static void sort(@NotNull final List<? extends Orderable> orderable) {
+    if (orderable.size() < 2) return;
+
     // our graph is pretty sparse so do benefit from the fact
-    final Map<String, Orderable> map = ContainerUtil.newLinkedHashMap();
-    final Map<Orderable, LoadingOrder> cachedMap = ContainerUtil.newLinkedHashMap();
+    final Map<String, Orderable> map = new LinkedHashMap<>();
+    final Map<Orderable, LoadingOrder> cachedMap = new LinkedHashMap<>();
     final Set<Orderable> first = new LinkedHashSet<>(1);
     final Set<Orderable> hasBefore = new LinkedHashSet<>(orderable.size());
     for (Orderable o : orderable) {
       String id = o.getOrderId();
       if (StringUtil.isNotEmpty(id)) map.put(id, o);
       LoadingOrder order = o.getOrder();
+      if (order == ANY) continue;
+
       cachedMap.put(o, order);
       if (order.myFirst) first.add(o);
       if (!order.myBefore.isEmpty()) hasBefore.add(o);
     }
 
+    if (cachedMap.isEmpty()) return;
+
     InboundSemiGraph<Orderable> graph = new InboundSemiGraph<Orderable>() {
       @NotNull
       @Override
       public Collection<Orderable> getNodes() {
-        List<Orderable> list = ContainerUtil.newArrayList(orderable);
+        List<Orderable> list = new ArrayList<>(orderable);
         Collections.reverse(list);
         return list;
       }
@@ -136,7 +143,7 @@ public class LoadingOrder {
       @NotNull
       @Override
       public Iterator<Orderable> getIn(Orderable n) {
-        LoadingOrder order = cachedMap.get(n);
+        LoadingOrder order = cachedMap.getOrDefault(n, ANY);
 
         Set<Orderable> predecessors = new LinkedHashSet<>();
         for (String id : order.myAfter) {
@@ -149,7 +156,7 @@ public class LoadingOrder {
         String id = n.getOrderId();
         if (StringUtil.isNotEmpty(id)) {
           for (Orderable o : hasBefore) {
-            LoadingOrder hisOrder = cachedMap.get(o);
+            LoadingOrder hisOrder = cachedMap.getOrDefault(o, ANY);
             if (hisOrder.myBefore.contains(id)) {
               predecessors.add(o);
             }
@@ -158,7 +165,7 @@ public class LoadingOrder {
 
         if (order.myLast) {
           for (Orderable o : orderable) {
-            LoadingOrder hisOrder = cachedMap.get(o);
+            LoadingOrder hisOrder = cachedMap.getOrDefault(o, ANY);
             if (!hisOrder.myLast) {
               predecessors.add(o);
             }

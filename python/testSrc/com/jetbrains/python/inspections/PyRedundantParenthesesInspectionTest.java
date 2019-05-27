@@ -92,4 +92,14 @@ public class PyRedundantParenthesesInspectionTest extends PyInspectionTestCase {
   public void testReturn() {
     runWithLanguageLevel(LanguageLevel.PYTHON35, this::doTest);
   }
+
+  // PY-33266
+  public void testNestedParentheses() {
+    doTest();
+  }
+
+  // PY-21530
+  public void testReferenceExpression() {
+    doTest();
+  }
 }

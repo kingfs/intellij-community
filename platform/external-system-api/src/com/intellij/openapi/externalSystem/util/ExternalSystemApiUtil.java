@@ -1,7 +1,8 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.externalSystem.util;
 
 import com.intellij.execution.rmi.RemoteUtil;
+import com.intellij.ide.highlighter.ArchiveFileType;
 import com.intellij.openapi.application.*;
 import com.intellij.openapi.externalSystem.ExternalSystemAutoImportAware;
 import com.intellij.openapi.externalSystem.ExternalSystemManager;
@@ -17,7 +18,6 @@ import com.intellij.openapi.externalSystem.settings.AbstractExternalSystemLocalS
 import com.intellij.openapi.externalSystem.settings.AbstractExternalSystemSettings;
 import com.intellij.openapi.externalSystem.settings.ExternalProjectSettings;
 import com.intellij.openapi.externalSystem.settings.ExternalSystemSettingsListener;
-import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.project.Project;
@@ -36,9 +36,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.*;
 import com.intellij.util.concurrency.EdtExecutorService;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.containers.ContainerUtilRt;
 import com.intellij.util.containers.MultiMap;
-import com.intellij.util.containers.Stack;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.Contract;
@@ -49,12 +47,12 @@ import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.*;
+import java.util.function.Consumer;
 
 import static com.intellij.util.PlatformUtils.*;
 
 /**
  * @author Denis Zhdanov
- * @since 4/1/13 1:31 PM
  */
 public class ExternalSystemApiUtil {
 
@@ -163,7 +161,7 @@ public class ExternalSystemApiUtil {
 
   @NotNull
   public static String getLocalFileSystemPath(@NotNull VirtualFile file) {
-    if (file.getFileType() == FileTypes.ARCHIVE) {
+    if (file.getFileType() == ArchiveFileType.INSTANCE) {
       final VirtualFile jar = JarFileSystem.getInstance().getVirtualFileForJar(file);
       if (jar != null) {
         return jar.getPath();
@@ -189,7 +187,7 @@ public class ExternalSystemApiUtil {
 
   public static MultiMap<Key<?>, DataNode<?>> recursiveGroup(@NotNull Collection<DataNode<?>> nodes) {
     MultiMap<Key<?>, DataNode<?>> result = new ContainerUtil.KeyOrderedMultiMap<>();
-    Queue<Collection<DataNode<?>>> queue = ContainerUtil.newLinkedList();
+    Queue<Collection<DataNode<?>>> queue = new LinkedList<>();
     queue.add(nodes);
     while (!queue.isEmpty()) {
       Collection<DataNode<?>> _nodes = queue.remove();
@@ -225,7 +223,7 @@ public class ExternalSystemApiUtil {
         continue;
       }
       if (result == null) {
-        result = ContainerUtilRt.newArrayList();
+        result = new ArrayList<>();
       }
       result.add((DataNode<T>)child);
     }
@@ -276,16 +274,9 @@ public class ExternalSystemApiUtil {
     return getChildren(parent, key);
   }
 
-  public static void visit(@Nullable DataNode node, @NotNull Consumer<? super DataNode<?>> consumer) {
-    if (node == null) return;
-
-    Stack<DataNode> toProcess = ContainerUtil.newStack(node);
-    while (!toProcess.isEmpty()) {
-      DataNode<?> node0 = toProcess.pop();
-      consumer.consume(node0);
-      for (DataNode<?> child : node0.getChildren()) {
-        toProcess.push(child);
-      }
+  public static void visit(@Nullable DataNode<?> originalNode, @NotNull Consumer<? super DataNode<?>> consumer) {
+    if (originalNode != null) {
+      originalNode.visit(consumer);
     }
   }
 
@@ -358,7 +349,9 @@ public class ExternalSystemApiUtil {
   }
 
   public static void executeProjectChangeAction(boolean synchronous, @NotNull final DisposeAwareProjectChange task) {
-    TransactionGuard.getInstance().assertWriteSafeContext(ModalityState.defaultModalityState());
+    if (!ApplicationManager.getApplication().isDispatchThread()) {
+      TransactionGuard.getInstance().assertWriteSafeContext(ModalityState.defaultModalityState());
+    }
     executeOnEdt(synchronous, () -> ApplicationManager.getApplication().runWriteAction(task));
   }
 
@@ -715,6 +708,41 @@ public class ExternalSystemApiUtil {
 
     findAll(moduleDataNode, ProjectKeys.TASK).stream().map(DataNode::getData).forEach(tasks::add);
     return tasks;
+  }
+
+  @ApiStatus.Experimental
+  @Nullable
+  public static DataNode<ModuleData> findModuleData(@NotNull Module module,
+                                                    @NotNull ProjectSystemId systemId) {
+    String externalProjectPath = getExternalProjectPath(module);
+    if (externalProjectPath == null) return null;
+    Project project = module.getProject();
+    DataNode<ProjectData> projectNode = findProjectData(project, systemId, externalProjectPath);
+    if (projectNode == null) return null;
+    return find(projectNode, ProjectKeys.MODULE, node -> externalProjectPath.equals(node.getData().getLinkedExternalProjectPath()));
+  }
+
+  @ApiStatus.Experimental
+  @Nullable
+  public static DataNode<ProjectData> findProjectData(@NotNull Project project,
+                                                      @NotNull ProjectSystemId systemId,
+                                                      @NotNull String projectPath) {
+    ExternalProjectInfo projectInfo = findProjectInfo(project, systemId, projectPath);
+    if (projectInfo == null) return null;
+    return projectInfo.getExternalProjectStructure();
+  }
+
+  @ApiStatus.Experimental
+  @Nullable
+  public static ExternalProjectInfo findProjectInfo(@NotNull Project project,
+                                                    @NotNull ProjectSystemId systemId,
+                                                    @NotNull String projectPath) {
+    AbstractExternalSystemSettings settings = getSettings(project, systemId);
+    ExternalProjectSettings linkedProjectSettings = settings.getLinkedProjectSettings(projectPath);
+    if (linkedProjectSettings == null) return null;
+    return ProjectDataManager.getInstance().getExternalProjectsData(project, systemId).stream()
+      .filter(info -> FileUtil.pathsEqual(linkedProjectSettings.getExternalProjectPath(), info.getExternalProjectPath()))
+      .findFirst().orElse(null);
   }
 
   /**

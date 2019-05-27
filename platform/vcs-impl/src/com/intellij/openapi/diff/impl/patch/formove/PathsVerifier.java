@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.diff.impl.patch.formove;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -22,6 +22,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.vcsUtil.VcsUtil;
 import org.jetbrains.annotations.CalledInAwt;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -95,13 +96,16 @@ public class PathsVerifier {
     for (FilePath path : myBeforePaths) {
       final FilePath parent = path.getParentPath();
       if (parent != null) {
-        affected.add(parent.getVirtualFile());
+        VirtualFile parentFile = parent.getVirtualFile();
+        if (parentFile != null) {
+          affected.add(parentFile);
+        }
       }
     }
     return affected;
   }
 
-  private static void addAllFilePath(final Collection<VirtualFile> files, final Collection<FilePath> paths) {
+  private static void addAllFilePath(final Collection<? extends VirtualFile> files, final Collection<? super FilePath> paths) {
     for (VirtualFile file : files) {
       paths.add(VcsUtil.getFilePath(file));
     }
@@ -109,7 +113,7 @@ public class PathsVerifier {
 
   @CalledInAwt
   public List<FilePatch> nonWriteActionPreCheck() {
-    List<FilePatch> failedToApply = ContainerUtil.newArrayList();
+    List<FilePatch> failedToApply = new ArrayList<>();
     myDelayedPrecheckContext = new DelayedPrecheckContext(myProject);
     for (FilePatch patch : myPatches) {
       final CheckPath checker = getChecker(patch);
@@ -130,7 +134,7 @@ public class PathsVerifier {
   }
 
   public List<FilePatch> execute() {
-    List<FilePatch> failedPatches = ContainerUtil.newArrayList();
+    List<FilePatch> failedPatches = new ArrayList<>();
     try {
       final List<CheckPath> checkers = new ArrayList<>(myPatches.size());
       for (FilePatch patch : myPatches) {
@@ -310,7 +314,6 @@ public class PathsVerifier {
       if (! checkExistsAndValid(beforeFile, myBeforeName)) {
         return false;
       }
-      assert beforeFile != null; // if beforeFile is null then checkExist returned false;
       myMovedFiles.put(beforeFile, new MovedFileData(afterFileParent, beforeFile, myPatch.getAfterFileName()));
       addPatch(myPatch, beforeFile);
       return true;
@@ -348,7 +351,8 @@ public class PathsVerifier {
                                         DelayedPrecheckContext context);
     protected abstract boolean check() throws IOException;
 
-    protected boolean checkExistsAndValid(final VirtualFile file, final String name) {
+    @Contract("null, _ -> false")
+    protected boolean checkExistsAndValid(@Nullable VirtualFile file, final String name) {
       if (file == null) {
         setErrorMessage(fileNotFoundMessage(name));
         return false;
@@ -356,10 +360,10 @@ public class PathsVerifier {
       return checkModificationValid(file, name);
     }
 
-    protected boolean checkModificationValid(final VirtualFile file, final String name) {
+    protected boolean checkModificationValid(@NotNull VirtualFile file, final String name) {
       if (ApplicationManager.getApplication().isUnitTestMode() && myIgnoreContentRootsCheck) return true;
       // security check to avoid overwriting system files with a patch
-      if (file == null || !inContent(file) || myVcsManager.getVcsRootFor(file) == null) {
+      if (!inContent(file) && myVcsManager.getVcsRootFor(file) == null) {
         setErrorMessage("File to patch found outside content root: " + name);
         return false;
       }
@@ -384,7 +388,7 @@ public class PathsVerifier {
     }
   }
 
-  private void addPatch(final FilePatch patch, final VirtualFile file) {
+  private void addPatch(@NotNull FilePatch patch, @NotNull VirtualFile file) {
     if (patch instanceof TextFilePatch) {
       myTextPatches.add(new PatchAndFile(file, ApplyFilePatchFactory.create((TextFilePatch)patch)));
     }
@@ -504,6 +508,7 @@ public class PathsVerifier {
       VirtualFile nextChild = child.findChild(piece);
       if (nextChild == null) {
         nextChild = VfsUtil.createDirectories(child.getPath() + '/' + piece);
+        if (nextChild == null) throw new IOException("Can't create directory: " + piece);
         myCreatedDirectories.add(nextChild);
       }
       child = nextChild;

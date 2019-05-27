@@ -1,8 +1,7 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.debugger.impl;
 
 import com.intellij.debugger.DebuggerBundle;
-import com.intellij.debugger.DebuggerManagerEx;
 import com.intellij.debugger.engine.DebuggerManagerThreadImpl;
 import com.intellij.debugger.engine.events.DebuggerCommandImpl;
 import com.intellij.ide.actions.ActionsCollector;
@@ -14,21 +13,20 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.containers.JBIterable;
+import gnu.trove.THashMap;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class HotSwapManager {
   private final Map<DebuggerSession, Long> myTimeStamps = new HashMap<>();
   private static final String CLASS_EXTENSION = ".class";
   private final Project myProject;
 
-  public HotSwapManager(Project project, DebuggerManagerEx manager) {
+  public HotSwapManager(@NotNull Project project) {
     myProject = project;
-    manager.addDebuggerManagerListener(new DebuggerManagerListener() {
+    project.getMessageBus().connect().subscribe(DebuggerManagerListener.TOPIC, new DebuggerManagerListener() {
       @Override
       public void sessionCreated(DebuggerSession session) {
         myTimeStamps.put(session, Long.valueOf(System.currentTimeMillis()));
@@ -107,13 +105,13 @@ public class HotSwapManager {
     }
   }
 
-  public static Map<DebuggerSession, Map<String, HotSwapFile>> findModifiedClasses(List<? extends DebuggerSession> sessions, Map<String, List<String>> generatedPaths) {
+  public static Map<DebuggerSession, Map<String, HotSwapFile>> findModifiedClasses(List<? extends DebuggerSession> sessions, Map<String, Collection<String>> generatedPaths) {
     final Map<DebuggerSession, Map<String, HotSwapFile>> result = new HashMap<>();
     List<Pair<DebuggerSession, Long>> sessionWithStamps = new ArrayList<>();
     for (DebuggerSession session : sessions) {
       sessionWithStamps.add(new Pair<>(session, getInstance(session.getProject()).getTimeStamp(session)));
     }
-    for (Map.Entry<String, List<String>> entry : generatedPaths.entrySet()) {
+    for (Map.Entry<String, Collection<String>> entry : generatedPaths.entrySet()) {
       final File root = new File(entry.getKey());
       for (String relativePath : entry.getValue()) {
         if (SystemInfo.isFileSystemCaseSensitive? StringUtil.endsWith(relativePath, CLASS_EXTENSION) : StringUtil.endsWithIgnoreCase(relativePath, CLASS_EXTENSION)) {
@@ -134,28 +132,27 @@ public class HotSwapManager {
   }
 
 
-  public static Map<DebuggerSession, Map<String, HotSwapFile>> scanForModifiedClasses(final List<? extends DebuggerSession> sessions,
-                                                                                      final HotSwapProgress swapProgress) {
-    final Map<DebuggerSession, Map<String, HotSwapFile>> modifiedClasses = new HashMap<>();
-
+  @NotNull
+  public static Map<DebuggerSession, Map<String, HotSwapFile>> scanForModifiedClasses(@NotNull List<? extends DebuggerSession> sessions,
+                                                                                      @NotNull HotSwapProgress swapProgress) {
+    final Map<DebuggerSession, Map<String, HotSwapFile>> modifiedClasses = new THashMap<>();
     final MultiProcessCommand scanClassesCommand = new MultiProcessCommand();
-
     swapProgress.setCancelWorker(() -> scanClassesCommand.cancel());
-
-    for (final DebuggerSession debuggerSession : sessions) {
-      if (debuggerSession.isAttached()) {
-                 scanClassesCommand.addCommand(debuggerSession.getProcess(), new DebuggerCommandImpl() {
-                   @Override
-                   protected void action() {
-                     swapProgress.setDebuggerSession(debuggerSession);
-                     final Map<String, HotSwapFile> sessionClasses =
-                       getInstance(swapProgress.getProject()).scanForModifiedClasses(debuggerSession, swapProgress);
-                     if (!sessionClasses.isEmpty()) {
-                       modifiedClasses.put(debuggerSession, sessionClasses);
-                     }
-                   }
-        });
+    for (DebuggerSession debuggerSession : sessions) {
+      if (!debuggerSession.isAttached()) {
+        continue;
       }
+
+      scanClassesCommand.addCommand(debuggerSession.getProcess(), new DebuggerCommandImpl() {
+        @Override
+        protected void action() {
+          swapProgress.setDebuggerSession(debuggerSession);
+          Map<String, HotSwapFile> sessionClasses = getInstance(swapProgress.getProject()).scanForModifiedClasses(debuggerSession, swapProgress);
+          if (!sessionClasses.isEmpty()) {
+            modifiedClasses.put(debuggerSession, sessionClasses);
+          }
+        }
+      });
     }
 
     swapProgress.setTitle(DebuggerBundle.message("progress.hotswap.scanning.classes"));
@@ -165,17 +162,17 @@ public class HotSwapManager {
       for (DebuggerSession session : sessions) {
         session.setModifiedClassesScanRequired(true);
       }
-      return new HashMap<>();
+      return Collections.emptyMap();
     }
-    return modifiedClasses;
+    else {
+      return modifiedClasses;
+    }
   }
 
-  public static void reloadModifiedClasses(final Map<DebuggerSession, Map<String, HotSwapFile>> modifiedClasses, final HotSwapProgress reloadClassesProgress) {
-    final MultiProcessCommand reloadClassesCommand = new MultiProcessCommand();
-
+  public static void reloadModifiedClasses(@NotNull Map<DebuggerSession, Map<String, HotSwapFile>> modifiedClasses, @NotNull HotSwapProgress reloadClassesProgress) {
+    MultiProcessCommand reloadClassesCommand = new MultiProcessCommand();
     reloadClassesProgress.setCancelWorker(() -> reloadClassesCommand.cancel());
-
-    for (final DebuggerSession debuggerSession : modifiedClasses.keySet()) {
+    for (DebuggerSession debuggerSession : modifiedClasses.keySet()) {
       reloadClassesCommand.addCommand(debuggerSession.getProcess(), new DebuggerCommandImpl() {
         @Override
         protected void action() {

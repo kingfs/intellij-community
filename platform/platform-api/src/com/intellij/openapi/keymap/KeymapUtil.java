@@ -36,8 +36,9 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.*;
-import java.util.*;
 import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class KeymapUtil {
 
@@ -263,15 +264,7 @@ public class KeymapUtil {
     if (shortcuts.length == 0) {
       return "";
     }
-    StringBuilder buffer = new StringBuilder();
-    for (int i = 0; i < shortcuts.length; i++) {
-      Shortcut shortcut = shortcuts[i];
-      if (i > 0) {
-        buffer.append(' ');
-      }
-      buffer.append(getShortcutText(shortcut));
-    }
-    return buffer.toString();
+    return Arrays.stream(shortcuts).map(KeymapUtil::getShortcutText).collect(Collectors.joining(" "));
   }
 
   /**
@@ -602,5 +595,21 @@ public class KeymapUtil {
       }
     }
     return filtered.isEmpty() ? null : new CustomShortcutSet(filtered.toArray(Shortcut.EMPTY_ARRAY));
+  }
+
+  /**
+   * Check if {@link AnActionEvent} was called with keyboard shortcut
+   * and if so return string presentation for this shortcut
+   * @param event called event
+   * @return string presentation of shortcut if {@code event} was called with shortcut. In other cases null is returned
+   */
+  @Nullable
+  public static String getEventCallerKeystrokeText(@NotNull AnActionEvent event) {
+    if (event.getInputEvent() instanceof KeyEvent) {
+      KeyEvent ke = (KeyEvent)event.getInputEvent();
+      return getKeystrokeText(KeyStroke.getKeyStroke(ke.getKeyCode(), ke.getModifiers()));
+    }
+
+    return null;
   }
 }

@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2014 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.history;
 
 import com.intellij.dvcs.DvcsUtil;
@@ -40,9 +26,7 @@ import com.intellij.openapi.vcs.history.VcsFileRevision;
 import com.intellij.openapi.vcs.history.VcsHistorySession;
 import com.intellij.openapi.vcs.ui.VcsBalloonProblemNotifier;
 import com.intellij.ui.awt.RelativePoint;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.Consumer;
-import com.intellij.util.containers.ContainerUtil;
 import git4idea.GitFileRevision;
 import git4idea.GitRevisionNumber;
 import git4idea.GitUtil;
@@ -61,8 +45,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * {@link DiffFromHistoryHandler#showDiffForTwo(com.intellij.openapi.project.Project, com.intellij.openapi.vcs.FilePath, com.intellij.openapi.vcs.history.VcsFileRevision, com.intellij.openapi.vcs.history.VcsFileRevision) "Show Diff" for 2 revision} calls the common code.
- * {@link DiffFromHistoryHandler#showDiffForOne(com.intellij.openapi.actionSystem.AnActionEvent, com.intellij.openapi.vcs.FilePath, com.intellij.openapi.vcs.history.VcsFileRevision, com.intellij.openapi.vcs.history.VcsFileRevision) "Show diff" for 1 revision}
+ * {@link DiffFromHistoryHandler#showDiffForTwo(Project, FilePath, VcsFileRevision, VcsFileRevision) "Show Diff" for 2 revision} calls the common code.
+ * {@link DiffFromHistoryHandler#showDiffForOne(AnActionEvent, Project, FilePath, VcsFileRevision, VcsFileRevision) "Show diff" for 1 revision}
  * behaves differently for merge commits: for them it shown a popup displaying the parents of the selected commit. Selecting a parent
  * from the popup shows the difference with this parent.
  * If an ordinary (not merge) revision with 1 parent, it is the same as usual: just compare with the parent;
@@ -105,13 +89,13 @@ public class GitDiffFromHistoryHandler extends BaseDiffFromHistoryHandler<GitFil
     String hash1 = rev1.getHash();
 
     if (rev2 == null) {
-      return ContainerUtil.newArrayList(GitChangeUtils.getDiffWithWorkingDir(myProject, repository.getRoot(), hash1,
-                                                                             Collections.singleton(path), false));
+      return new ArrayList<>(GitChangeUtils.getDiffWithWorkingDir(myProject, repository.getRoot(), hash1,
+                                                                  Collections.singleton(path), false));
     }
 
     String hash2 = rev2.getHash();
-    return ContainerUtil.newArrayList(GitChangeUtils.getDiff(myProject, repository.getRoot(), hash1, hash2,
-                                                             Collections.singletonList(path)));
+    return new ArrayList<>(GitChangeUtils.getDiff(myProject, repository.getRoot(), hash1, hash2,
+                                                  Collections.singletonList(path)));
   }
 
   @NotNull
@@ -119,7 +103,7 @@ public class GitDiffFromHistoryHandler extends BaseDiffFromHistoryHandler<GitFil
   protected List<Change> getAffectedChanges(@NotNull FilePath path, @NotNull GitFileRevision rev) throws VcsException {
     GitRepository repository = getRepository(path);
 
-    return ContainerUtil.newArrayList(
+    return new ArrayList<>(
       GitChangeUtils.getRevisionChanges(repository.getProject(), repository.getRoot(), rev.getHash(), false, true, true).getChanges());
   }
 
@@ -144,7 +128,7 @@ public class GitDiffFromHistoryHandler extends BaseDiffFromHistoryHandler<GitFil
       if (!info.wasFileTouched()) {
         String message = String.format("There were no changes in %s in this merge commit, besides those which were made in both branches",
                                        filePath.getName());
-        VcsBalloonProblemNotifier.showOverVersionControlView(GitDiffFromHistoryHandler.this.myProject, message, MessageType.INFO);
+        VcsBalloonProblemNotifier.showOverVersionControlView(this.myProject, message, MessageType.INFO);
       }
       showPopup(event, rev, filePath, info.getParents());
     });
@@ -281,7 +265,7 @@ public class GitDiffFromHistoryHandler extends BaseDiffFromHistoryHandler<GitFil
     for (GitFileRevision parent : parents) {
       actions.add(createParentAction(rev, filePath, parent));
     }
-    return new DefaultActionGroup(ArrayUtil.toObjectArray(actions, AnAction.class));
+    return new DefaultActionGroup(actions.toArray(AnAction.EMPTY_ARRAY));
   }
 
   @NotNull

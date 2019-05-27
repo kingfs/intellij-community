@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.codeInsight;
 
@@ -10,7 +10,6 @@ import com.intellij.ide.util.EditSourceUtil;
 import com.intellij.lang.Language;
 import com.intellij.lang.LanguageExtension;
 import com.intellij.navigation.NavigationItem;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.editor.Document;
@@ -31,7 +30,6 @@ import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.util.BitUtil;
 import com.intellij.util.Consumer;
 import com.intellij.util.ThreeState;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -117,12 +115,23 @@ public class TargetElementUtil extends TargetElementUtilBase {
     PsiReference ref = file.findReferenceAt(adjustOffset(file, document, offset));
     if (ref == null) return null;
     int elementOffset = ref.getElement().getTextRange().getStartOffset();
-    if (ref.getRangeInElement().shiftRight(elementOffset).containsOffset(offset)) {
-      return ref;
+
+    for (TextRange range : ReferenceRange.getRanges(ref)) {
+      if (range.shiftRight(elementOffset).containsOffset(offset)) {
+        return ref;
+      }
     }
+
     return null;
   }
 
+  /**
+   * Attempts to adjust the {@code offset} in the {@code file} to point to an {@link #isIdentifierPart(PsiFile, CharSequence, int) identifier},
+   * single quote, double quote, closing bracket or parentheses by moving it back by a single character. Does nothing if there are no
+   * identifiers around, or the {@code offset} is already in one.
+   *
+   * @param file language source for the {@link #isIdentifierPart(com.intellij.psi.PsiFile, java.lang.CharSequence, int)}
+   */
   public static int adjustOffset(@Nullable PsiFile file, Document document, final int offset) {
     CharSequence text = document.getCharsSequence();
     int correctedOffset = offset;
@@ -143,6 +152,11 @@ public class TargetElementUtil extends TargetElementUtilBase {
     return offset;
   }
 
+  /**
+   * @return true iff character at the offset may be a part of an identifier.
+   * @see Character#isJavaIdentifierPart(char)
+   * @see TargetElementEvaluatorEx#isIdentifierPart(com.intellij.psi.PsiFile, java.lang.CharSequence, int)
+   */
   private static boolean isIdentifierPart(@Nullable PsiFile file, CharSequence text, int offset) {
     if (file != null) {
       TargetElementEvaluatorEx evaluator = getElementEvaluatorsEx(file.getLanguage());
@@ -166,8 +180,6 @@ public class TargetElementUtil extends TargetElementUtilBase {
    */
   @Nullable
   public static PsiElement findTargetElement(Editor editor, int flags) {
-    ApplicationManager.getApplication().assertIsDispatchThread();
-
     int offset = editor.getCaretModel().getOffset();
     final PsiElement result = getInstance().findTargetElement(editor, flags, offset);
     if (result != null) return result;
@@ -252,7 +264,7 @@ public class TargetElementUtil extends TargetElementUtilBase {
     return null;
   }
 
-  protected boolean isAcceptableReferencedElement(@Nullable PsiElement element, @Nullable PsiElement referenceOrReferencedElement) {
+  private boolean isAcceptableReferencedElement(@Nullable PsiElement element, @Nullable PsiElement referenceOrReferencedElement) {
     if (referenceOrReferencedElement == null || !referenceOrReferencedElement.isValid()) return false;
 
     TargetElementEvaluatorEx2 evaluator = element != null ? getElementEvaluatorsEx2(element.getLanguage()) : null;
@@ -287,7 +299,7 @@ public class TargetElementUtil extends TargetElementUtilBase {
   public PsiElement getNamedElement(@Nullable final PsiElement element, final int offsetInElement) {
     if (element == null) return null;
 
-    final List<PomTarget> targets = ContainerUtil.newArrayList();
+    final List<PomTarget> targets = new ArrayList<>();
     final Consumer<PomTarget> consumer = target -> {
       if (target instanceof PsiDeclaredTarget) {
         final PsiDeclaredTarget declaredTarget = (PsiDeclaredTarget)target;
@@ -361,7 +373,7 @@ public class TargetElementUtil extends TargetElementUtilBase {
     if (ref == null) return null;
 
     final Language language = ref.getElement().getLanguage();
-    TargetElementEvaluator evaluator = targetElementEvaluator.forLanguage(language);
+    TargetElementEvaluator evaluator = TARGET_ELEMENT_EVALUATOR.forLanguage(language);
     if (evaluator != null) {
       final PsiElement element = evaluator.getElementByReference(ref, flags);
       if (element != null) return element;
@@ -418,7 +430,7 @@ public class TargetElementUtil extends TargetElementUtilBase {
 
   @Override
   public boolean includeSelfInGotoImplementation(@NotNull final PsiElement element) {
-    TargetElementEvaluator evaluator = targetElementEvaluator.forLanguage(element.getLanguage());
+    TargetElementEvaluator evaluator = TARGET_ELEMENT_EVALUATOR.forLanguage(element.getLanguage());
     return evaluator == null || evaluator.includeSelfInGotoImplementation(element);
   }
 
@@ -438,16 +450,16 @@ public class TargetElementUtil extends TargetElementUtilBase {
     return PsiSearchHelper.getInstance(element.getProject()).getUseScope(file != null ? file : element);
   }
 
-  protected static final LanguageExtension<TargetElementEvaluator> targetElementEvaluator =
+  private static final LanguageExtension<TargetElementEvaluator> TARGET_ELEMENT_EVALUATOR =
     new LanguageExtension<>("com.intellij.targetElementEvaluator");
   @Nullable
   private static TargetElementEvaluatorEx getElementEvaluatorsEx(@NotNull Language language) {
-    TargetElementEvaluator result = targetElementEvaluator.forLanguage(language);
+    TargetElementEvaluator result = TARGET_ELEMENT_EVALUATOR.forLanguage(language);
     return result instanceof TargetElementEvaluatorEx ? (TargetElementEvaluatorEx)result : null;
   }
   @Nullable
   private static TargetElementEvaluatorEx2 getElementEvaluatorsEx2(@NotNull Language language) {
-    TargetElementEvaluator result = targetElementEvaluator.forLanguage(language);
+    TargetElementEvaluator result = TARGET_ELEMENT_EVALUATOR.forLanguage(language);
     return result instanceof TargetElementEvaluatorEx2 ? (TargetElementEvaluatorEx2)result : null;
   }
 }

@@ -26,6 +26,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
 import com.intellij.util.ArrayUtil;
 import org.jdom.Element;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -35,6 +36,7 @@ import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer
 /**
  * @author dsl
  */
+@ApiStatus.Internal
 public class ModuleOrderEntryImpl extends OrderEntryBaseImpl implements ModuleOrderEntry, WritableOrderEntry, ClonableOrderEntry {
   @NonNls public static final String ENTRY_TYPE = JpsModuleRootModelSerializer.MODULE_TYPE;
   @NonNls public static final String MODULE_NAME_ATTR = JpsModuleRootModelSerializer.MODULE_NAME_ATTRIBUTE;
@@ -85,11 +87,14 @@ public class ModuleOrderEntryImpl extends OrderEntryBaseImpl implements ModuleOr
     return getRootModel().getModule();
   }
 
+  @Override
   public boolean isProductionOnTestDependency() {
     return myProductionOnTestDependency;
   }
 
+  @Override
   public void setProductionOnTestDependency(boolean productionOnTestDependency) {
+    getRootModel().assertWritable();
     myProductionOnTestDependency = productionOnTestDependency;
   }
 
@@ -143,7 +148,7 @@ public class ModuleOrderEntryImpl extends OrderEntryBaseImpl implements ModuleOr
   }
 
   @Override
-  public void writeExternal(Element rootElement) throws WriteExternalException {
+  public void writeExternal(@NotNull Element rootElement) throws WriteExternalException {
     final Element element = OrderEntryFactory.createOrderEntryElement(ENTRY_TYPE);
     element.setAttribute(MODULE_NAME_ATTR, getModuleName());
     if (myExported) {
@@ -157,6 +162,7 @@ public class ModuleOrderEntryImpl extends OrderEntryBaseImpl implements ModuleOr
   }
 
   @Override
+  @NotNull
   public String getModuleName() {
     return myModulePointer.getModuleName();
   }

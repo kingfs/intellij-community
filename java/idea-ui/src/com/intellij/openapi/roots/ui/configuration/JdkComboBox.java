@@ -49,7 +49,6 @@ import static com.intellij.openapi.projectRoots.SimpleJavaSdkType.notSimpleJavaS
 
 /**
  * @author Eugene Zhuravlev
- * @since May 18, 2005
  */
 public class JdkComboBox extends ComboBoxWithWidePopup<JdkComboBox.JdkComboBoxItem> {
 
@@ -155,7 +154,7 @@ public class JdkComboBox extends ComboBoxWithWidePopup<JdkComboBox.JdkComboBoxIt
                                 @Nullable final Project project,
                                 final ProjectSdksModel jdksModel,
                                 final JdkComboBoxItem firstItem,
-                                @Nullable final Condition<Sdk> additionalSetup,
+                                @Nullable final Condition<? super Sdk> additionalSetup,
                                 final boolean moduleJdkSetup) {
     setSetupButton(setUpButton, project, jdksModel, firstItem, additionalSetup,
                    ProjectBundle.message("project.roots.set.up.jdk.title", moduleJdkSetup ? 1 : 2));

@@ -3,17 +3,16 @@ package com.intellij.util.xml.impl;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
-import com.intellij.openapi.util.RecursionGuard;
 import com.intellij.openapi.util.RecursionManager;
 import com.intellij.psi.xml.XmlFile;
 import com.intellij.reference.SoftReference;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.Interner;
 import com.intellij.util.containers.WeakInterner;
 import com.intellij.util.xml.DomElement;
 import com.intellij.util.xml.GenericDomValue;
-import com.intellij.util.xml.JavaMethod;
 import com.intellij.util.xml.reflect.*;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
@@ -29,8 +28,7 @@ import java.util.Set;
  * @author peter
  */
 public class DynamicGenericInfo extends DomGenericInfoEx {
-  private static final Key<SoftReference<WeakInterner<ChildrenDescriptionsHolder>>> HOLDERS_CACHE = Key.create("DOM_CHILDREN_HOLDERS_CACHE");
-  private static final RecursionGuard ourGuard = RecursionManager.createGuard("dynamicGenericInfo");
+  private static final Key<SoftReference<Interner<ChildrenDescriptionsHolder>>> HOLDERS_CACHE = Key.create("DOM_CHILDREN_HOLDERS_CACHE");
   private final StaticGenericInfo myStaticGenericInfo;
   @NotNull private final DomInvocationHandler myInvocationHandler;
   private volatile boolean myInitialized;
@@ -49,18 +47,13 @@ public class DynamicGenericInfo extends DomGenericInfoEx {
   }
 
   @Override
-  public Invocation createInvocation(final JavaMethod method) {
-    return myStaticGenericInfo.createInvocation(method);
-  }
-
-  @Override
   public final boolean checkInitialized() {
     if (myInitialized) return true;
     myStaticGenericInfo.buildMethodMaps();
 
     if (!myInvocationHandler.exists()) return true;
 
-    return ourGuard.doPreventingRecursion(myInvocationHandler, false, () -> {
+    return RecursionManager.doPreventingRecursion(myInvocationHandler, false, () -> {
       DomExtensionsRegistrarImpl registrar = runDomExtenders();
 
       synchronized (myInvocationHandler) {
@@ -114,8 +107,8 @@ public class DynamicGenericInfo extends DomGenericInfoEx {
   }
 
   private static <T extends DomChildDescriptionImpl> ChildrenDescriptionsHolder<T> internChildrenHolder(XmlFile file, ChildrenDescriptionsHolder<T> holder) {
-    SoftReference<WeakInterner<ChildrenDescriptionsHolder>> ref = file.getUserData(HOLDERS_CACHE);
-    WeakInterner<ChildrenDescriptionsHolder> cache = SoftReference.dereference(ref);
+    SoftReference<Interner<ChildrenDescriptionsHolder>> ref = file.getUserData(HOLDERS_CACHE);
+    Interner<ChildrenDescriptionsHolder> cache = SoftReference.dereference(ref);
     if (cache == null) {
       cache = new WeakInterner<>();
       file.putUserData(HOLDERS_CACHE, new SoftReference<>(cache));

@@ -16,6 +16,7 @@
 package com.intellij.refactoring.anonymousToInner;
 
 import com.intellij.codeInsight.ChangeContextUtil;
+import com.intellij.codeInspection.RemoveRedundantTypeArgumentsUtil;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.application.ApplicationManager;
@@ -36,6 +37,8 @@ import com.intellij.refactoring.HelpID;
 import com.intellij.refactoring.RefactoringActionHandler;
 import com.intellij.refactoring.RefactoringBundle;
 import com.intellij.refactoring.util.CommonRefactoringUtil;
+import com.intellij.refactoring.util.RefactoringChangeUtil;
+import com.intellij.refactoring.util.RefactoringUtil;
 import com.intellij.refactoring.util.classMembers.ElementNeedsThis;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
@@ -58,7 +61,7 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
   private PsiClass myTargetClass;
   protected String myNewClassName;
 
-  private VariableInfo[] myVariableInfos;
+  protected VariableInfo[] myVariableInfos;
   protected boolean myMakeStatic;
   private final Set<PsiTypeParameter> myTypeParametersToCreate = new LinkedHashSet<>();
 
@@ -175,13 +178,14 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
 
   private void doRefactoring() throws IncorrectOperationException {
     calculateTypeParametersToCreate();
-    PsiClass aClass = createClass(myNewClassName);
-    myTargetClass.add(aClass);
-
+    ChangeContextUtil.encodeContextInfo(myAnonClass, false);
+    PsiClass innerClass = (PsiClass)myTargetClass.add(createClass(myNewClassName));
+    ChangeContextUtil.decodeContextInfo(innerClass, myTargetClass, RefactoringChangeUtil.createThisExpression(myTargetClass.getManager(), myTargetClass));
+    
     PsiNewExpression newExpr = (PsiNewExpression) myAnonClass.getParent();
     @NonNls StringBuilder buf = new StringBuilder();
     buf.append("new ");
-    buf.append(aClass.getName());
+    buf.append(innerClass.getName());
     if (!myTypeParametersToCreate.isEmpty()) {
       buf.append("<");
       int idx = 0;
@@ -210,7 +214,7 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
       (PsiNewExpression)JavaPsiFacade.getElementFactory(myManager.getProject()).createExpressionFromText(buf.toString(), null);
     newClassExpression = (PsiNewExpression)newExpr.replace(newClassExpression);
     if (PsiDiamondTypeUtil.canCollapseToDiamond(newClassExpression, newClassExpression, newClassExpression.getType())) {
-      PsiDiamondTypeUtil.replaceExplicitWithDiamond(newClassExpression.getClassOrAnonymousClassReference().getParameterList());
+      RemoveRedundantTypeArgumentsUtil.replaceExplicitWithDiamond(newClassExpression.getClassOrAnonymousClassReference().getParameterList());
     }
   }
 
@@ -586,7 +590,8 @@ public class AnonymousToInnerHandler implements RefactoringActionHandler {
         final PsiElement resolved = reference.resolve();
         if (resolved instanceof PsiTypeParameter) {
           final PsiTypeParameterListOwner owner = ((PsiTypeParameter)resolved).getOwner();
-          if (owner != null && !PsiTreeUtil.isAncestor(myAnonClass, owner, false)) {
+          if (owner != null && !PsiTreeUtil.isAncestor(myAnonClass, owner, false) && 
+              (RefactoringUtil.isInStaticContext(owner, myTargetClass) || myMakeStatic)) {
             myTypeParametersToCreate.add((PsiTypeParameter)resolved);
           }
         }

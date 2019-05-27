@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.find.impl;
 
 import com.intellij.find.FindBundle;
@@ -29,6 +29,7 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.util.text.TrigramBuilder;
 import com.intellij.openapi.vfs.*;
+import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.impl.cache.CacheManager;
@@ -46,6 +47,7 @@ import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.FileBasedIndex;
 import com.intellij.util.indexing.FileBasedIndexImpl;
 import com.intellij.util.ui.UIUtil;
+import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -74,7 +76,7 @@ class FindInProjectTask {
   private final Condition<VirtualFile> myFileMask;
   private final ProgressIndicator myProgress;
   @Nullable private final Module myModule;
-  private final Set<VirtualFile> myLargeFiles = Collections.synchronizedSet(ContainerUtil.newTroveSet());
+  private final Set<VirtualFile> myLargeFiles = Collections.synchronizedSet(new THashSet<>());
   private final Set<? extends VirtualFile> myFilesToScanInitially;
   private final AtomicLong myTotalFilesSize = new AtomicLong();
   private final String myStringToFindInIndices;
@@ -155,7 +157,7 @@ class FindInProjectTask {
 
   private static void logStats(@NotNull Collection<? extends VirtualFile> otherFiles, long time) {
     Map<String, Long> extensionToCount = otherFiles.stream()
-      .collect(Collectors.groupingBy(file -> StringUtil.notNullize(file.getExtension()).toLowerCase(Locale.ENGLISH), Collectors.counting()));
+      .collect(Collectors.groupingBy(file -> StringUtil.toLowerCase(StringUtil.notNullize(file.getExtension())), Collectors.counting()));
     String topExtensions = extensionToCount
       .entrySet().stream()
       .sorted(Map.Entry.comparingByValue(Comparator.reverseOrder()))
@@ -168,7 +170,7 @@ class FindInProjectTask {
              "Most frequent non-indexed file extensions: " + topExtensions);
   }
 
-  private void searchInFiles(@NotNull Collection<VirtualFile> virtualFiles,
+  private void searchInFiles(@NotNull Collection<? extends VirtualFile> virtualFiles,
                              @NotNull FindUsagesProcessPresentation processPresentation,
                              @NotNull final Processor<? super UsageInfo> consumer) {
     AtomicInteger occurrenceCount = new AtomicInteger();
@@ -255,7 +257,7 @@ class FindInProjectTask {
     final boolean hasTrigrams = hasTrigrams(myStringToFindInIndices);
 
     class EnumContentIterator implements ContentIterator {
-      private final Set<VirtualFile> myFiles = new LinkedHashSet<>();
+      private final Set<VirtualFile> myFiles = new CompactVirtualFileSet();
 
       @Override
       public boolean processFile(@NotNull final VirtualFile virtualFile) {
@@ -270,7 +272,7 @@ class FindInProjectTask {
             }
 
             if (skipIndexed && isCoveredByIndex(virtualFile) &&
-                (fileIndex.isInContent(virtualFile) || fileIndex.isInLibraryClasses(virtualFile) || fileIndex.isInLibrarySource(virtualFile))) {
+                (fileIndex.isInContent(virtualFile) || fileIndex.isInLibrary(virtualFile))) {
               return;
             }
 
@@ -385,7 +387,7 @@ class FindInProjectTask {
       return Collections.emptySet();
     }
 
-    final Set<VirtualFile> resultFiles = new LinkedHashSet<>();
+    final Set<VirtualFile> resultFiles = new CompactVirtualFileSet();
     for(VirtualFile file:myFilesToScanInitially) {
       if (myFileMask.value(file)) {
         resultFiles.add(file);
@@ -396,7 +398,7 @@ class FindInProjectTask {
                                                                               myProject);
 
     if (TrigramIndex.ENABLED) {
-      final Set<Integer> keys = ContainerUtil.newTroveSet();
+      final Set<Integer> keys = new THashSet<>();
       TrigramBuilder.processTrigrams(stringToFind, new TrigramBuilder.TrigramProcessor() {
         @Override
         public boolean execute(int value) {
@@ -443,8 +445,8 @@ class FindInProjectTask {
   private Pair.NonNull<PsiFile, VirtualFile> findFile(@NotNull final VirtualFile virtualFile) {
     PsiFile psiFile = myPsiManager.findFile(virtualFile);
     if (psiFile != null) {
-      PsiFile sourceFile = (PsiFile)psiFile.getNavigationElement();
-      if (sourceFile != null) psiFile = sourceFile;
+      PsiElement sourceFile = psiFile.getNavigationElement();
+      if (sourceFile instanceof PsiFile) psiFile = (PsiFile)sourceFile;
       if (psiFile.getFileType().isBinary()) {
         psiFile = null;
       }

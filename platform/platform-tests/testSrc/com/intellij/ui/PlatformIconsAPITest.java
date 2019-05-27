@@ -2,7 +2,7 @@
 package com.intellij.ui;
 
 import com.intellij.icons.AllIcons;
-import com.intellij.testFramework.PlatformTestCase;
+import junit.framework.TestCase;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,7 +11,7 @@ import java.util.TreeSet;
 /**
  * @author Konstantin Bulenkov
  */
-public class PlatformIconsAPITest extends PlatformTestCase {
+public class PlatformIconsAPITest extends TestCase {
 
   public void testCurrentAPI() {
     //todo[kb, tav] Check that icons added to AllIcons are also added to PUBLIC_API_ICONS. Add svg icons
@@ -585,8 +585,6 @@ public class PlatformIconsAPITest extends PlatformTestCase {
     "/icon_128.png",
     "/icon_CE.png",
     "/icon_CE_128.png",
-    "/icon_CE_256.png",
-    "/icon_CE_512.png",
     "/icon_CE_64.png",
     "/icon_CEsmall.png",
     "/icon_small.png",

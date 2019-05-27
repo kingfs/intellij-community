@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.intention.impl.config;
 
 import com.intellij.codeInsight.CodeInsightWorkspaceSettings;
@@ -13,10 +13,7 @@ import com.intellij.codeInsight.daemon.quickFix.CreateFieldOrPropertyFix;
 import com.intellij.codeInsight.intention.IntentionAction;
 import com.intellij.codeInsight.intention.IntentionManager;
 import com.intellij.codeInsight.intention.QuickFixFactory;
-import com.intellij.codeInsight.intention.impl.CreateClassInPackageInModuleFix;
-import com.intellij.codeInsight.intention.impl.ReplaceAssignmentWithComparisonFix;
-import com.intellij.codeInsight.intention.impl.RunRefactoringAction;
-import com.intellij.codeInsight.intention.impl.SameErasureButDifferentMethodsFix;
+import com.intellij.codeInsight.intention.impl.*;
 import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.deadCode.UnusedDeclarationInspectionBase;
 import com.intellij.codeInspection.ex.EntryPointsManagerBase;
@@ -26,20 +23,18 @@ import com.intellij.diagnostic.AttachmentFactory;
 import com.intellij.lang.annotation.HighlightSeverity;
 import com.intellij.lang.java.request.CreateConstructorFromUsage;
 import com.intellij.lang.java.request.CreateMethodFromUsage;
-import com.intellij.lang.jvm.actions.JvmElementActionFactories;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.undo.UndoManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.module.Module;
-import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.TextRange;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.*;
+import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.tree.IElementType;
 import com.intellij.psi.util.ClassKind;
 import com.intellij.psi.util.InheritanceUtil;
@@ -47,6 +42,9 @@ import com.intellij.psi.util.PropertyMemberType;
 import com.intellij.refactoring.memberPushDown.JavaPushDownHandler;
 import com.intellij.util.DocumentUtil;
 import com.intellij.util.IncorrectOperationException;
+import com.siyeh.ig.fixes.CreateDefaultBranchFix;
+import com.siyeh.ig.fixes.CreateMissingSwitchBranchesFix;
+import org.jetbrains.annotations.ApiStatus.ScheduledForRemoval;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -205,7 +203,7 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   @NotNull
   @Override
   public IntentionAction createAddExceptionToCatchFix() {
-    return new AddExceptionToCatchFix();
+    return new AddExceptionToCatchFix(true);
   }
 
   @NotNull
@@ -230,12 +228,6 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   @Override
   public IntentionAction createAddExceptionToExistingCatch(@NotNull PsiElement element) {
     return new AddExceptionToExistingCatchFix(element);
-  }
-
-  @NotNull
-  @Override
-  public IntentionAction createGeneralizeCatchFix(@NotNull PsiElement element, @NotNull PsiClassType type) {
-    return new GeneralizeCatchFix(element, type);
   }
 
   @NotNull
@@ -491,6 +483,8 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
     return CreateMethodFromUsage.generateActions(call);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreateMethodFromUsageFix(@NotNull PsiMethodCallExpression call) {
@@ -503,24 +497,32 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
     return new CreateMethodFromMethodReferenceFix(methodReferenceExpression);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreateAbstractMethodFromUsageFix(@NotNull PsiMethodCallExpression call) {
     return new CreateAbstractMethodFromUsageFix(call);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreatePropertyFromUsageFix(@NotNull PsiMethodCallExpression call) {
     return new CreatePropertyFromUsageFix(call);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreateConstructorFromSuperFix(@NotNull PsiMethodCallExpression call) {
     return new CreateConstructorFromSuperFix(call);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreateConstructorFromThisFix(@NotNull PsiMethodCallExpression call) {
@@ -530,15 +532,11 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   @NotNull
   @Override
   public List<IntentionAction> createCreateConstructorFromCallExpressionFixes(@NotNull PsiMethodCallExpression call) {
-    if (JvmElementActionFactories.useInterlaguageActions()) {
-      return CreateConstructorFromUsage.generateConstructorActions(call);
-    }
-    return Arrays.asList(
-      createCreateConstructorFromSuperFix(call),
-      createCreateConstructorFromThisFix(call)
-    );
+    return CreateConstructorFromUsage.generateConstructorActions(call);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreateGetterSetterPropertyFromUsageFix(@NotNull PsiMethodCallExpression call) {
@@ -548,13 +546,13 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   @NotNull
   @Override
   public IntentionAction createStaticImportMethodFix(@NotNull PsiMethodCallExpression call) {
-    return new StaticImportMethodFix(call);
+    return new StaticImportMethodFix(call.getContainingFile(), call);
   }
 
   @NotNull
   @Override
   public IntentionAction createQualifyStaticMethodCallFix(@NotNull PsiMethodCallExpression call) {
-    return new QualifyStaticMethodCallFix(call);
+    return new QualifyStaticMethodCallFix(call.getContainingFile(), call);
   }
 
   @NotNull
@@ -563,6 +561,8 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
     return new ReplaceAddAllArrayToCollectionFix(call);
   }
 
+  @Deprecated
+  @ScheduledForRemoval(inVersion = "2019.3")
   @NotNull
   @Override
   public IntentionAction createCreateConstructorFromCallFix(@NotNull PsiConstructorCall call) {
@@ -572,10 +572,7 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   @NotNull
   @Override
   public List<IntentionAction> createCreateConstructorFromUsageFixes(@NotNull PsiConstructorCall call) {
-    if (JvmElementActionFactories.useInterlaguageActions()) {
-      return CreateConstructorFromUsage.generateConstructorActions(call);
-    }
-    return Collections.singletonList(createCreateConstructorFromCallFix(call));
+    return CreateConstructorFromUsage.generateConstructorActions(call);
   }
 
   @NotNull
@@ -586,8 +583,8 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
 
   @NotNull
   @Override
-  public IntentionAction createAddReturnFix(@NotNull PsiMethod method) {
-    return new AddReturnFix(method);
+  public IntentionAction createAddReturnFix(@NotNull PsiParameterListOwner methodOrLambda) {
+    return new AddReturnFix(methodOrLambda);
   }
 
   @NotNull
@@ -664,34 +661,32 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   @NotNull
   @Override
   public IntentionAction createOptimizeImportsFix(final boolean onTheFly) {
-    final OptimizeImportsFix fix = new OptimizeImportsFix();
-
     return new IntentionAction() {
       @NotNull
       @Override
       public String getText() {
-        return fix.getText();
+        return QuickFixBundle.message("optimize.imports.fix");
       }
 
       @NotNull
       @Override
       public String getFamilyName() {
-        return fix.getFamilyName();
+        return QuickFixBundle.message("optimize.imports.fix");
       }
 
       @Override
       public boolean isAvailable(@NotNull Project project, Editor editor, PsiFile file) {
-        return (!onTheFly || timeToOptimizeImports(file)) && fix.isAvailable(project, editor, file);
+        return (!onTheFly || timeToOptimizeImports(file)) && file instanceof PsiJavaFile && BaseIntentionAction.canModify(file);
       }
 
       @Override
       public void invoke(@NotNull final Project project, final Editor editor, final PsiFile file) throws IncorrectOperationException {
-        invokeOnTheFlyImportOptimizer(() -> fix.invoke(project, editor, file), file);
+        invokeOnTheFlyImportOptimizer(file);
       }
 
       @Override
       public boolean startInWriteAction() {
-        return fix.startInWriteAction();
+        return true;
       }
     };
   }
@@ -775,29 +770,22 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
     return OrderEntryFix.registerFixes(registrar, reference);
   }
 
-  private static void invokeOnTheFlyImportOptimizer(@NotNull final Runnable runnable, @NotNull final PsiFile file) {
+  private static void invokeOnTheFlyImportOptimizer(@NotNull PsiFile file) {
     final Project project = file.getProject();
     final Document document = PsiDocumentManager.getInstance(project).getDocument(file);
     if (document == null) return;
-    final long stamp = document.getModificationStamp();
-    DumbService.getInstance(file.getProject()).smartInvokeLater(() -> {
-      if (project.isDisposed() || document.getModificationStamp() != stamp) return;
-      //no need to optimize imports on the fly during undo/redo
-      final UndoManager undoManager = UndoManager.getInstance(project);
-      if (undoManager.isUndoInProgress() || undoManager.isRedoInProgress()) return;
-      PsiDocumentManager.getInstance(project).commitAllDocuments();
-      String beforeText = file.getText();
-      final long oldStamp = document.getModificationStamp();
-      DocumentUtil.writeInRunUndoTransparentAction(runnable);
-      if (oldStamp != document.getModificationStamp()) {
-        String afterText = file.getText();
-        if (Comparing.strEqual(beforeText, afterText)) {
-          LOG.error("Import optimizer hasn't optimized any imports",
-                    new Throwable(file.getViewProvider().getVirtualFile().getPath()),
-                    AttachmentFactory.createAttachment(file.getViewProvider().getVirtualFile()));
-        }
+
+    String beforeText = file.getText();
+    long oldStamp = document.getModificationStamp();
+    DocumentUtil.writeInRunUndoTransparentAction(() -> JavaCodeStyleManager.getInstance(project).optimizeImports(file));
+    if (oldStamp != document.getModificationStamp()) {
+      String afterText = file.getText();
+      if (Comparing.strEqual(beforeText, afterText)) {
+        LOG.error("Import optimizer hasn't optimized any imports",
+                  new Throwable(file.getViewProvider().getVirtualFile().getPath()),
+                  AttachmentFactory.createAttachment(file.getViewProvider().getVirtualFile()));
       }
-    });
+    }
   }
 
   @NotNull
@@ -865,6 +853,7 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
     // ignore unresolved imports errors
     PsiImportList importList = ((PsiJavaFile)file).getImportList();
     final TextRange importsRange = importList == null ? TextRange.EMPTY_RANGE : importList.getTextRange();
+    //noinspection UnnecessaryLocalVariable
     boolean hasErrorsExceptUnresolvedImports = !DaemonCodeAnalyzerEx
       .processHighlights(document, file.getProject(), HighlightSeverity.ERROR, 0, document.getTextLength(), error -> {
         if (error.type instanceof LocalInspectionsPass.InspectionHighlightInfoType) return true;
@@ -933,4 +922,14 @@ public class QuickFixFactoryImpl extends QuickFixFactory {
   public IntentionAction createSameErasureButDifferentMethodsFix(@NotNull PsiMethod method, @NotNull PsiMethod superMethod) {
     return new SameErasureButDifferentMethodsFix(method, superMethod);
   }
+  
+  @Override
+  public IntentionAction createAddMissingEnumBranchesFix(@NotNull PsiSwitchBlock switchBlock, @NotNull Set<String> missingCases) {
+    return new CreateMissingSwitchBranchesFix(switchBlock, missingCases);
+  } 
+  
+  @Override
+  public IntentionAction createAddSwitchDefaultFix(@NotNull PsiSwitchBlock switchBlock, String message) {
+    return new CreateDefaultBranchFix(switchBlock, message);
+  } 
 }

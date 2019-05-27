@@ -39,7 +39,7 @@ class OrderRootsEnumeratorImpl implements OrderRootsEnumerator {
   private final OrderRootType myRootType;
   private final NotNullFunction<? super OrderEntry, ? extends OrderRootType> myRootTypeProvider;
   private boolean myUsingCache;
-  private NotNullFunction<OrderEntry, VirtualFile[]> myCustomRootProvider;
+  private NotNullFunction<? super OrderEntry, VirtualFile[]> myCustomRootProvider;
   private boolean myWithoutSelfModuleOutput;
 
   OrderRootsEnumeratorImpl(@NotNull OrderEnumeratorBase orderEnumerator, @NotNull OrderRootType rootType) {
@@ -61,14 +61,8 @@ class OrderRootsEnumeratorImpl implements OrderRootsEnumerator {
     if (myUsingCache) {
       checkCanUseCache();
       final OrderRootsCache cache = myOrderEnumerator.getCache();
-      if (cache != null) {
-        final int flags = myOrderEnumerator.getFlags();
-        final VirtualFile[] cached = cache.getCachedRoots(myRootType, flags);
-        if (cached == null) {
-          return cache.setCachedRoots(myRootType, flags, computeRootsUrls()).getFiles();
-        }
-        return cached;
-      }
+      final int flags = myOrderEnumerator.getFlags();
+      return cache.getOrComputeRoots(myRootType, flags, this::computeRootsUrls);
     }
 
     return VfsUtilCore.toVirtualFileArray(computeRoots());
@@ -80,14 +74,8 @@ class OrderRootsEnumeratorImpl implements OrderRootsEnumerator {
     if (myUsingCache) {
       checkCanUseCache();
       final OrderRootsCache cache = myOrderEnumerator.getCache();
-      if (cache != null) {
-        final int flags = myOrderEnumerator.getFlags();
-        String[] cached = cache.getCachedUrls(myRootType, flags);
-        if (cached == null) {
-          return cache.setCachedRoots(myRootType, flags, computeRootsUrls()).getUrls();
-        }
-        return cached;
-      }
+      final int flags = myOrderEnumerator.getFlags();
+      return cache.getOrComputeUrls(myRootType, flags, this::computeRootsUrls);
     }
     return ArrayUtil.toStringArray(computeRootsUrls());
   }
@@ -113,8 +101,7 @@ class OrderRootsEnumeratorImpl implements OrderRootsEnumerator {
         final Module module = moduleOrderEntry.getModule();
         if (module != null) {
           ModuleRootModel rootModel = myOrderEnumerator.getRootModel(module);
-          boolean productionOnTests = orderEntry instanceof ModuleOrderEntryImpl
-                                      && ((ModuleOrderEntryImpl)orderEntry).isProductionOnTestDependency();
+          boolean productionOnTests = ((ModuleOrderEntry)orderEntry).isProductionOnTestDependency();
           boolean includeTests = !myOrderEnumerator.isProductionOnly()
                                  && OrderEnumeratorBase.shouldIncludeTestsFromDependentModulesToTestClasspath(customHandlers)
                                  || productionOnTests;
@@ -150,8 +137,7 @@ class OrderRootsEnumeratorImpl implements OrderRootsEnumerator {
         final Module module = moduleOrderEntry.getModule();
         if (module != null) {
           ModuleRootModel rootModel = myOrderEnumerator.getRootModel(module);
-          boolean productionOnTests = orderEntry instanceof ModuleOrderEntryImpl
-                                      && ((ModuleOrderEntryImpl)orderEntry).isProductionOnTestDependency();
+          boolean productionOnTests = ((ModuleOrderEntry)orderEntry).isProductionOnTestDependency();
           boolean includeTests = !myOrderEnumerator.isProductionOnly() && OrderEnumeratorBase
             .shouldIncludeTestsFromDependentModulesToTestClasspath(customHandlers)
                                  || productionOnTests;
@@ -198,7 +184,7 @@ class OrderRootsEnumeratorImpl implements OrderRootsEnumerator {
 
   @NotNull
   @Override
-  public OrderRootsEnumerator usingCustomRootProvider(@NotNull NotNullFunction<OrderEntry, VirtualFile[]> provider) {
+  public OrderRootsEnumerator usingCustomRootProvider(@NotNull NotNullFunction<? super OrderEntry, VirtualFile[]> provider) {
     myCustomRootProvider = provider;
     return this;
   }

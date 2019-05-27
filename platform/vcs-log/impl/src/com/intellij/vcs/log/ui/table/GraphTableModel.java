@@ -12,14 +12,15 @@ import com.intellij.vcs.log.data.CommitIdByStringCondition;
 import com.intellij.vcs.log.data.DataGetter;
 import com.intellij.vcs.log.data.RefsModel;
 import com.intellij.vcs.log.data.VcsLogData;
+import com.intellij.vcs.log.ui.frame.CommitPresentationUtil;
 import com.intellij.vcs.log.ui.render.GraphCommitCell;
-import com.intellij.vcs.log.util.VcsUserUtil;
 import com.intellij.vcs.log.visible.VisiblePack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.table.AbstractTableModel;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -28,8 +29,10 @@ public class GraphTableModel extends AbstractTableModel {
   public static final int COMMIT_COLUMN = 1;
   public static final int AUTHOR_COLUMN = 2;
   public static final int DATE_COLUMN = 3;
-  private static final int COLUMN_COUNT = DATE_COLUMN + 1;
-  private static final String[] COLUMN_NAMES = {"", "Subject", "Author", "Date"};
+  public static final int HASH_COLUMN = 4;
+  private static final int COLUMN_COUNT = HASH_COLUMN + 1;
+  public static final String[] COLUMN_NAMES = {"", "Subject", "Author", "Date", "Hash"};
+  public static final int[] DYNAMIC_COLUMNS = {AUTHOR_COLUMN, DATE_COLUMN, HASH_COLUMN};
 
   private static final int UP_PRELOAD_COUNT = 20;
   private static final int DOWN_PRELOAD_COUNT = 40;
@@ -127,8 +130,7 @@ public class GraphTableModel extends AbstractTableModel {
         return new GraphCommitCell(data.getSubject(), getRefsAtRow(rowIndex),
                                    myDataPack.getVisibleGraph().getRowInfo(rowIndex).getPrintElements());
       case AUTHOR_COLUMN:
-        String authorString = VcsUserUtil.getShortPresentation(data.getAuthor());
-        return authorString + (VcsUserUtil.isSamePerson(data.getAuthor(), data.getCommitter()) ? "" : "*");
+        return CommitPresentationUtil.getAuthorPresentation(data);
       case DATE_COLUMN:
         if (data.getAuthorTime() < 0) {
           return "";
@@ -136,6 +138,8 @@ public class GraphTableModel extends AbstractTableModel {
         else {
           return DateFormatUtil.formatDateTime(data.getAuthorTime());
         }
+      case HASH_COLUMN:
+        return data.getId().toShortString();
       default:
         throw new IllegalArgumentException("columnIndex is " + columnIndex + " > " + (getColumnCount() - 1));
     }
@@ -156,8 +160,8 @@ public class GraphTableModel extends AbstractTableModel {
       case COMMIT_COLUMN:
         return GraphCommitCell.class;
       case AUTHOR_COLUMN:
-        return String.class;
       case DATE_COLUMN:
+      case HASH_COLUMN:
         return String.class;
       default:
         throw new IllegalArgumentException("columnIndex is " + column + " > " + (getColumnCount() - 1));
@@ -182,18 +186,14 @@ public class GraphTableModel extends AbstractTableModel {
 
   @NotNull
   public VcsFullCommitDetails getFullDetails(int row) {
-    return getDetails(row, myLogData.getCommitDetailsGetter());
+    Integer id = getIdAtRow(row);
+    return myLogData.getCommitDetailsGetter().getCommitData(id, Collections.singleton(id));
   }
 
   @NotNull
   public VcsCommitMetadata getCommitMetadata(int row) {
-    return getDetails(row, myLogData.getMiniDetailsGetter());
-  }
-
-  @NotNull
-  private <T extends VcsShortCommitDetails> T getDetails(int row, @NotNull DataGetter<T> dataGetter) {
     Iterable<Integer> iterable = createRowsIterable(row, UP_PRELOAD_COUNT, DOWN_PRELOAD_COUNT, getRowCount());
-    return dataGetter.getCommitData(getIdAtRow(row), iterable);
+    return myLogData.getMiniDetailsGetter().getCommitData(getIdAtRow(row), iterable);
   }
 
   @NotNull

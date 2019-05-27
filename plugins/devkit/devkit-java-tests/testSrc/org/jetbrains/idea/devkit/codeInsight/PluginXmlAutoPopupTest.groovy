@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2016 JetBrains s.r.o.
+ * Copyright 2000-2019 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,12 @@
 package org.jetbrains.idea.devkit.codeInsight
 
 import com.intellij.codeInsight.completion.CompletionAutoPopupTestCase
+import groovy.transform.CompileStatic
 
 /**
  * @author peter
  */
+@CompileStatic
 class PluginXmlAutoPopupTest extends CompletionAutoPopupTestCase {
 
   void "test autopopup for class references"() {
@@ -32,8 +34,8 @@ class PluginXmlAutoPopupTest extends CompletionAutoPopupTestCase {
 </idea-plugin>
 '''
     type 'o'
-    assert lookup
-    assert myFixture.lookupElementStrings == ['FooFooFooFooFoo']
+    assertNotNull(lookup)
+    assertSameElements(myFixture.lookupElementStrings,['FooFooFooFooFoo'])
   }
 
   void "test no autopopup when only word completion is available"() {
@@ -45,7 +47,7 @@ class PluginXmlAutoPopupTest extends CompletionAutoPopupTestCase {
 </idea-plugin>
 '''
     type 'e'
-    assert !lookup
+    assertNull(lookup)
   }
 
 }

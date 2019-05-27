@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vfs.impl;
 
 import com.intellij.openapi.Disposable;
@@ -20,9 +20,7 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointer;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerListener;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
-import com.intellij.testFramework.PlatformTestCase;
-import com.intellij.testFramework.PlatformTestUtil;
-import com.intellij.testFramework.PsiTestUtil;
+import com.intellij.testFramework.*;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
@@ -32,6 +30,9 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+@RunFirst
+@SkipSlowTestLocally
+@SuppressWarnings("SuspiciousPackagePrivateAccess")
 public class VirtualFilePointerRootsTest extends PlatformTestCase {
   private final Disposable disposable = Disposer.newDisposable();
   private VirtualFilePointerManagerImpl myVirtualFilePointerManager;
@@ -52,6 +53,9 @@ public class VirtualFilePointerRootsTest extends PlatformTestCase {
       Disposer.dispose(disposable);
       assertEquals(numberOfPointersBefore, myVirtualFilePointerManager.numberOfPointers());
       assertEquals(numberOfListenersBefore, myVirtualFilePointerManager.numberOfListeners());
+    }
+    catch (Throwable e) {
+      addSuppressedException(e);
     }
     finally {
       myVirtualFilePointerManager = null;
@@ -89,7 +93,7 @@ public class VirtualFilePointerRootsTest extends PlatformTestCase {
     myVirtualFilePointerManager.shelveAllPointersIn(() -> {
       for (int i = 0; i < 100_000; i++) {
         myVirtualFilePointerManager.create(VfsUtilCore.pathToUrl("/a/b/c/d/" + i), disposable, listener);
-        events.add(new VFileCreateEvent(this, temp, "xxx" + i, false, true));
+        events.add(new VFileCreateEvent(this, temp, "xxx" + i, false, null, null, true, null));
       }
       PlatformTestUtil.startPerformanceTest("vfp update", 7_000, () -> {
         for (int i = 0; i < 100; i++) {

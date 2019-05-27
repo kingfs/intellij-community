@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.editor.impl;
 
 import com.intellij.lang.FileASTNode;
@@ -29,7 +29,6 @@ import com.intellij.psi.impl.PsiToDocumentSynchronizer;
 import com.intellij.testFramework.*;
 import com.intellij.util.CommonProcessors;
 import com.intellij.util.ObjectUtils;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ref.GCUtil;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.THashSet;
@@ -810,7 +809,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
   public void testRandomStressEdit_NoCommand() {
     final Random gen = new Random();
     int N_TRIES = Timings.adjustAccordingToMySpeed(7000, false);
-    System.out.println("N_TRIES = " + N_TRIES);
+    LOG.debug("N_TRIES = " + N_TRIES);
     DocumentEx document = null;
     final int N = 100;
     for (int tryn = 0; tryn < N_TRIES; tryn++) {
@@ -918,7 +917,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
 
   public void testRangeMarkersAreWeakReferenced_NoCommand() {
     final Document document = EditorFactory.getInstance().createDocument("[xxxxxxxxxxxxxx]");
-    Set<RangeMarker> markers = ContainerUtil.newHashSet();
+    Set<RangeMarker> markers = new HashSet<>();
     for (int i = 0; i < 10; i++) {
       markers.add(document.createRangeMarker(0, document.getTextLength()));
     }
@@ -1112,6 +1111,39 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     marker.dispose();
   }
 
+  public void testLazyRangeMarkersWithInvalidOffsetWhenNoDocumentCreatedMustInvalidateThemSelvesOnFirstOpportunity() {
+    psiFile = createFile("x.txt", "");
+
+    LazyRangeMarkerFactoryImpl factory = (LazyRangeMarkerFactoryImpl)LazyRangeMarkerFactory.getInstance(getProject());
+    VirtualFile virtualFile = psiFile.getVirtualFile();
+
+    assertEquals("", psiFile.getText());
+
+    RangeMarker marker = factory.createRangeMarker(virtualFile, 1 /* invalid offset */);
+
+    document = FileDocumentManager.getInstance().getDocument(virtualFile);
+    document.replaceString(0, 0, "\n\t\n");  // used to throw AssertionError from RangeMarkerTree.updateMarkersOnChange
+    assertEquals("\n\t\n", document.getText());
+    assertFalse(marker.isValid());
+  }
+
+  public void testLazyRangeMarkersWithInvalidOffsetWhenCachedDocumentAlreadyExistsMustRejectInvalidOffsetsRightAway() {
+    psiFile = createFile("x.txt", "");
+
+    LazyRangeMarkerFactoryImpl factory = (LazyRangeMarkerFactoryImpl)LazyRangeMarkerFactory.getInstance(getProject());
+    VirtualFile virtualFile = psiFile.getVirtualFile();
+    document = FileDocumentManager.getInstance().getDocument(virtualFile);
+
+    assertEquals("", psiFile.getText());
+
+    try {
+      factory.createRangeMarker(virtualFile, 1 /* invalid offset */);
+      fail("Must fail fast");
+    }
+    catch (IllegalArgumentException ignored) {
+    }
+  }
+
   public void testNonGreedyMarkersGrowOnAppendingReplace() {
     Document doc = new DocumentImpl("foo");
     RangeMarker marker = doc.createRangeMarker(0, 3);
@@ -1129,7 +1161,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
     AtomicReference<List<Integer>> minOffsets = new AtomicReference<>();
     AtomicInteger failPrinted = new AtomicInteger();
     String text = StringUtil.repeat("blah", 1000);
-    IntStream.range(0, 10_000).parallel().forEach(iter -> {
+    IntStream.range(0, 1_000).parallel().forEach(iter -> {
       DocumentEx doc = new DocumentImpl(text, true);
       List<Integer> offsets = new ArrayList<>();
 
@@ -1171,10 +1203,7 @@ public class RangeMarkerTest extends LightPlatformTestCase {
         throw e;
       }
     });
-    if (minOffsets.get() == null) {
-      System.out.println("Can't find anything, giving up");
-    }
-    else {
+    if (minOffsets.get() != null) {
       System.err.println("Moves and offsets ("+minOffsets.get().size()+"): " + minOffsets);
       fail();
     }
@@ -1309,9 +1338,10 @@ public class RangeMarkerTest extends LightPlatformTestCase {
       markers.add(marker);
     }
     PlatformTestUtil.startPerformanceTest(getTestName(false), 2000, ()->{
+      List<RangeMarker> overlaps = new ArrayList<>(10);
       for (int it=0;it<50;it++) {
         for (int i=1; i<doc.getTextLength()-1;i++) {
-          List<RangeMarker> overlaps = new ArrayList<>();
+          overlaps.clear();
           doc.processRangeMarkersOverlappingWith(i,i+1, rm->{
             overlaps.add(rm);
             return true;

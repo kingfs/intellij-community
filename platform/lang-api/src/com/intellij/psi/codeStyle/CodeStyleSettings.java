@@ -1,6 +1,7 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.codeStyle;
 
+import com.intellij.configurationStore.Property;
 import com.intellij.configurationStore.UnknownElementCollector;
 import com.intellij.configurationStore.UnknownElementWriter;
 import com.intellij.lang.Language;
@@ -53,8 +54,7 @@ import java.util.regex.PatternSyntaxException;
  * as well as the inheritance from {@code CommonCodeStyleSettings}, are left only for backwards compatibility and may be removed in the future.
  */
 @SuppressWarnings("deprecation")
-public class CodeStyleSettings extends LegacyCodeStyleSettings
-  implements Cloneable, JDOMExternalizable, ImportsLayoutSettings, CodeStyleConstraints {
+public class CodeStyleSettings extends LegacyCodeStyleSettings implements Cloneable, JDOMExternalizable, ImportsLayoutSettings {
   public static final int CURR_VERSION = 173;
 
   private static final Logger LOG = Logger.getInstance(CodeStyleSettings.class);
@@ -68,7 +68,9 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   @NonNls private static final String FILETYPE = "fileType";
   private CommonCodeStyleSettingsManager myCommonSettingsManager = new CommonCodeStyleSettingsManager(this);
 
-  private static CodeStyleSettings myDefaults;
+  private static class DefaultsHolder {
+    private static final CodeStyleSettings myDefaults = new CodeStyleSettings();
+  }
 
   private UnknownElementWriter myUnknownElementWriter = UnknownElementWriter.EMPTY;
 
@@ -77,6 +79,8 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   private final ExcludedFiles myExcludedFiles = new ExcludedFiles();
 
   private int myVersion = CURR_VERSION;
+
+  private final SimpleModificationTracker myModificationTracker = new SimpleModificationTracker();
 
   public CodeStyleSettings() {
     this(true);
@@ -166,7 +170,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
       myCustomSettings.clear();
 
       for (final CustomCodeStyleSettings settings : from.getCustomSettingsValues()) {
-        addCustomSettings((CustomCodeStyleSettings)settings.clone());
+        addCustomSettings(settings.copyWith(this));
       }
 
       FIELD_TYPE_TO_NAME.copyFrom(from.FIELD_TYPE_TO_NAME);
@@ -318,19 +322,6 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
     myRepeatAnnotations.addAll(repeatAnnotations);
   }
 
-  //----------------- FUNCTIONAL EXPRESSIONS -----
-
-  /** @deprecated Use JavaCodeStyleSettings.REPLACE_INSTANCE_OF */
-  @Deprecated
-  public boolean REPLACE_INSTANCEOF = false;
-  /** @deprecated Use JavaCodeStyleSettings.REPLACE_CAST */
-  @Deprecated
-  public boolean REPLACE_CAST = false;
-  /** @deprecated Use JavaCodeStyleSettings.REPLACE_NULL_CHECK */
-  @Deprecated
-  public boolean REPLACE_NULL_CHECK = true;
-
-
   //----------------- JAVA IMPORTS (deprecated, moved to JavaCodeStyleSettings) --------------------
 
   /** @deprecated Use JavaCodeStyleSettings.LAYOUT_STATIC_IMPORTS_SEPARATELY */
@@ -475,6 +466,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
    * @deprecated Use get/setRightMargin() methods instead.
    */
   @SuppressWarnings({"DeprecatedIsStillUsed", "MissingDeprecatedAnnotation"})
+  @Property(externalName = "max_line_length")
   public int RIGHT_MARGIN = 120;
   /**
    * <b>Do not use this field directly since it doesn't reflect a setting for a specific language which may
@@ -482,6 +474,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
    *
    * @see CommonCodeStyleSettings#WRAP_ON_TYPING
    */
+  @Property(externalName = "wrap_on_typing")
   public boolean WRAP_WHEN_TYPING_REACHES_RIGHT_MARGIN;
 
 // endregion
@@ -495,98 +488,11 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   public boolean ENABLE_JAVADOC_FORMATTING = true;
 
   /**
-   * Align parameter comments to longest parameter name.JD_ALIGN_PARAM_COMMENTS
-   * @deprecated Use JavaCodeStyleSettings.JD_ALIGN_PARAM_COMMENTS
-   */
-  @Deprecated
-  public boolean JD_ALIGN_PARAM_COMMENTS = true;
-
-  /**
-   * Align exception comments to longest exception name
-   * @deprecated Use JavaCodeStyleSettings.JD_ALIGN_EXCEPTION_COMMENTS
-   */
-  @Deprecated
-  public boolean JD_ALIGN_EXCEPTION_COMMENTS = true;
-
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_ADD_BLANK_AFTER_PARM_COMMENTS;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_ADD_BLANK_AFTER_RETURN;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_ADD_BLANK_AFTER_DESCRIPTION = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_P_AT_EMPTY_LINES = true;
-
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_KEEP_INVALID_TAGS = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_KEEP_EMPTY_LINES = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_DO_NOT_WRAP_ONE_LINE_COMMENTS;
-
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_USE_THROWS_NOT_EXCEPTION = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_KEEP_EMPTY_PARAMETER = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_KEEP_EMPTY_EXCEPTION = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.
-   */
-  @Deprecated
-  public boolean JD_KEEP_EMPTY_RETURN = true;
-
-
-  /**
    * @deprecated Use JavaCodeStyleSettings.JD_LEADING_ASTERISKS_ARE_ENABLED
    */
   @Deprecated
   public boolean JD_LEADING_ASTERISKS_ARE_ENABLED = true;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.JD_PRESERVE_LINE_FEEDS
-   */
-  @Deprecated
-  public boolean JD_PRESERVE_LINE_FEEDS;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.JD_PARAM_DESCRIPTION_ON_NEW_LINE
-   */
-  @Deprecated
-  public boolean JD_PARAM_DESCRIPTION_ON_NEW_LINE;
-  /**
-   * @deprecated Use JavaCodeStyleSettings.JD_INDENT_ON_CONTINUATION
-   */
-  @Deprecated
-  public boolean JD_INDENT_ON_CONTINUATION = false;
+
 
 // endregion
 
@@ -692,7 +598,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
    * @deprecated Use HtmlCodeStyleSettings
    */
   @Deprecated
-  public boolean HTML_ENFORCE_QUOTES = false;
+  public boolean HTML_ENFORCE_QUOTES;
   /**
    * @deprecated Use HtmlCodeStyleSettings
    */
@@ -906,7 +812,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   }
 
   @Override
-  @Nullable
+  @NotNull
   public IndentOptions getIndentOptions() {
     return OTHER_INDENT_OPTIONS;
   }
@@ -1025,9 +931,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   }
 
   private static boolean isFileFullyCoveredByRange(@NotNull PsiFile file, @Nullable TextRange formatRange) {
-    return
-      formatRange != null &&
-      file.getTextRange().equals(formatRange);
+    return formatRange != null && formatRange.equals(file.getTextRange());
   }
 
   private static void logIndentOptions(@NotNull PsiFile file,
@@ -1394,11 +1298,9 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
     return true;
   }
 
+  @NotNull
   public static CodeStyleSettings getDefaults() {
-    if (myDefaults == null) {
-      myDefaults = new CodeStyleSettings();
-    }
-    return myDefaults;
+    return DefaultsHolder.myDefaults;
   }
 
   private void migrateLegacySettings() {
@@ -1423,7 +1325,7 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   @SuppressWarnings("deprecation")
   public void resetDeprecatedFields() {
     CodeStyleSettings defaults = getDefaults();
-    ReflectionUtil.copyFields(this.getClass().getFields(), defaults, this, new DifferenceFilter<CodeStyleSettings>(this, defaults){
+    ReflectionUtil.copyFields(getClass().getFields(), defaults, this, new DifferenceFilter<CodeStyleSettings>(this, defaults){
       @Override
       public boolean isAccept(@NotNull Field field) {
         return field.getAnnotation(Deprecated.class) != null;
@@ -1487,4 +1389,9 @@ public class CodeStyleSettings extends LegacyCodeStyleSettings
   public ExcludedFiles getExcludedFiles() {
     return myExcludedFiles;
   }
+
+  public SimpleModificationTracker getModificationTracker() {
+    return myModificationTracker;
+  }
+
 }

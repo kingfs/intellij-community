@@ -19,6 +19,7 @@ import com.intellij.codeInspection.dataFlow.ContractValue;
 import com.intellij.codeInspection.dataFlow.JavaMethodContractUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.tree.IElementType;
+import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PropertyUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -180,7 +181,7 @@ public class SideEffectChecker {
 
     @Override
     public void visitNewExpression(@NotNull PsiNewExpression expression) {
-      if (!ExpressionUtils.isArrayCreationExpression(expression) && !isSideEffectFreeConstructor(expression)) {
+      if (!expression.isArrayCreation() && !isSideEffectFreeConstructor(expression)) {
         if (addSideEffect(expression)) return;
       }
       super.visitNewExpression(expression);
@@ -203,9 +204,10 @@ public class SideEffectChecker {
 
     @Override
     public void visitBreakStatement(PsiBreakStatement statement) {
-      PsiStatement exitedStatement = statement.findExitedStatement();
-      if (exitedStatement != null && PsiTreeUtil.isAncestor(myStartElement, exitedStatement, true)) return;
-      if (addSideEffect(statement)) return;
+      PsiElement exitedStatement = statement.findExitedElement();
+      if (exitedStatement == null || !PsiTreeUtil.isAncestor(myStartElement, exitedStatement, false)) {
+        if (addSideEffect(statement)) return;
+      }
       super.visitBreakStatement(statement);
     }
 
@@ -254,12 +256,24 @@ public class SideEffectChecker {
   public static boolean mayHaveExceptionalSideEffect(PsiMethod method) {
     String name = method.getName();
     if (name.startsWith("assert") || name.startsWith("check") || name.startsWith("require")) return true;
+    PsiClass aClass = method.getContainingClass();
+    if (InheritanceUtil.isInheritor(aClass, "org.assertj.core.api.Assert")) {
+      // See com.intellij.codeInsight.DefaultInferredAnnotationProvider#getHardcodedContractAnnotation
+      return true;
+    }
     return JavaMethodContractUtil.getMethodCallContracts(method, null).stream()
                                  .filter(mc -> mc.getConditions().stream().noneMatch(ContractValue::isBoundCheckingCondition))
                                  .anyMatch(mc -> mc.getReturnValue().isFail());
   }
 
   private static boolean isSideEffectFreeConstructor(@NotNull PsiNewExpression newExpression) {
+    PsiAnonymousClass anonymousClass = newExpression.getAnonymousClass();
+    if (anonymousClass != null && anonymousClass.getInitializers().length == 0) {
+      PsiClass baseClass = anonymousClass.getBaseClassType().resolve();
+      if (baseClass != null && baseClass.isInterface()) {
+        return true;
+      }
+    }
     PsiJavaCodeReferenceElement classReference = newExpression.getClassReference();
     PsiClass aClass = classReference == null ? null : (PsiClass)classReference.resolve();
     String qualifiedName = aClass == null ? null : aClass.getQualifiedName();

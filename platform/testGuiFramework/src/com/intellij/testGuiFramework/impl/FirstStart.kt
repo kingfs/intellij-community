@@ -5,16 +5,16 @@ import com.intellij.ide.gdpr.EndUserAgreement
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ConfigImportHelper
 import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.util.SystemInfo
 import com.intellij.testGuiFramework.fixtures.JDialogFixture
 import com.intellij.testGuiFramework.framework.Timeouts
 import com.intellij.testGuiFramework.impl.FirstStart.Utils.button
 import com.intellij.testGuiFramework.impl.FirstStart.Utils.dialog
 import com.intellij.testGuiFramework.impl.FirstStart.Utils.radioButton
 import com.intellij.testGuiFramework.impl.FirstStart.Utils.waitFrame
+import com.intellij.testGuiFramework.impl.GuiTestUtilKt.repeatUntil
 import com.intellij.testGuiFramework.impl.GuiTestUtilKt.silentWaitUntil
 import com.intellij.testGuiFramework.launcher.ide.IdeType
+import com.intellij.testGuiFramework.util.ScreenshotTaker
 import org.fest.swing.core.GenericTypeMatcher
 import org.fest.swing.core.Robot
 import org.fest.swing.core.SmartWaitRobot
@@ -42,8 +42,6 @@ abstract class FirstStart(val ideType: IdeType) {
 
   private val FIRST_START_ROBOT_THREAD = "First Start Robot Thread"
 
-  private val LOG = Logger.getInstance(this.javaClass.name)
-
   val myRobot: Robot
 
   private val robotThread: Thread = thread(start = false, name = FIRST_START_ROBOT_THREAD) {
@@ -53,26 +51,22 @@ abstract class FirstStart(val ideType: IdeType) {
     catch (e: Exception) {
       when (e) {
         is ComponentLookupException -> {
-          takeScreenshot(e)
+          ScreenshotTaker.takeScreenshotAndHierarchy("FirstStartFailed-ComponentLookupException")
         }
         is WaitTimedOutError -> {
-          takeScreenshot(e)
+          ScreenshotTaker.takeScreenshotAndHierarchy("FirstStartFailed-WaitTimedOutError")
           throw exceptionWithHierarchy(e)
         }
         else -> {
-          takeScreenshot(e)
+          ScreenshotTaker.takeScreenshotAndHierarchy("FirstStartFailed-${e::class.java.canonicalName}")
           throw e
         }
       }
     }
   }
 
-  fun takeScreenshot(e: Throwable) {
-    ScreenshotOnFailure.takeScreenshot("FirstStartFailed", e)
-  }
-
   private fun exceptionWithHierarchy(e: Throwable): Throwable {
-    return Exception("Hierarchy log: ${ScreenshotOnFailure.getHierarchy()}", e)
+    return Exception("Hierarchy log: ${ScreenshotTaker.getHierarchy()}", e)
   }
 
   // should be initialized before IDE has been started
@@ -85,7 +79,7 @@ abstract class FirstStart(val ideType: IdeType) {
 
   init {
     myRobot = SmartWaitRobot()
-    LOG.info("Starting separated thread: '$FIRST_START_ROBOT_THREAD' to complete initial installation")
+    println("Starting separated thread: '$FIRST_START_ROBOT_THREAD' to complete initial installation")
     robotThread.start()
   }
 
@@ -111,7 +105,7 @@ abstract class FirstStart(val ideType: IdeType) {
   fun Frame.close() = myRobot.close(this)
 
   fun findWelcomeFrame(seconds: Int = 5): Frame? {
-    LOG.info("Waiting for a Welcome Frame")
+    println("Waiting for a Welcome Frame")
     silentWaitUntil("Welcome Frame to show up", seconds) {
       Frame.getFrames().any { checkIsWelcomeFrame(it) }
     }
@@ -123,7 +117,7 @@ abstract class FirstStart(val ideType: IdeType) {
     return GuiTestUtilKt.withPauseWhenNull(timeout = Timeouts.defaultTimeout) {
       try {
         myRobot.finder().find {
-          it is JDialog && (it.title.contains("License Agreement") || it.title.contains("Privacy Policy"))
+          it is JDialog && (it.title.contains("License Agreement") || it.title.contains("Privacy Policy") || it.title.contains("User Agreement"))
         } as JDialog
       }
       catch (cle: ComponentLookupException) {
@@ -134,54 +128,50 @@ abstract class FirstStart(val ideType: IdeType) {
 
   open fun acceptAgreement() {
     if (!needToShowAgreement()) return
-    with(myRobot) {
-      try {
-        LOG.info("Waiting for License Agreement/Privacy Policy dialog")
-        findPrivacyPolicyDialogOrLicenseAgreement()
-        with(JDialogFixture(myRobot, findPrivacyPolicyDialogOrLicenseAgreement())) {
-          click()
-          while (!button("Accept").isEnabled) {
-            scrollDown()
-          }
-          LOG.info("Accept License Agreement/Privacy Policy dialog")
-          button("Accept").click()
-        }
-      }
-      catch (e: WaitTimedOutError) {
-        LOG.warn("'License Agreement/Privacy Policy dialog hasn't been shown. Check registry...")
+    try {
+      println("Waiting for License Agreement/Privacy Policy dialog")
+      findPrivacyPolicyDialogOrLicenseAgreement()
+      with(JDialogFixture(myRobot, findPrivacyPolicyDialogOrLicenseAgreement())) {
+        click()
+        checkboxContainingText("i confirm", true, Timeouts.noTimeout).select()
+        println("Accept License Agreement/Privacy Policy dialog")
+        button("Continue", Timeouts.seconds05).click()
       }
     }
-  }
-
-  private fun scrollDown() {
-    val amount: Int = if (SystemInfo.isMac) -100 else 100
-    myRobot.rotateMouseWheel(amount)
+    catch (e: WaitTimedOutError) {
+      println("'License Agreement/Privacy Policy dialog hasn't been shown. Check registry...")
+    }
   }
 
   open fun completeInstallation() {
     if (!needToShowCompleteInstallation()) return
     with(myRobot) {
-      val title = "Complete Installation"
-      LOG.info("Waiting for '$title' dialog")
-      dialog(title)
+      println("Waiting for 'import settings' dialog")
+      val dialogFixture = dialog {
+        it.startsWith("Import")
+      }
 
-      LOG.info("Click OK on 'Do not import settings'")
-      radioButton("Do not import settings").select()
-      button("OK").click()
+      println("Click OK on 'Do not import settings'")
+      dialogFixture.radioButton("Do not import settings").select()
+
+      repeatUntil(
+        { !dialogFixture.target().isShowing },
+        { dialogFixture.button("OK").click() }
+      )
     }
   }
 
   open fun acceptDataSharing() {
     with(myRobot) {
-      LOG.info("Accepting Data Sharing")
+      println("Accepting Data Sharing")
       val title = "Data Sharing"
       try {
         dialog(title, timeout = Timeouts.seconds05)
         button("Send Usage Statistics").click()
-        LOG.info("Data sharing accepted")
+        println("Data sharing accepted")
       }
       catch (e: WaitTimedOutError) {
-        LOG.info("Data sharing dialog hasn't been shown")
+        println("Data sharing dialog hasn't been shown")
         return
       }
     }
@@ -191,10 +181,10 @@ abstract class FirstStart(val ideType: IdeType) {
     if (!needToShowCustomizeWizard()) return
     with(myRobot) {
       val title = "Customize $ideName"
-      LOG.info("Waiting for '$title' dialog")
+      println("Waiting for '$title' dialog")
       dialog(title)
       val buttonText = "Skip Remaining and Set Defaults"
-      LOG.info("Click '$buttonText'")
+      println("Click '$buttonText'")
       button(buttonText).click()
     }
   }
@@ -202,20 +192,20 @@ abstract class FirstStart(val ideType: IdeType) {
   open fun evaluateLicense(ideName: String, robot: Robot) {
     with(robot) {
       val licenseActivationFrameTitle = "$ideName License Activation"
-      LOG.info("Waiting for '$licenseActivationFrameTitle' dialog")
+      println("Waiting for '$licenseActivationFrameTitle' dialog")
       try {
         waitFrame(licenseActivationFrameTitle) { it == licenseActivationFrameTitle }
         radioButton("Evaluate for free").select()
         val evaluateButton = button("Evaluate")
         GuiTestUtilKt.waitUntil("activate button will be enabled") { evaluateButton.isEnabled }
-        LOG.info("Click '${evaluateButton.text()}'")
+        println("Click '${evaluateButton.text()}'")
         evaluateButton.click()
 
         dialog(timeout = Timeouts.seconds10) { it.startsWith("License Agreement for") }
         button("Accept").click()
       }
       catch (waitTimedOutError: WaitTimedOutError) {
-        LOG.info("No License Activation dialog has been found")
+        println("No License Activation dialog has been found")
       }
     }
   }

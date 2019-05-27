@@ -1,3 +1,4 @@
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.changes.actions.migrate;
 
 import com.intellij.diff.DiffContentFactory;
@@ -16,7 +17,6 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.Consumer;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -66,16 +66,14 @@ public class MigrateToNewDiffUtil {
 
     com.intellij.openapi.diff.SimpleContent leftContent = (SimpleContent)request.getContents()[0];
     com.intellij.openapi.diff.SimpleContent rightContent = (SimpleContent)request.getContents()[2];
-    List<String> contents = ContainerUtil.list(leftContent.getText(), mergeVersion.getOriginalText(), rightContent.getText());
+    List<String> contents = Arrays.asList(leftContent.getText(), mergeVersion.getOriginalText(), rightContent.getText());
 
     Document document = mergeContent.getDocument();
 
     String windowTitle = request.getWindowTitle();
     List<String> titles = Arrays.asList(request.getContentTitles());
 
-    Consumer<MergeResult> callback = result -> {
-      request.setResult(result == MergeResult.CANCEL ? DialogWrapper.CANCEL_EXIT_CODE : DialogWrapper.OK_EXIT_CODE);
-    };
+    Consumer<MergeResult> callback = result -> request.setResult(result == MergeResult.CANCEL ? DialogWrapper.CANCEL_EXIT_CODE : DialogWrapper.OK_EXIT_CODE);
 
     return DiffRequestFactory.getInstance().createMergeRequest(request.getProject(), mergeContent.getContentType(), document, contents,
                                                                windowTitle, titles, callback);

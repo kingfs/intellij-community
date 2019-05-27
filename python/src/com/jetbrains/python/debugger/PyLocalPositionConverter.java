@@ -5,6 +5,7 @@ import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.JarFileSystem;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -54,9 +55,15 @@ public class PyLocalPositionConverter implements PyPositionConverter {
     }
   }
 
+  @NotNull
+  @Override
+  public PySourcePosition create(@NotNull String file, int line) {
+    return convertPythonToFrame(file, line);
+  }
+
   @Override
   @NotNull
-  final public PySourcePosition create(@NotNull final String filePath, final int line) {
+  public PySourcePosition convertPythonToFrame(@NotNull final String filePath, final int line) {
     File file = new File(filePath);
 
     if (file.exists()) {
@@ -67,9 +74,15 @@ public class PyLocalPositionConverter implements PyPositionConverter {
     }
   }
 
+  @NotNull
+  @Override
+  public PySourcePosition convertFrameToPython(@NotNull PySourcePosition position) {
+    return position; // frame and Python positions are the same for Python files
+  }
+
   @Override
   @NotNull
-  public final PySourcePosition convertToPython(@NotNull final XSourcePosition position) {
+  public PySourcePosition convertToPython(@NotNull final XSourcePosition position) {
     return convertToPython(convertFilePath(position.getFile().getPath()), convertLocalLineToRemote(position.getFile(), position.getLine()));
   }
 
@@ -156,14 +169,14 @@ public class PyLocalPositionConverter implements PyPositionConverter {
       if (ind != -1) break;
     }
     if (ind != -1) {
-      return file.substring(0, ind + 4).toLowerCase() + file.substring(ind + 4);
+      return StringUtil.toLowerCase(file.substring(0, ind + 4)) + file.substring(ind + 4);
     }
     else {
-      return file.toLowerCase();
+      return StringUtil.toLowerCase(file);
     }
   }
   @Nullable
-  protected static XSourcePosition createXSourcePosition(@Nullable VirtualFile vFile, int line) {
+  public static XSourcePosition createXSourcePosition(@Nullable VirtualFile vFile, int line) {
     if (vFile != null) {
       return XDebuggerUtil.getInstance().createPosition(vFile, convertRemoteLineToLocal(vFile, line));
     }

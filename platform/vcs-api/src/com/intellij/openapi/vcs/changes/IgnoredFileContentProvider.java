@@ -20,4 +20,13 @@ public interface IgnoredFileContentProvider {
 
   @NotNull
   String buildIgnoreFileContent(@NotNull VirtualFile ignoreFileRoot, @NotNull IgnoredFileProvider[] ignoredFileProviders);
+
+  @NotNull
+  String buildUnignoreContent(@NotNull String ignorePattern);
+
+  @NotNull
+  String buildIgnoreEntryContent(@NotNull VirtualFile ignoreFileRoot, @NotNull IgnoredFileDescriptor ignoredFileDescriptor);
+
+  @NotNull
+  String buildIgnoreGroupDescription(@NotNull IgnoredFileProvider ignoredFileProvider);
 }

@@ -18,7 +18,6 @@ package com.intellij.task.impl;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.task.ModuleFilesBuildTask;
-import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.Arrays;
@@ -26,7 +25,6 @@ import java.util.Collection;
 
 /**
  * @author Vladislav.Soroka
- * @since 5/14/2016
  */
 public class ModuleFilesBuildTaskImpl extends ModuleBuildTaskImpl implements ModuleFilesBuildTask {
   private final VirtualFile[] myFiles;
@@ -37,7 +35,7 @@ public class ModuleFilesBuildTaskImpl extends ModuleBuildTaskImpl implements Mod
   }
 
   public ModuleFilesBuildTaskImpl(Module module, boolean isIncrementalBuild, Collection<? extends VirtualFile> files) {
-    this(module, isIncrementalBuild, ArrayUtil.toObjectArray(files, VirtualFile.class));
+    this(module, isIncrementalBuild, files.toArray(VirtualFile.EMPTY_ARRAY));
   }
 
   @Override

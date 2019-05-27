@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.impl;
 
 import com.intellij.codeInsight.CodeInsightSettings;
@@ -14,6 +14,7 @@ import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.command.CommandEvent;
 import com.intellij.openapi.command.CommandListener;
+import com.intellij.openapi.command.CommandProcessor;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.command.undo.BasicUndoableAction;
 import com.intellij.openapi.command.undo.DocumentReference;
@@ -33,6 +34,7 @@ import com.intellij.openapi.editor.markup.HighlighterLayer;
 import com.intellij.openapi.editor.markup.HighlighterTargetArea;
 import com.intellij.openapi.editor.markup.RangeHighlighter;
 import com.intellij.openapi.editor.markup.TextAttributes;
+import com.intellij.openapi.fileEditor.impl.EditorWindow;
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.IndexNotReadyException;
@@ -98,14 +100,16 @@ public class TemplateState implements Disposable {
     myEditorDocumentListener = new DocumentListener() {
       @Override
       public void beforeDocumentChange(@NotNull DocumentEvent e) {
-        myDocumentChanged = true;
+        if (CommandProcessor.getInstance().getCurrentCommand() != null) {
+          myDocumentChanged = true;
+        }
       }
     };
     myLookupListener = new LookupListener() {
       @Override
       public void itemSelected(@NotNull LookupEvent event) {
         if (isCaretOutsideCurrentSegment(null)) {
-          if (isCaretInsideNextVariable()) {
+          if (isCaretInsideOrBeforeNextVariable()) {
             nextTab();
           }
           else {
@@ -172,11 +176,17 @@ public class TemplateState implements Disposable {
     editor.getCaretModel().addCaretListener(listener, this);
   }
 
-  private boolean isCaretInsideNextVariable() {
+  private boolean isCaretInsideOrBeforeNextVariable() {
     if (myEditor != null && myCurrentVariableNumber >= 0) {
       int nextVar = getNextVariableNumber(myCurrentVariableNumber);
-      TextRange range = nextVar < 0 ? null : getVariableRange(myTemplate.getVariableNameAt(nextVar));
-      return range != null && range.containsOffset(myEditor.getCaretModel().getOffset());
+      TextRange nextVarRange = nextVar < 0 ? null : getVariableRange(myTemplate.getVariableNameAt(nextVar));
+      if (nextVarRange == null) return false;
+
+      int caretOffset = myEditor.getCaretModel().getOffset();
+      if (nextVarRange.containsOffset(caretOffset)) return true;
+
+      TextRange currentVarRange = getVariableRange(myTemplate.getVariableNameAt(myCurrentVariableNumber));
+      return currentVarRange != null && currentVarRange.getEndOffset() < caretOffset && caretOffset < nextVarRange.getStartOffset();
     }
     return false;
   }
@@ -328,9 +338,9 @@ public class TemplateState implements Disposable {
     }
   }
 
-  public void start(@NotNull TemplateImpl template,
-                    @Nullable final PairProcessor<? super String, ? super String> processor,
-                    @Nullable Map<String, String> predefinedVarValues) {
+  void start(@NotNull TemplateImpl template,
+             @Nullable PairProcessor<? super String, ? super String> processor,
+             @Nullable Map<String, String> predefinedVarValues) {
     LOG.assertTrue(!myStarted, "Already started");
     myStarted = true;
 
@@ -380,6 +390,8 @@ public class TemplateState implements Disposable {
     myTemplateRange.setGreedyToLeft(true);
     myTemplateRange.setGreedyToRight(true);
 
+    LiveTemplateRunLogger.log(template, file.getLanguage());
+
     processAllExpressions(myTemplate);
   }
 
@@ -421,6 +433,10 @@ public class TemplateState implements Disposable {
       LOG.assertTrue(myTemplateRange.isValid(), getRangesDebugInfo());
       calcResults(false);  //Fixed SCR #[vk500] : all variables should be recalced twice on start.
       LOG.assertTrue(myTemplateRange.isValid(), getRangesDebugInfo());
+      if (myEditor instanceof EditorWindow && !((EditorWindow)myEditor).isValid()) {
+        finishTemplateEditing();
+        return;
+      }
       doReformat();
 
       int nextVariableNumber = getNextVariableNumber(-1);
@@ -619,7 +635,7 @@ public class TemplateState implements Disposable {
     catch (IndexNotReadyException ignored) { }
     if (elements == null) return Collections.emptyList();
 
-    List<TemplateExpressionLookupElement> result = ContainerUtil.newArrayList();
+    List<TemplateExpressionLookupElement> result = new ArrayList<>();
     for (int i = 0; i < elements.length; i++) {
       result.add(new TemplateExpressionLookupElement(this, elements[i], i));
     }
@@ -728,7 +744,7 @@ public class TemplateState implements Disposable {
           }
         }
 
-        List<TemplateDocumentChange> changes = ContainerUtil.newArrayList();
+        List<TemplateDocumentChange> changes = new ArrayList<>();
         boolean selectionCalculated = false;
         for (int i = 0; i < myTemplate.getSegmentsCount(); i++) {
           if (!calcedSegments.get(i)) {
@@ -821,11 +837,14 @@ public class TemplateState implements Disposable {
     String oldValue = getExpressionString(segmentNumber);
     int start = mySegments.getSegmentStart(segmentNumber);
     int end = mySegments.getSegmentEnd(segmentNumber);
+    boolean commitDocument = !isQuick || expressionNode.requiresCommittedPSI();
 
-    PsiDocumentManager.getInstance(myProject).commitDocument(myDocument);
+    if(commitDocument) {
+      PsiDocumentManager.getInstance(myProject).commitDocument(myDocument);
+    }
     PsiFile psiFile = getPsiFile();
     PsiElement element = psiFile != null ? psiFile.findElementAt(start) : null;
-    if (element != null) {
+    if (element != null && commitDocument) {
       PsiUtilCore.ensureValid(element);
     }
 
@@ -848,7 +867,7 @@ public class TemplateState implements Disposable {
     if (defaultValue != null && resultIsNullOrEmpty) {
       result = defaultValue.calculateResult(context);
     }
-    if (element != null) {
+    if (element != null && commitDocument) {
       PsiUtilCore.ensureValid(element);
     }
     if (result == null || result.equalsToText(oldValue, element)) return;
@@ -947,7 +966,7 @@ public class TemplateState implements Disposable {
     TextRange range = getCurrentVariableRange();
     if (range != null && range.getLength() > 0) {
       int caret = myEditor.getCaretModel().getOffset();
-      if (caret == range.getEndOffset() || isCaretInsideNextVariable()) {
+      if (caret == range.getEndOffset() || isCaretInsideOrBeforeNextVariable()) {
         nextTab();
       }
       else if (caret > range.getEndOffset()) {
@@ -1075,7 +1094,7 @@ public class TemplateState implements Disposable {
     }
   }
 
-  public boolean isDisposed() {
+  boolean isDisposed() {
     return myDocument == null;
   }
 
@@ -1139,7 +1158,7 @@ public class TemplateState implements Disposable {
     int selStart = myTemplate.getSelectionStartSegmentNumber();
     int selEnd = myTemplate.getSelectionEndSegmentNumber();
     IntArrayList indices = new IntArrayList();
-    List<TemplateDocumentChange> changes = ContainerUtil.newArrayList();
+    List<TemplateDocumentChange> changes = new ArrayList<>();
     for (int i = 0; i < myTemplate.getSegmentsCount(); i++) {
       int length = mySegments.getSegmentEnd(i) - mySegments.getSegmentStart(i);
       if (length != 0) continue;
@@ -1164,7 +1183,7 @@ public class TemplateState implements Disposable {
   }
 
   private void restoreEmptyVariables(IntArrayList indices) {
-    List<TextRange> rangesToRemove = ContainerUtil.newArrayList();
+    List<TextRange> rangesToRemove = new ArrayList<>();
     for (int i = 0; i < indices.size(); i++) {
       int index = indices.get(i);
       rangesToRemove.add(TextRange.create(mySegments.getSegmentStart(index), mySegments.getSegmentEnd(index)));
@@ -1237,8 +1256,7 @@ public class TemplateState implements Disposable {
     final PsiFile file = getPsiFile();
     if (file != null) {
       CodeStyleManager style = CodeStyleManager.getInstance(myProject);
-      DumbService dumbService = DumbService.getInstance(myProject);
-      for (TemplateOptionalProcessor processor : dumbService.filterByDumbAwareness(TemplateOptionalProcessor.EP_NAME.getExtensionList())) {
+      for (TemplateOptionalProcessor processor : DumbService.getDumbAwareExtensions(myProject, TemplateOptionalProcessor.EP_NAME)) {
         try {
           processor.processText(myProject, myTemplate, myDocument, myTemplateRange, myEditor);
         }

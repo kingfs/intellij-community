@@ -34,7 +34,6 @@ import java.util.List;
  * Not thread-safe.
  *
  * @author Denis Zhdanov
- * @since Jun 29, 2010 3:04:20 PM
  */
 public class SoftWrapsStorage implements Dumpable {
 
@@ -158,7 +157,7 @@ public class SoftWrapsStorage implements Dumpable {
    * Adds soft wraps to storage. They are supposed to be sorted by their offsets, and have offsets larger than offsets for soft wraps 
    * existing in storage at the moment.
    */
-  public void addAll(List<SoftWrapImpl> softWraps) {
+  public void addAll(List<? extends SoftWrapImpl> softWraps) {
     myWraps.addAll(softWraps);
   }
 

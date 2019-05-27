@@ -1,33 +1,25 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.java.codeInsight.template
 
 import com.intellij.JavaTestUtil
 import com.intellij.codeInsight.CodeInsightSettings
 import com.intellij.codeInsight.daemon.impl.quickfix.EmptyExpression
 import com.intellij.codeInsight.lookup.Lookup
+import com.intellij.codeInsight.template.JavaCodeContextType
 import com.intellij.codeInsight.template.Template
-import com.intellij.codeInsight.template.TemplateManager
-import com.intellij.codeInsight.template.impl.ConstantNode
-import com.intellij.codeInsight.template.impl.EmptyNode
-import com.intellij.codeInsight.template.impl.MacroCallNode
-import com.intellij.codeInsight.template.impl.TemplateImpl
-import com.intellij.codeInsight.template.impl.TemplateManagerImpl
-import com.intellij.codeInsight.template.impl.TemplateSettings
-import com.intellij.codeInsight.template.impl.TextExpression
-import com.intellij.codeInsight.template.macro.ClassNameCompleteMacro
-import com.intellij.codeInsight.template.macro.CompleteMacro
-import com.intellij.codeInsight.template.macro.CompleteSmartMacro
-import com.intellij.codeInsight.template.macro.MethodReturnTypeMacro
-import com.intellij.codeInsight.template.macro.VariableOfTypeMacro
+import com.intellij.codeInsight.template.actions.SaveAsTemplateAction
+import com.intellij.codeInsight.template.impl.*
+import com.intellij.codeInsight.template.macro.*
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.impl.DocumentImpl
 import com.intellij.psi.PsiDocumentManager
+import groovy.transform.CompileStatic
 
 import static com.intellij.codeInsight.template.Template.Property.USE_STATIC_IMPORT_IF_POSSIBLE
-
 /**
  * @author peter
  */
+@CompileStatic
 class JavaLiveTemplateTest extends LiveTemplateTestCase {
   final String basePath = JavaTestUtil.getRelativeJavaTestDataPath() + "/codeInsight/template/"
   
@@ -35,8 +27,7 @@ class JavaLiveTemplateTest extends LiveTemplateTestCase {
     myFixture.configureByText 'a.java', '''
 <caret>
 '''
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("imp", "user", 'import $MODIFIER$ java.$NAME$;')
+    Template template = templateManager.createTemplate("imp", "user", 'import $MODIFIER$ java.$NAME$;')
     template.addVariable('NAME', new MacroCallNode(new CompleteMacro(true)), new EmptyNode(), true)
     template.addVariable('MODIFIER', new EmptyExpression(), true)
     startTemplate(template)
@@ -58,8 +49,7 @@ public class Main {
     }
 }
 '''
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("for", "user", 'for ($ELEMENT_TYPE$ $VAR$ : $ITERABLE_TYPE$) {\n' +
+    Template template = templateManager.createTemplate("for", "user", 'for ($ELEMENT_TYPE$ $VAR$ : $ITERABLE_TYPE$) {\n' +
                                                                     '$END$;\n' +
                                                                     '}')
     template.addVariable('ITERABLE_TYPE', new MacroCallNode(new CompleteSmartMacro()), new EmptyNode(), true)
@@ -94,8 +84,7 @@ public class Main {
     }
 }
 '''
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("for", "user", 'for ($ELEMENT_TYPE$ $VAR$ : $ITERABLE_TYPE$) {\n' +
+    Template template = templateManager.createTemplate("for", "user", 'for ($ELEMENT_TYPE$ $VAR$ : $ITERABLE_TYPE$) {\n' +
                                                                     '$END$;\n' +
                                                                     '}')
     template.addVariable('ITERABLE_TYPE', new MacroCallNode(new CompleteSmartMacro()), new EmptyNode(), true)
@@ -127,8 +116,7 @@ class Foo {
   { <caret> }
 }
 '''
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("frm", "user", '$VAR$')
+    Template template = templateManager.createTemplate("frm", "user", '$VAR$')
     template.addVariable('VAR', new MacroCallNode(new ClassNameCompleteMacro()), new EmptyNode(), true)
     startTemplate(template)
     assert !state.finished
@@ -152,8 +140,7 @@ class Outer {
 }
 '''
 
-    TemplateManager manager = TemplateManager.getInstance(getProject())
-    Template template = manager.createTemplate("myCbDo", "user", 'MyUtils.doSomethingWithCallback($CB$)')
+    Template template = templateManager.createTemplate("myCbDo", "user", 'MyUtils.doSomethingWithCallback($CB$)')
 
     MacroCallNode call = new MacroCallNode(new VariableOfTypeMacro())
     call.addParameter(new ConstantNode("MyCallback"))
@@ -238,6 +225,12 @@ class Outer {
     return TemplateManagerImpl.isApplicable(myFixture.getFile(), getEditor().getCaretModel().getOffset(), inst)
   }
 
+  void 'test generic type argument is declaration context'() {
+    myFixture.configureByText "a.java","class Foo {{ List<Pair<X, <caret>Y>> l; }}"
+    assert TemplateManagerImpl.getApplicableContextTypes(myFixture.file, myFixture.caretOffset).collect { it.class } ==
+           [JavaCodeContextType.Declaration]
+  }
+
   void testJavaStatementContext() {
     final TemplateImpl template = TemplateSettings.getInstance().getTemplate("inst", "other")
     assertFalse(isApplicable("class Foo {{ if (a inst<caret>) }}", template))
@@ -310,8 +303,7 @@ class Foo {
 }
 '''
 
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("result", "user", '$T$ result;')
+    Template template = templateManager.createTemplate("result", "user", '$T$ result;')
     template.addVariable('T', new MacroCallNode(new MethodReturnTypeMacro()), new EmptyNode(), false)
     template.toReformat = true
 
@@ -364,8 +356,7 @@ class Foo {
   }
 }
 """
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("xxx", "user", 'foo.Bar.someMethod($END$)')
+    Template template = templateManager.createTemplate("xxx", "user", 'foo.Bar.someMethod($END$)')
     template.setValue(USE_STATIC_IMPORT_IF_POSSIBLE, true)
 
     startTemplate(template)
@@ -395,8 +386,7 @@ class Foo {
   }
 }
 """
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("xxx", "user", 'foo.Bar.someMethod($END$)')
+    Template template = templateManager.createTemplate("xxx", "user", 'foo.Bar.someMethod($END$)')
     template.setValue(USE_STATIC_IMPORT_IF_POSSIBLE, true)
 
     startTemplate(template)
@@ -419,8 +409,7 @@ class Foo {
   }
 }
 """
-    final TemplateManager manager = TemplateManager.getInstance(getProject())
-    final Template template = manager.createTemplate("xxx", "user", 'java.lang.Math.abs(java.lang.Math.PI);')
+    Template template = templateManager.createTemplate("xxx", "user", 'java.lang.Math.abs(java.lang.Math.PI);')
     template.setValue(USE_STATIC_IMPORT_IF_POSSIBLE, true)
 
     startTemplate(template)
@@ -486,7 +475,7 @@ java.util.List<? extends Integer> list;
   }
 
   void "test overtyping suggestion with a quote"() {
-    CodeInsightSettings.instance.SELECT_AUTOPOPUP_SUGGESTIONS_BY_CHARS = true
+    CodeInsightSettings.instance.selectAutopopupSuggestionsByChars = true
 
     myFixture.configureByText 'a.java', '''
 class A {
@@ -501,10 +490,19 @@ class A {
     myFixture.checkResult '''
 class A {
   {
-    String s = "";
+    String s = "null";
     s.toString();
   }
 }'''
     assert !myFixture.lookup
+  }
+
+  void "test save as live template for annotation values"() {
+    myFixture.addClass("package foo; public @interface Anno { String value(); }")
+    myFixture.configureByText "a.java", 'import foo.*; <selection>@Anno("")</selection> class T {}'
+    assert SaveAsTemplateAction.suggestTemplateText(myFixture.editor, myFixture.file) == '@foo.Anno("")'
+
+    myFixture.configureByText "b.java", 'import foo.*; <selection>@Anno(value="")</selection> class T {}'
+    assert SaveAsTemplateAction.suggestTemplateText(myFixture.editor, myFixture.file) == '@foo.Anno(value="")'
   }
 }

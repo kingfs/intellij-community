@@ -1,12 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeHighlighting.BackgroundEditorHighlighter;
 import com.intellij.codeHighlighting.HighlightingPass;
 import com.intellij.codeHighlighting.Pass;
 import com.intellij.codeHighlighting.TextEditorHighlightingPass;
-import com.intellij.codeInsight.AutoPopupController;
 import com.intellij.codeInsight.daemon.*;
 import com.intellij.codeInsight.hint.HintManager;
 import com.intellij.codeInsight.intention.impl.FileLevelIntentionComponent;
@@ -20,6 +18,7 @@ import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.ex.ApplicationManagerEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
+import com.intellij.openapi.application.impl.NonBlockingReadActionImpl;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
@@ -34,7 +33,6 @@ import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.TextEditor;
 import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx;
 import com.intellij.openapi.fileEditor.impl.text.AsyncEditorLoader;
-import com.intellij.openapi.fileEditor.impl.text.TextEditorImpl;
 import com.intellij.openapi.fileEditor.impl.text.TextEditorProvider;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeManager;
@@ -52,8 +50,6 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.RefreshQueueImpl;
 import com.intellij.packageDependencies.DependencyValidationManager;
 import com.intellij.psi.*;
-import com.intellij.psi.impl.PsiDocumentManagerBase;
-import com.intellij.psi.search.scope.packageSet.NamedScopeManager;
 import com.intellij.psi.util.PsiModificationTracker;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.util.*;
@@ -114,8 +110,8 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
                                 @NotNull DaemonCodeAnalyzerSettings daemonCodeAnalyzerSettings,
                                 @NotNull EditorTracker editorTracker,
                                 @NotNull PsiDocumentManager psiDocumentManager,
-                                @NotNull final NamedScopeManager namedScopeManager,
-                                @NotNull final DependencyValidationManager dependencyValidationManager) {
+                                // DependencyValidationManagerImpl adds scope listener, so, we need to force service creation
+                                @SuppressWarnings("unused") @NotNull DependencyValidationManager dependencyValidationManager) {
     myProject = project;
     mySettings = daemonCodeAnalyzerSettings;
     myEditorTracker = editorTracker;
@@ -159,7 +155,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
 
   @NotNull
   @TestOnly
-  public static List<HighlightInfo> getHighlights(@NotNull Document document, HighlightSeverity minSeverity, @NotNull Project project) {
+  public static List<HighlightInfo> getHighlights(@NotNull Document document, @Nullable HighlightSeverity minSeverity, @NotNull Project project) {
     List<HighlightInfo> infos = new ArrayList<>();
     processHighlights(document, project, minSeverity, 0, document.getTextLength(), Processors.cancelableCollectProcessor(infos));
     return infos;
@@ -285,14 +281,13 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
     Disposer.register(parent, () -> mustWaitForSmartMode = old);
   }
 
-  @NotNull
   @TestOnly
-  public List<HighlightInfo> runPasses(@NotNull PsiFile file,
-                                       @NotNull Document document,
-                                       @NotNull List<? extends TextEditor> textEditors,
-                                       @NotNull int[] toIgnore,
-                                       boolean canChangeDocument,
-                                       @Nullable final Runnable callbackWhileWaiting) throws ProcessCanceledException {
+  public void runPasses(@NotNull PsiFile file,
+                        @NotNull Document document,
+                        @NotNull List<? extends TextEditor> textEditors,
+                        @NotNull int[] toIgnore,
+                        boolean canChangeDocument,
+                        @Nullable final Runnable callbackWhileWaiting) throws ProcessCanceledException {
     assert myInitialized;
     assert !myDisposed;
     ApplicationEx application = ApplicationManagerEx.getApplicationEx();
@@ -319,19 +314,12 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
 
     UIUtil.dispatchAllInvocationEvents();
 
-    Project project = file.getProject();
     FileStatusMap fileStatusMap = getFileStatusMap();
 
     Map<FileEditor, HighlightingPass[]> map = new HashMap<>();
+
+    NonBlockingReadActionImpl.waitForAsyncTaskCompletion(); // wait for async editor loading
     for (TextEditor textEditor : textEditors) {
-      if (textEditor instanceof TextEditorImpl) {
-        try {
-          ((TextEditorImpl)textEditor).waitForLoaded(10, TimeUnit.SECONDS);
-        }
-        catch (TimeoutException e) {
-          throw new RuntimeException(textEditor + " has not completed loading in 10 seconds");
-        }
-      }
       TextEditorBackgroundHighlighter highlighter = (TextEditorBackgroundHighlighter)textEditor.getBackgroundHighlighter();
       if (highlighter == null) {
         Editor editor = textEditor.getEditor();
@@ -384,8 +372,6 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
       UIUtil.dispatchAllInvocationEvents();
       UIUtil.dispatchAllInvocationEvents();
       assert progress.isCanceled() && progress.isDisposed();
-
-      return getHighlights(document, null, project);
     }
     finally {
       DaemonProgressIndicator.setDebug(false);
@@ -609,7 +595,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
     boolean restart = toRestartAlarm && !myDisposed && myInitialized;
 
     if (restart && myUpdateRunnableFuture.isDone()) {
-      myUpdateRunnableFuture = myAlarm.schedule(myUpdateRunnable, mySettings.AUTOREPARSE_DELAY, TimeUnit.MILLISECONDS);
+      myUpdateRunnableFuture = myAlarm.schedule(myUpdateRunnable, mySettings.getAutoReparseDelay(), TimeUnit.MILLISECONDS);
     }
 
     return canceled;
@@ -792,10 +778,9 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
         // we'll restart when the write action finish
         return;
       }
-      final PsiDocumentManagerBase documentManager = (PsiDocumentManagerBase)dca.myPsiDocumentManager;
-      if (documentManager.hasUncommitedDocuments()) {
+      if (dca.myPsiDocumentManager.hasUncommitedDocuments()) {
         // restart when everything committed
-        AutoPopupController.runTransactionWithEverythingCommitted(myProject, this);
+        dca.myPsiDocumentManager.performLaterWhenAllCommitted(this);
         return;
       }
       if (RefResolveService.ENABLED &&
@@ -892,8 +877,7 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
     ApplicationManager.getApplication().assertIsDispatchThread();
 
     // Editors in modal context
-    List<Editor> editors = getActiveEditors();
-
+    List<Editor> editors = myEditorTracker.getActiveEditors();
     Collection<FileEditor> activeTextEditors = new THashSet<>(editors.size());
     for (Editor editor : editors) {
       if (editor.isDisposed()) continue;
@@ -926,11 +910,6 @@ public class DaemonCodeAnalyzerImpl extends DaemonCodeAnalyzerEx implements Pers
       result.add(fileEditor);
     }
     return result;
-  }
-
-  @NotNull
-  private List<Editor> getActiveEditors() {
-    return myEditorTracker.getActiveEditors();
   }
 
   @TestOnly

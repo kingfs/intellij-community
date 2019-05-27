@@ -3,6 +3,7 @@ package com.jetbrains.python.console.pydev;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 
@@ -31,9 +32,9 @@ public abstract class AbstractConsoleCommunication implements ConsoleCommunicati
   }
 
   public static Pair<String, Boolean> parseExecResponseString(String str) {
-    Boolean more;
+    boolean more;
     String errorContents = null;
-    String lower = str.toLowerCase();
+    String lower = StringUtil.toLowerCase(str);
     if (lower.equals("true") || lower.equals("1")) {
       more = true;
     }

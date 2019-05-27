@@ -8,14 +8,11 @@ import com.intellij.psi.PsiManager
 import com.intellij.psi.xml.XmlFile
 import org.jetbrains.idea.devkit.module.PluginDescriptorConstants
 import org.jetbrains.idea.devkit.util.DescriptorUtil
-import org.jetbrains.idea.devkit.util.PsiUtil
 
 class PluginDescriptorEditorTabTitleProvider : EditorTabTitleProvider {
 
   override fun getEditorTabTitle(project: Project, file: VirtualFile): String? {
     if (PluginDescriptorConstants.META_DATA.fileName != file.name) return null
-
-    if (!PsiUtil.isPluginProject(project)) return null
 
     val xmlFile = PsiManager.getInstance(project).findFile(file) as? XmlFile ?: return null
 

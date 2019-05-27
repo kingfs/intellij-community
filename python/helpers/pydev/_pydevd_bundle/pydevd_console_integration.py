@@ -13,6 +13,7 @@ from _pydev_bundle.pydev_code_executor import BaseCodeExecutor
 from _pydev_bundle.pydev_console_types import CodeFragment, Command
 from _pydev_bundle.pydev_imports import Exec
 from _pydevd_bundle import pydevd_vars, pydevd_save_locals
+from _pydevd_bundle.pydevd_console_pytest import enable_pytest_output
 
 try:
     import __builtin__
@@ -41,6 +42,8 @@ if 'IPYTHONENABLE' in os.environ:
 else:
     IPYTHON = True
 
+PYTEST_RUN_CONFIG = 'PYTEST_RUN_CONFIG' in os.environ
+
 try:
     try:
         exitfunc = sys.exitfunc
@@ -65,6 +68,14 @@ def get_ipython_hidden_vars():
     if IPYTHON and hasattr(__builtin__, 'interpreter'):
         code_executor = get_code_executor()
         return code_executor.get_ipython_hidden_vars_dict()
+    else:
+        try:
+            ipython_shell = get_ipython()
+            from _pydev_bundle.pydev_ipython_console_011 import get_ipython_hidden_vars
+            return get_ipython_hidden_vars(ipython_shell)
+        except:
+            pass
+
 
 def get_code_executor():
     try:
@@ -167,6 +178,9 @@ def console_exec(thread_id, frame_id, expression, dbg):
     updated_globals = {}
     updated_globals.update(frame.f_globals)
     updated_globals.update(frame.f_locals)  # locals later because it has precedence over the actual globals
+
+    if PYTEST_RUN_CONFIG:
+        enable_pytest_output()
 
     if IPYTHON:
         need_more = exec_code(CodeFragment(expression), updated_globals, frame.f_locals, dbg)

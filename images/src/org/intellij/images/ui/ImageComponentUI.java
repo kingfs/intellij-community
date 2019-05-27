@@ -13,9 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/** $Id$ */
-
 package org.intellij.images.ui;
 
 import com.intellij.util.ui.UIUtil;
@@ -108,6 +105,7 @@ public class ImageComponentUI extends ComponentUI {
         RenderingHints oldHints = g2d.getRenderingHints();
 
         BufferedImage image = document.getValue(ic.getZoomFactor());
+        if (image == null) return;
 
         if (size.width > image.getWidth() && size.height > image.getHeight()) {
             // disable any kind of source image manipulation when resizing

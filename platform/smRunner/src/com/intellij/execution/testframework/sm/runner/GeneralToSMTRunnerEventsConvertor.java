@@ -77,6 +77,7 @@ public class GeneralToSMTRunnerEventsConvertor extends GeneralTestEventsProcesso
 
   @Override
   public void onFinishTesting() {
+    fireOnBeforeTestingFinished(myTestsRootProxy);
     // has been already invoked!
     // We don't know whether process was destroyed by user
     // or it finished after all tests have been run
@@ -180,7 +181,7 @@ public class GeneralToSMTRunnerEventsConvertor extends GeneralTestEventsProcesso
       parentSuite.addChild(newSuite);
     }
 
-    initCurrentChildren(newSuite);
+    initCurrentChildren(newSuite, true);
     mySuitesStack.pushSuite(newSuite);
 
     //Progress started
@@ -190,10 +191,10 @@ public class GeneralToSMTRunnerEventsConvertor extends GeneralTestEventsProcesso
     fireOnSuiteStarted(newSuite);
   }
 
-  private void initCurrentChildren(SMTestProxy newSuite) {
+  private void initCurrentChildren(SMTestProxy newSuite, boolean preferSuite) {
     if (myTreeBuildBeforeStart) {
       for (SMTestProxy proxy : newSuite.getChildren()) {
-        if (!proxy.isFinal()) {
+        if (!proxy.isFinal() || preferSuite && proxy.isSuite()) {
           String url = proxy.getLocationUrl();
           if (url != null) {
             myCurrentChildren.computeIfAbsent(url, l -> new ArrayList<>()).add(proxy);
@@ -209,20 +210,28 @@ public class GeneralToSMTRunnerEventsConvertor extends GeneralTestEventsProcesso
       Set<SMTestProxy> acceptedProxies = new LinkedHashSet<>();
       Collection<? extends SMTestProxy> children = myCurrentChildren.get(fullName);
       if (children == null) {
-        initCurrentChildren(parentSuite);
+        initCurrentChildren(parentSuite, preferSuite);
         children = myCurrentChildren.get(fullName);
       }
       if (children != null) { //null if child started second time
         for (SMTestProxy proxy : children) {
-          if (!proxy.isFinal()) {
+          if (!proxy.isFinal() || preferSuite && proxy.isSuite()) {
             acceptedProxies.add(proxy);
           }
         }
         if (!acceptedProxies.isEmpty()) {
-          return acceptedProxies.stream()
-            .filter(proxy -> proxy.isSuite() == preferSuite)
-            .findFirst()
-            .orElse(acceptedProxies.iterator().next());
+          SMTestProxy accepted = null;
+          for (SMTestProxy proxy : acceptedProxies) {
+            if (proxy.isSuite() == preferSuite && proxy.getParent() == parentSuite) {
+              if (!proxy.isFinal()) {
+                return proxy;
+              }
+              if (accepted == null) {
+                accepted = proxy;
+              }
+            }
+          }
+          return accepted != null ? accepted : acceptedProxies.iterator().next();
         }
       }
     }

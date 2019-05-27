@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.intention.impl;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -69,7 +55,7 @@ public class UnrollLoopAction extends PsiElementBaseIntentionAction {
     for (PsiStatement statement : statements) {
       if (isLoopBreak(statement)) continue;
       boolean acceptable = PsiTreeUtil.processElements(statement, e -> {
-        if (e instanceof PsiBreakStatement && ((PsiBreakStatement)e).findExitedStatement() == loop) return false;
+        if (e instanceof PsiBreakStatement && ((PsiBreakStatement)e).findExitedElement() == loop) return false;
         if (e instanceof PsiContinueStatement && ((PsiContinueStatement)e).findContinuedStatement() == loop) return false;
         return true;
       });
@@ -177,9 +163,7 @@ public class UnrollLoopAction extends PsiElementBaseIntentionAction {
     CommentTracker ct = new CommentTracker();
     PsiElement anchor = loop;
     for (PsiExpression expression : expressions) {
-      if (loop.getBody() != null) {
-        ct.markUnchanged(loop.getBody());
-      }
+      ct.markUnchanged(loop.getBody());
       PsiLoopStatement copy = (PsiLoopStatement)factory.createStatementFromText(loop.getText(), element);
       PsiVariable variable = Objects.requireNonNull(getVariable(copy));
       for (PsiReference reference : ReferencesSearch.search(variable, new LocalSearchScope(copy))) {
@@ -225,6 +209,6 @@ public class UnrollLoopAction extends PsiElementBaseIntentionAction {
     PsiIfStatement ifStatement = (PsiIfStatement)statement;
     if (ifStatement.getElseBranch() != null || ifStatement.getCondition() == null) return false;
     PsiStatement thenBranch = ControlFlowUtils.stripBraces(ifStatement.getThenBranch());
-    return thenBranch instanceof PsiBreakStatement && ((PsiBreakStatement)thenBranch).getLabelIdentifier() == null;
+    return thenBranch instanceof PsiBreakStatement && ((PsiBreakStatement)thenBranch).getLabelExpression() == null;
   }
 }

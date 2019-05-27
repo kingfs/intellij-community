@@ -16,6 +16,7 @@
 package com.intellij.ide.todo;
 
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
 
@@ -121,9 +122,7 @@ final class FileTree {
     for (VirtualFile dir : myStrictDirectory2Children.keySet()) {
       List<VirtualFile> children = myStrictDirectory2Children.get(dir);
       LOG.assertTrue(children != null);
-      if (children.contains(file)) {
-        children.remove(file);
-      }
+      children.remove(file);
     }
     // We have remove also all removed (empty) directories
     if (dirsToBeRemoved != null) {
@@ -208,12 +207,15 @@ final class FileTree {
     return filesList;
   }
 
-  private void collectFiles(VirtualFile dir, List<VirtualFile> filesList) {
+  private void collectFiles(VirtualFile dir, List<? super VirtualFile> filesList) {
     List<VirtualFile> children = myDirectory2Children.get(dir);
     if (children != null) {
       for (VirtualFile child : children) {
+        ProgressManager.checkCanceled();
         if (!child.isDirectory()) {
-          LOG.assertTrue(!filesList.contains(child));
+          if (LOG.isDebugEnabled()) {
+            LOG.assertTrue(!filesList.contains(child));
+          }
           filesList.add(child);
         }
         else {

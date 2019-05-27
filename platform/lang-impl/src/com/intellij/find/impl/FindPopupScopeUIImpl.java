@@ -20,9 +20,13 @@ import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiBundle;
 import com.intellij.psi.search.SearchScope;
-import com.intellij.ui.ComboboxSpeedSearch;
+import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.util.Functions;
+import com.intellij.util.ObjectUtils;
+import com.intellij.util.PlatformUtils;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.EmptyIcon;
-import com.intellij.util.ui.SwingHelper;
+import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -52,13 +56,15 @@ class FindPopupScopeUIImpl implements FindPopupScopeUI {
     myFindPopupPanel = panel;
     initComponents();
 
-    //noinspection unchecked
-    myComponents = (Pair<ScopeType, JComponent>[])new Pair[]{
-      new Pair<>(PROJECT, new JLabel()),
-      new Pair<>(MODULE, shrink(myModuleComboBox)),
-      new Pair<>(DIRECTORY, myDirectoryChooser),
-      new Pair<>(SCOPE, shrink(myScopeCombo)),
-    };
+    boolean fullVersion = !PlatformUtils.isDataGrip();
+    myComponents =
+      fullVersion
+      ? ContainerUtil.ar(new Pair<>(PROJECT, new JLabel()),
+                         new Pair<>(MODULE, shrink(myModuleComboBox)),
+                         new Pair<>(DIRECTORY, myDirectoryChooser),
+                         new Pair<>(SCOPE, shrink(myScopeCombo)))
+      : ContainerUtil.ar(new Pair<>(SCOPE, shrink(myScopeCombo)),
+                         new Pair<>(DIRECTORY, myDirectoryChooser));
   }
 
   public void initComponents() {
@@ -70,19 +76,20 @@ class FindPopupScopeUIImpl implements FindPopupScopeUI {
 
     Arrays.sort(names, String.CASE_INSENSITIVE_ORDER);
     myModuleComboBox = new ComboBox<>(names);
-    new ComboboxSpeedSearch(myModuleComboBox);
+    myModuleComboBox.setSwingPopup(false);
+    myModuleComboBox.setMinimumAndPreferredWidth(JBUI.scale(300)); // as ScopeChooser
+    myModuleComboBox.setRenderer(SimpleListCellRenderer.create("", Functions.id()));
 
-    SwingHelper.setLongestAsPrototype(myModuleComboBox, Arrays.asList(names));
-    if (myModuleComboBox.getPrototypeDisplayValue() != null) {
-      myModuleComboBox.setMinLength(myModuleComboBox.getPrototypeDisplayValue().length());
-    }
     ActionListener restartSearchListener = e -> scheduleResultsUpdate();
     myModuleComboBox.addActionListener(restartSearchListener);
 
     myDirectoryChooser = new FindPopupDirectoryChooser(myFindPopupPanel);
 
     myScopeCombo = new ScopeChooserCombo();
-    myScopeCombo.init(myProject, true, true, FindSettings.getInstance().getDefaultScopeName(), new Condition<ScopeDescriptor>() {
+    Object selection = ObjectUtils.coalesce(myHelper.getModel().getCustomScope(),
+                                            myHelper.getModel().getCustomScopeName(),
+                                            FindSettings.getInstance().getDefaultScopeName());
+    myScopeCombo.init(myProject, true, true, selection, new Condition<ScopeDescriptor>() {
       //final String projectFilesScopeName = PsiBundle.message("psi.search.scope.project");
       final String moduleFilesScopeName;
 
@@ -94,7 +101,7 @@ class FindPopupScopeUIImpl implements FindPopupScopeUI {
 
       @Override
       public boolean value(ScopeDescriptor descriptor) {
-        final String display = descriptor.getDisplay();
+        final String display = descriptor.getDisplayName();
         return /*!projectFilesScopeName.equals(display) &&*/ !display.startsWith(moduleFilesScopeName);
       }
     });
@@ -192,7 +199,10 @@ class FindPopupScopeUIImpl implements FindPopupScopeUI {
       }
     }
 
-    ScopeType selectedScope = getScope(findModel);
+    ScopeType scope = getScope(findModel);
+    ScopeType selectedScope = Arrays.stream(myComponents).filter(o -> o.first == scope).findFirst().orElse(null) == null
+                              ? myComponents[0].first
+                              : scope;
     if (selectedScope == MODULE) {
       myModuleComboBox.setSelectedItem(findModel.getModuleName());
     }

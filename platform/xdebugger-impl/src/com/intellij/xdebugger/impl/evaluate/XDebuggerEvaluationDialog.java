@@ -11,7 +11,6 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.wm.IdeFocusManager;
-import com.intellij.openapi.wm.WindowManager;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.components.BorderLayoutPanel;
 import com.intellij.xdebugger.*;
@@ -55,7 +54,7 @@ public class XDebuggerEvaluationDialog extends DialogWrapper {
   private final XDebuggerTreePanel myTreePanel;
   private EvaluationInputComponent myInputComponent;
   private final XDebugSession mySession;
-  private final Supplier<XDebuggerEvaluator> myEvaluatorSupplier;
+  private final Supplier<? extends XDebuggerEvaluator> myEvaluatorSupplier;
   private final Project myProject;
   private final XDebuggerEditorsProvider myEditorsProvider;
   private EvaluationMode myMode;
@@ -81,13 +80,13 @@ public class XDebuggerEvaluationDialog extends DialogWrapper {
   }
 
   private XDebuggerEvaluationDialog(@Nullable XDebugSession session,
-                                    @Nullable Supplier<XDebuggerEvaluator> evaluatorSupplier,
+                                    @Nullable Supplier<? extends XDebuggerEvaluator> evaluatorSupplier,
                                     @NotNull Project project,
                                     @NotNull XDebuggerEditorsProvider editorsProvider,
                                     @NotNull XExpression text,
                                     @Nullable XSourcePosition sourcePosition,
                                     boolean isCodeFragmentEvaluationSupported) {
-    super(WindowManager.getInstance().getFrame(project), true);
+    super(project, true);
     mySession = session;
     myEvaluatorSupplier = evaluatorSupplier;
     myProject = project;
@@ -300,8 +299,7 @@ public class XDebuggerEvaluationDialog extends DialogWrapper {
 
     //editor is already changed
     editor = inputEditor.getEditor();
-    //selectAll puts focus back
-    inputEditor.selectAll();
+    inputEditor.requestFocusInEditor();
 
     //try to restore caret position and clear selection
     if (offset >= 0 && editor != null) {

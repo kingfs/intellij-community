@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 /*
  * Class MethodBreakpoint
@@ -17,6 +17,7 @@ import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.evaluation.EvaluationContextImpl;
 import com.intellij.debugger.engine.requests.RequestManagerImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
+import com.intellij.debugger.impl.DebuggerUtilsImpl;
 import com.intellij.debugger.impl.PositionUtil;
 import com.intellij.debugger.jdi.ClassesByNameProvider;
 import com.intellij.debugger.jdi.MethodBytecodeUtil;
@@ -62,7 +63,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
-import java.util.stream.Stream;
 
 public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakpointProperties> implements MethodBreakpointBase {
   private static final Logger LOG = Logger.getInstance("#com.intellij.debugger.ui.breakpoints.MethodBreakpoint");
@@ -121,7 +121,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
     DebuggerManagerThreadImpl.assertIsManagerThread();
     RequestManagerImpl requestsManager = debugProcess.getRequestsManager();
     ClassPrepareRequest request = requestsManager.createClassPrepareRequest((debuggerProcess, referenceType) -> {
-      if (instanceOf(referenceType, baseType)) {
+      if (DebuggerUtilsImpl.instanceOf(referenceType, baseType)) {
         createRequestForPreparedClassEmulated(breakpoint, debugProcess, referenceType, false);
       }
     }, null);
@@ -210,6 +210,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
     for (Method method : methods) {
       found = true;
       if (method.isNative()) {
+        LOG.info("Breakpoint emulation was disabled because " + method + " is native");
         breakpoint.disableEmulation();
         return;
       }
@@ -220,6 +221,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
 
       List<Location> allLineLocations = DebuggerUtilsEx.allLineLocations(method);
       if (allLineLocations == null && !method.isBridge()) { // no line numbers
+        LOG.info("Breakpoint emulation was disabled because " + method + " contains no line info");
         breakpoint.disableEmulation();
         return;
       }
@@ -546,27 +548,8 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
     int methodLine;
   }
 
-  private static boolean instanceOf(@Nullable ReferenceType type, @NotNull ReferenceType superType) {
-    if (type == null) {
-      return false;
-    }
-    if (superType.equals(type)) {
-      return true;
-    }
-    return supertypes(type).anyMatch(t -> instanceOf(t, superType));
-  }
-
-  private static Stream<? extends ReferenceType> supertypes(ReferenceType type) {
-    if (type instanceof InterfaceType) {
-      return ((InterfaceType)type).superinterfaces().stream();
-    } else if (type instanceof ClassType) {
-      return StreamEx.<ReferenceType>ofNullable(((ClassType)type).superclass()).prepend(((ClassType)type).interfaces());
-    }
-    return StreamEx.empty();
-  }
-
   private static void processPreparedSubTypes(ReferenceType classType,
-                                              BiConsumer<ReferenceType, ClassesByNameProvider> consumer,
+                                              BiConsumer<? super ReferenceType, ? super ClassesByNameProvider> consumer,
                                               ProgressIndicator progressIndicator) {
     long start = 0;
     if (LOG.isDebugEnabled()) {
@@ -585,7 +568,7 @@ public class MethodBreakpoint extends BreakpointWithHighlighter<JavaMethodBreakp
         ReferenceType type = allTypes.get(i);
         if (type.isPrepared()) {
           try {
-            supertypes(type).forEach(st -> inheritance.putValue(st, type));
+            DebuggerUtilsImpl.supertypes(type).forEach(st -> inheritance.putValue(st, type));
           }
           catch (ObjectCollectedException ignored) {
           }

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.execution.util
 
 import com.intellij.execution.CommandLineUtil
@@ -15,7 +15,6 @@ import com.intellij.openapi.util.registry.Registry
 import com.intellij.openapi.util.text.StringUtil
 import java.io.*
 import java.nio.charset.Charset
-import java.nio.charset.StandardCharsets
 
 object ExecUtil {
   private val hasGkSudo = PathExecLazyValue("gksudo")
@@ -23,7 +22,10 @@ object ExecUtil {
   private val hasPkExec = PathExecLazyValue("pkexec")
   private val hasGnomeTerminal = PathExecLazyValue("gnome-terminal")
   private val hasKdeTerminal = PathExecLazyValue("konsole")
+  private val hasUrxvt = PathExecLazyValue("urxvt")
   private val hasXTerm = PathExecLazyValue("xterm")
+  private val hasSetsid = PathExecLazyValue("setsid")
+  private val hasEnv = PathExecLazyValue("env")
 
   private const val nicePath = "/usr/bin/nice"
   private val hasNice by lazy { File(nicePath).exists() }
@@ -45,7 +47,7 @@ object ExecUtil {
   fun loadTemplate(loader: ClassLoader, templateName: String, variables: Map<String, String>?): String {
     val stream = loader.getResourceAsStream(templateName) ?: throw IOException("Template '$templateName' not found by $loader")
 
-    val template = FileUtil.loadTextAndClose(InputStreamReader(stream, StandardCharsets.UTF_8))
+    val template = FileUtil.loadTextAndClose(InputStreamReader(stream, Charsets.UTF_8))
     if (variables == null || variables.isEmpty()) {
       return template
     }
@@ -65,7 +67,7 @@ object ExecUtil {
   fun createTempExecutableScript(prefix: String, suffix: String, content: String): File {
     val tempDir = File(PathManager.getTempPath())
     val tempFile = FileUtil.createTempFile(tempDir, prefix, suffix, true, true)
-    FileUtil.writeToFile(tempFile, content.toByteArray(StandardCharsets.UTF_8))
+    FileUtil.writeToFile(tempFile, content.toByteArray(Charsets.UTF_8))
     if (!tempFile.setExecutable(true, true)) {
       throw ExecutionException("Failed to make temp file executable: $tempFile")
     }
@@ -131,31 +133,35 @@ object ExecUtil {
       }
       SystemInfo.isMac -> {
         val escapedCommand = StringUtil.join(command, { escapeAppleScriptArgument(it) }, " & \" \" & ")
+        val messageArg = if (SystemInfo.isMacOSYosemite) " with prompt \"${prompt.replace("\"", "\\\"")}\"" else ""
         val escapedScript =
           "tell current application\n" +
           "   activate\n" +
-          "   do shell script " + escapedCommand + " with administrator privileges without altering line endings\n" +
+          "   do shell script ${escapedCommand}${messageArg} with administrator privileges without altering line endings\n" +
           "end tell"
         GeneralCommandLine(osascriptPath, "-e", escapedScript)
       }
       hasGkSudo.value -> {
-        GeneralCommandLine(listOf("gksudo", "--message", prompt, "--") + command)
+        GeneralCommandLine(listOf("gksudo", "--message", prompt, "--") + envCommand(commandLine) + command)
       }
       hasKdeSudo.value -> {
-        GeneralCommandLine(listOf("kdesudo", "--comment", prompt, "--") + command)
+        GeneralCommandLine(listOf("kdesudo", "--comment", prompt, "--") + envCommand(commandLine) + command)
       }
       hasPkExec.value -> {
-        command.add(0, "pkexec")
-        GeneralCommandLine(command)
+        GeneralCommandLine(listOf("pkexec") + envCommand(commandLine) + command)
       }
       SystemInfo.isUnix && hasTerminalApp() -> {
         val escapedCommandLine = StringUtil.join(command, { escapeUnixShellArgument(it) }, " ")
+        val escapedEnvCommand = when (val args = envCommandArgs(commandLine)) {
+          emptyList<String>() -> ""
+          else -> "env " + StringUtil.join(args, { escapeUnixShellArgument(it) }, " ") + " "
+        }
         val script = createTempExecutableScript(
           "sudo", ".sh",
           "#!/bin/sh\n" +
           "echo " + escapeUnixShellArgument(prompt) + "\n" +
           "echo\n" +
-          "sudo -- " + escapedCommandLine + "\n" +
+          "sudo -- " + escapedEnvCommand + escapedCommandLine + "\n" +
           "STATUS=$?\n" +
           "echo\n" +
           "read -p \"Press Enter to close this window...\" TEMP\n" +
@@ -174,6 +180,20 @@ object ExecUtil {
       .withRedirectErrorStream(commandLine.isRedirectErrorStream)
   }
 
+  private fun envCommand(commandLine: GeneralCommandLine): List<String> =
+    when (val args = envCommandArgs(commandLine)) {
+      emptyList<String>() -> emptyList()
+      else -> listOf("env") + args
+    }
+
+  private fun envCommandArgs(commandLine: GeneralCommandLine): List<String> =
+    // sudo doesn't pass parent process environment for security reasons,
+    // for the same reasons we pass only explicitly configured env variables
+    when (val env = commandLine.environment) {
+      emptyMap<String, String>() -> emptyList()
+      else -> env.map { entry -> "${entry.key}=${entry.value}" }
+    }
+
   @JvmStatic
   @Throws(IOException::class, ExecutionException::class)
   fun sudoAndGetOutput(commandLine: GeneralCommandLine, prompt: String): ProcessOutput =
@@ -186,7 +206,7 @@ object ExecUtil {
 
   @JvmStatic
   fun hasTerminalApp(): Boolean =
-    SystemInfo.isWindows || SystemInfo.isMac || hasKdeTerminal.value || hasGnomeTerminal.value || hasXTerm.value
+    SystemInfo.isWindows || SystemInfo.isMac || hasKdeTerminal.value || hasGnomeTerminal.value || hasUrxvt.value || hasXTerm.value
 
   @JvmStatic
   fun getTerminalCommand(title: String?, command: String): List<String> = when {
@@ -203,6 +223,10 @@ object ExecUtil {
     hasGnomeTerminal.value -> {
       if (title != null) listOf("gnome-terminal", "-t", title, "-x", command)
       else listOf("gnome-terminal", "-x", command)
+    }
+    hasUrxvt.value -> {
+      if (title != null) listOf("urxvt", "-title", title, "-e", command)
+      else listOf("urxvt", "-e", command)
     }
     hasXTerm.value -> {
       if (title != null) listOf("xterm", "-T", title, "-e", command)
@@ -229,6 +253,15 @@ object ExecUtil {
   }
 
   private fun canRunLowPriority() = Registry.`is`("ide.allow.low.priority.process") && (SystemInfo.isWindows || hasNice)
+
+  @JvmStatic
+  fun setupNoTtyExecution(commandLine: GeneralCommandLine) {
+    if (SystemInfo.isLinux && hasSetsid.value) {
+      val executablePath = commandLine.exePath
+      commandLine.exePath = "setsid"
+      commandLine.parametersList.prependAll(executablePath)
+    }
+  }
 
   //<editor-fold desc="Deprecated stuff.">
 

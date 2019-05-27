@@ -41,20 +41,19 @@ fi
 
 if [ -n "$JEDITERM_SOURCE" ]
 then
-  source $(echo $JEDITERM_SOURCE)
+  source $(echo $JEDITERM_SOURCE) $JEDITERM_SOURCE_ARGS
   unset JEDITERM_SOURCE
+  unset JEDITERM_SOURCE_ARGS
 fi
 
 function override_jb_variables {
-  for VARIABLE in $(env)
+  env | while IFS="=" read NAME VALUE
   do
-    NAME=${VARIABLE%%=*}
     if [[ $NAME = '_INTELLIJ_FORCE_SET_'* ]]
     then
       NEW_NAME=${NAME:20}
       if [ -n "$NEW_NAME" ]
       then
-        VALUE=${VARIABLE#*=}
         export "$NEW_NAME"="$VALUE"
       fi
     fi

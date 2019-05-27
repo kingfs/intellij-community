@@ -16,7 +16,6 @@ import java.util.List;
 
 /**
  * @author Denis Zhdanov
- * @since 9/17/12 11:53 AM
  */
 public class StdArrangementSettings implements ArrangementSettings {
   @NotNull private final   List<ArrangementSectionRule> mySectionRules     = new ArrayList<>();
@@ -28,9 +27,8 @@ public class StdArrangementSettings implements ArrangementSettings {
   public StdArrangementSettings() {
   }
 
-  @SuppressWarnings("unchecked")
   public StdArrangementSettings(@NotNull List<? extends ArrangementSectionRule> rules) {
-    this(Collections.EMPTY_LIST, rules);
+    this(Collections.emptyList(), rules);
   }
 
   public StdArrangementSettings(@NotNull List<? extends ArrangementGroupingRule> groupingRules,

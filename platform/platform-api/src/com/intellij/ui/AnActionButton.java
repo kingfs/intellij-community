@@ -1,17 +1,22 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui;
 
 import com.intellij.ide.DataManager;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.ui.popup.JBPopup;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.util.containers.SmartHashSet;
 import com.intellij.util.ui.UIUtil;
+import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -23,16 +28,19 @@ public abstract class AnActionButton extends AnAction implements ShortcutProvide
   private ShortcutSet myShortcut;
   private JComponent myContextComponent;
   private Set<AnActionButtonUpdater> myUpdaters;
+  private final List<ActionButtonListener> myListeners = new ArrayList<>();
 
   public AnActionButton(String text) {
     super(text);
   }
 
-  public AnActionButton(String text, String description, @Nullable Icon icon) {
+  public AnActionButton(@Nls(capitalization = Nls.Capitalization.Title) String text,
+                        @Nls(capitalization = Nls.Capitalization.Sentence) String description,
+                        @Nullable Icon icon) {
     super(text, description, icon);
   }
 
-  public AnActionButton(String text, Icon icon) {
+  public AnActionButton(@Nls(capitalization = Nls.Capitalization.Title) String text, Icon icon) {
     this(text, null, icon);
   }
 
@@ -52,7 +60,10 @@ public abstract class AnActionButton extends AnAction implements ShortcutProvide
   }
 
   public void setEnabled(boolean enabled) {
-    myEnabled = enabled;
+    if (myEnabled != enabled) {
+      myEnabled = enabled;
+      myListeners.forEach(l -> l.isEnabledChanged(enabled));
+    }
   }
 
   public boolean isVisible() {
@@ -60,7 +71,10 @@ public abstract class AnActionButton extends AnAction implements ShortcutProvide
   }
 
   public void setVisible(boolean visible) {
-    myVisible = visible;
+    if (myVisible != visible) {
+      myVisible = visible;
+      myListeners.forEach(l -> l.isVisibleChanged(visible));
+    }
   }
 
   @Override
@@ -145,6 +159,15 @@ public abstract class AnActionButton extends AnAction implements ShortcutProvide
     return null;
   }
 
+  public void addActionButtonListener(ActionButtonListener l, Disposable parentDisposable) {
+    myListeners.add(l);
+    Disposer.register(parentDisposable, () -> myListeners.remove(l));
+  }
+
+  public boolean removeActionButtonListener(ActionButtonListener l) {
+    return myListeners.remove(l);
+  }
+
   public static class CheckedAnActionButton extends AnActionButtonWrapper implements CheckedActionGroup {
     private final AnAction myDelegate;
 
@@ -198,6 +221,16 @@ public abstract class AnActionButton extends AnAction implements ShortcutProvide
 
     public void showPopup(JBPopup popup) {
       popup.show(myPeer.getPreferredPopupPoint());
+    }
+  }
+
+  public interface ActionButtonListener {
+    default void isVisibleChanged(boolean newValue) {
+      // Nothing
+    }
+
+    default void isEnabledChanged(boolean newValue) {
+      // Nothing
     }
   }
 }

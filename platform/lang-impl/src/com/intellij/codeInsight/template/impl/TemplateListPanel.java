@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.impl;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -124,20 +124,21 @@ public class TemplateListPanel extends JPanel implements Disposable {
   public void apply() throws ConfigurationException {
     List<TemplateGroup> templateGroups = getTemplateGroups();
     for (TemplateGroup templateGroup : templateGroups) {
-      Set<String> names = ContainerUtil.newHashSet();
+      Set<String> names = new HashSet<>();
 
       List<TemplateImpl> templates = templateGroup.getElements();
       for (TemplateImpl template : templates) {
-        if (StringUtil.isEmptyOrSpaces(template.getKey())) {
-          throw new ConfigurationException("A live template with an empty key has been found in " + templateGroup.getName() + " group, such live templates cannot be invoked");
+        String key = template.getKey();
+        if (StringUtil.isEmptyOrSpaces(key)) {
+          throw new ConfigurationException("A live template with an empty abbreviation has been found in '" + templateGroup.getName() + "' group, such live templates are not allowed");
         }
 
         if (StringUtil.isEmptyOrSpaces(template.getString())) {
-          throw new ConfigurationException("A live template with an empty text has been found in " + templateGroup.getName() + " group, such live templates cannot be invoked");
+          throw new ConfigurationException("A live template '" + key + "' with an empty text has been found in '" + templateGroup.getName() + "' group, such live templates make no sense");
         }
 
-        if (!names.add(template.getKey())) {
-          throw new ConfigurationException("Duplicate " + template.getKey() + " live templates in " + templateGroup.getName() + " group");
+        if (!names.add(key)) {
+          throw new ConfigurationException("Duplicate `" + key + "` live templates in " + templateGroup.getName() + " group");
         }
       }
     }
@@ -179,7 +180,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
     if (templateSettings.getDefaultShortcutChar() != myExpandByDefaultPanel.getSelectedChar()) {
       if (isTest) {
         //noinspection UseOfSystemOutOrSystemErr
-        System.err.println("LiveTemplatesConfig: templateSettings.getDefaultShortcutChar()="+templateSettings.getDefaultShortcutChar() 
+        System.err.println("LiveTemplatesConfig: templateSettings.getDefaultShortcutChar()="+templateSettings.getDefaultShortcutChar()
                            + "; myExpandByDefaultComponent.getSelectedChar()="+ myExpandByDefaultPanel.getSelectedChar());
       }
       return true;
@@ -218,7 +219,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
     return null;
   }
 
-  private static List<TemplateImpl> collectTemplates(@NotNull List<TemplateGroup> groups) {
+  private static List<TemplateImpl> collectTemplates(@NotNull List<? extends TemplateGroup> groups) {
     List<TemplateImpl> result = new ArrayList<>();
     for (TemplateGroup group : groups) {
       result.addAll(group.getElements());
@@ -233,7 +234,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
     return result;
   }
 
-  private String checkAreEqual(@NotNull  List<TemplateImpl> originalGroup, @NotNull List<TemplateImpl> newGroup) {
+  private String checkAreEqual(@NotNull List<? extends TemplateImpl> originalGroup, @NotNull List<? extends TemplateImpl> newGroup) {
     if (originalGroup.size() != newGroup.size()) return "different sizes";
 
     for (int i = 0; i < newGroup.size(); i++) {
@@ -285,7 +286,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
         ((DefaultTreeModel)myTree.getModel()).nodeChanged(node);
         TemplateSettings.getInstance().setLastSelectedTemplate(template.getGroupName(), template.getKey());
       }
-    }, TemplateSettings.getInstance().getTemplate(template.getKey(), template.getGroupName()) != null);
+    });
     for (Component component : myDetailsPanel.getComponents()) {
       if (component instanceof LiveTemplateSettingsEditor) {
         myDetailsPanel.remove(component);
@@ -334,9 +335,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
 
       template.setGroupName(newGroupName);
 
-      DefaultMutableTreeNode parent = (DefaultMutableTreeNode)oldTemplateNode.getParent();
       removeNodeFromParent(oldTemplateNode);
-      if (parent.getChildCount() == 0) removeNodeFromParent(parent);
 
       toSelect.add(new TreePath(registerTemplate(template).getPath()));
     }
@@ -641,8 +640,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
       public void update(@NotNull AnActionEvent e) {
         final TemplateGroup templateGroup = getSingleSelectedGroup();
         boolean enabled = templateGroup != null;
-        e.getPresentation().setEnabled(enabled);
-        e.getPresentation().setVisible(enabled);
+        e.getPresentation().setEnabledAndVisible(enabled);
         super.update(e);
       }
 
@@ -658,8 +656,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
       public void update(@NotNull AnActionEvent e) {
         final Map<TemplateImpl, DefaultMutableTreeNode> templates = getSelectedTemplates();
         boolean enabled = !templates.isEmpty();
-        e.getPresentation().setEnabled(enabled);
-        e.getPresentation().setVisible(enabled);
+        e.getPresentation().setEnabledAndVisible(enabled);
 
         if (enabled) {
           Set<String> oldGroups = getAllGroups(templates);
@@ -730,8 +727,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
             enabled = true;
           }
         }
-        e.getPresentation().setEnabled(enabled);
-        e.getPresentation().setVisible(enabled);
+        e.getPresentation().setEnabledAndVisible(enabled);
         super.update(e);
       }
 
@@ -767,7 +763,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
     });
   }
 
-  @Nullable 
+  @Nullable
   TemplateGroup getSingleSelectedGroup() {
     return getGroup(getSingleSelectedIndex());
   }
@@ -823,7 +819,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
         if (myCurrentTemplateEditor != null) {
           myCurrentTemplateEditor.dispose();
         }
-        createTemplateEditor(newTemplate, myExpandByDefaultPanel.getSelectedString(), getTemplateOptions(newTemplate), 
+        createTemplateEditor(newTemplate, myExpandByDefaultPanel.getSelectedString(), getTemplateOptions(newTemplate),
                              getTemplateContext(newTemplate));
         myCurrentTemplateEditor.resetUi();
         if (focusKey) {
@@ -900,7 +896,7 @@ public class TemplateListPanel extends JPanel implements Disposable {
     ((DefaultTreeModel)myTree.getModel()).nodesWereRemoved(parent, new int[]{idx}, new TreeNode[]{node});
   }
 
-  private void initTemplates(List<TemplateGroup> groups, String lastSelectedGroup, String lastSelectedKey) {
+  private void initTemplates(List<? extends TemplateGroup> groups, String lastSelectedGroup, String lastSelectedKey) {
     myTreeRoot.removeAllChildren();
     myTemplateGroups.clear();
     mutatorHelper.clear();

@@ -1,21 +1,29 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.featureStatistics;
 
-import com.intellij.internal.statistic.collectors.fus.ProductivityUsageCollector;
-import com.intellij.internal.statistic.eventLog.FeatureUsageLogger;
+import com.intellij.internal.statistic.eventLog.validator.ValidationResultType;
+import com.intellij.internal.statistic.eventLog.validator.rules.EventContext;
+import com.intellij.internal.statistic.eventLog.validator.rules.impl.CustomUtilsWhiteListRule;
 import com.intellij.internal.statistic.persistence.UsageStatisticsPersistenceComponent;
+import com.intellij.internal.statistic.service.fus.collectors.FUCounterUsageLogger;
+import com.intellij.internal.statistic.utils.PluginInfo;
+import com.intellij.internal.statistic.utils.PluginInfoDetectorKt;
 import com.intellij.openapi.components.PersistentStateComponent;
 import com.intellij.openapi.components.RoamingType;
 import com.intellij.openapi.components.State;
 import com.intellij.openapi.components.Storage;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.xmlb.XmlSerializer;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Set;
+
+import static com.intellij.internal.statistic.utils.StatisticsUtilKt.getPluginType;
 
 @State(name = "FeatureUsageStatistics", storages = @Storage(value = UsageStatisticsPersistenceComponent.USAGE_STATISTICS_XML, roamingType = RoamingType.DISABLED))
 public class FeatureUsageTrackerImpl extends FeatureUsageTracker implements PersistentStateComponent<Element> {
@@ -66,7 +74,7 @@ public class FeatureUsageTrackerImpl extends FeatureUsageTracker implements Pers
     }
 
     long current = System.currentTimeMillis();
-    long succesive_interval = descriptor.getDaysBetweenSuccessiveShowUps() * timeUnit + descriptor.getShownCount() * 2;
+    long succesive_interval = descriptor.getDaysBetweenSuccessiveShowUps() * timeUnit + descriptor.getShownCount() * 2L;
     long firstShowUpInterval = descriptor.getDaysBeforeFirstShowUp() * timeUnit;
     long lastTimeUsed = descriptor.getLastTimeUsed();
     long lastTimeShown = descriptor.getLastTimeShown();
@@ -171,8 +179,11 @@ public class FeatureUsageTrackerImpl extends FeatureUsageTracker implements Pers
      // TODO: LOG.error("Feature '" + featureId +"' must be registered prior triggerFeatureUsed() is called");
     }
     else {
-      FeatureUsageLogger.INSTANCE.log(ProductivityUsageCollector.GROUP_ID, descriptor.getId());
       descriptor.triggerUsed();
+
+      final Class<? extends ProductivityFeaturesProvider> provider = descriptor.getProvider();
+      final String id = provider == null || getPluginType(provider).isDevelopedByJetBrains() ? descriptor.getId() : "third.party";
+      FUCounterUsageLogger.getInstance().logEvent("productivity", id);
     }
   }
 
@@ -184,4 +195,30 @@ public class FeatureUsageTrackerImpl extends FeatureUsageTracker implements Pers
     }
   }
 
+  public static class ProductivityUtilValidator extends CustomUtilsWhiteListRule {
+
+    @Override
+    public boolean acceptRuleId(@Nullable String ruleId) {
+      return "productivity".equals(ruleId);
+    }
+
+    @NotNull
+    @Override
+    protected ValidationResultType doValidate(@NotNull String data, @NotNull EventContext context) {
+      if (isThirdPartyValue(data)) return ValidationResultType.ACCEPTED;
+
+      final ProductivityFeaturesRegistry registry = ProductivityFeaturesRegistry.getInstance();
+      final FeatureDescriptor descriptor = registry.getFeatureDescriptor(data);
+      if (descriptor == null) {
+        return ValidationResultType.REJECTED;
+      }
+
+      final Class<? extends ProductivityFeaturesProvider> provider = descriptor.getProvider();
+      final PluginInfo info = provider == null ? PluginInfoDetectorKt.getPlatformPlugin() : PluginInfoDetectorKt.getPluginInfo(provider);
+      if (StringUtil.equals(data, context.eventId)) {
+        context.setPluginInfo(info);
+      }
+      return info.isDevelopedByJetBrains() ? ValidationResultType.ACCEPTED : ValidationResultType.THIRD_PARTY;
+    }
+  }
 }

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.compiler.backwardRefs;
 
 import com.intellij.ProjectTopics;
@@ -20,7 +20,8 @@ import com.intellij.openapi.roots.ModuleRootEvent;
 import com.intellij.openapi.roots.ModuleRootListener;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.util.io.FileUtil;
-import com.intellij.openapi.vfs.*;
+import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.*;
 import com.intellij.psi.PsiDocumentManager;
@@ -36,12 +37,8 @@ import gnu.trove.THashSet;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.TestOnly;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 @SuppressWarnings("WeakerAccess")
 public class DirtyScopeHolder extends UserDataHolderBase implements BulkFileListener {
@@ -50,8 +47,10 @@ public class DirtyScopeHolder extends UserDataHolderBase implements BulkFileList
   private final PsiDocumentManager myPsiDocManager;
   private final Object myLock = new Object();
 
-  private final Set<Module> myVFSChangedModules = ContainerUtil.newHashSet(); // guarded by myLock
-  private final Set<Module> myChangedModulesDuringCompilation = ContainerUtil.newHashSet(); // guarded by myLock
+  private final Set<Module> myVFSChangedModules = new HashSet<>(); // guarded by myLock
+
+  private final Set<Module> myChangedModulesDuringCompilation = new HashSet<>(); // guarded by myLock
+
   private final List<ExcludeEntryDescription> myExcludedDescriptions = new SmartList<>(); // guarded by myLock
   private boolean myCompilationPhase; // guarded by myLock
   private volatile GlobalSearchScope myExcludedFilesScope; // calculated outside myLock
@@ -128,7 +127,7 @@ public class DirtyScopeHolder extends UserDataHolderBase implements BulkFileList
         return null;
       }
       final ModuleManager moduleManager = ModuleManager.getInstance(myService.getProject());
-      return myCompilationAffectedModules.stream().map(moduleManager::findModuleByName).collect(Collectors.toList());
+      return ContainerUtil.map(myCompilationAffectedModules, moduleManager::findModuleByName);
     });
     compilationFinished(() -> {
       if (compiledModules == null) return;

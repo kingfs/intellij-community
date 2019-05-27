@@ -1,4 +1,4 @@
-// Copyright 2000-2017 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch;
 
 import com.intellij.openapi.util.registry.Registry;
@@ -7,11 +7,13 @@ import org.jdom.Attribute;
 import org.jdom.DataConversionException;
 import org.jdom.Element;
 import org.jetbrains.annotations.NonNls;
+import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Maxim.Mossienko
  */
 public class MatchVariableConstraint extends NamedScriptableDefinition {
+  @NotNull
   private String regExp = "";
   private boolean invertRegExp;
   private boolean withinHierarchy;
@@ -21,19 +23,26 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
   private int maxCount = 1;
   private boolean greedy = true;
   private boolean invertReference;
+  @NotNull
   private String referenceConstraint = "";
   private boolean partOfSearchResults;
+  @NotNull
   private String nameOfExprType = "";
+  @NotNull
   private String expressionTypes = "";
   private boolean invertExprType;
   private boolean exprTypeWithinHierarchy;
 
+  @NotNull
   private String nameOfFormalArgType = "";
+  @NotNull
   private String expectedTypes = "";
   private boolean invertFormalType;
   private boolean formalArgTypeWithinHierarchy;
 
+  @NotNull
   private String withinConstraint = "";
+  @NotNull
   private String containsConstraint = "";
   private boolean invertContainsConstraint;
   private boolean invertWithinConstraint;
@@ -101,10 +110,11 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     return new MatchVariableConstraint(this);
   }
 
-  static String convertRegExpTypeToTypeString(String regexp) {
-    StringBuilder result = new StringBuilder();
+  @NotNull
+  static String convertRegExpTypeToTypeString(@NotNull String regexp) {
+    final StringBuilder result = new StringBuilder();
     for (int i = 0, length = regexp.length(); i < length; i++) {
-      int c = regexp.codePointAt(i);
+      final int c = regexp.codePointAt(i);
       if (c == '.') {
         if (i == length - 1 || !StructuralSearchUtil.isRegExpMetaChar(regexp.codePointAt(i + 1))) {
           result.append('.'); // consider dot not followed by other meta char a mistake
@@ -141,8 +151,9 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     return result.toString();
   }
 
-  static String convertTypeStringToRegExp(String typeString) {
-    StringBuilder result = new StringBuilder();
+  @NotNull
+  static String convertTypeStringToRegExp(@NotNull String typeString) {
+    final StringBuilder result = new StringBuilder();
     for (String type : StringUtil.split(typeString, "|")) {
       if (result.length() > 0) {
         result.append('|');
@@ -160,11 +171,12 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     this.greedy = greedy;
   }
 
+  @NotNull
   public String getRegExp() {
     return regExp;
   }
 
-  public void setRegExp(String regExp) {
+  public void setRegExp(@NotNull String regExp) {
     this.regExp = regExp;
   }
 
@@ -216,11 +228,12 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     this.invertReference = invertReference;
   }
 
+  @NotNull
   public String getReferenceConstraint() {
     return referenceConstraint;
   }
 
-  public void setReferenceConstraint(String nameOfReferenceVar) {
+  public void setReferenceConstraint(@NotNull String nameOfReferenceVar) {
     this.referenceConstraint = nameOfReferenceVar;
   }
 
@@ -232,11 +245,12 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     this.strictlyWithinHierarchy = strictlyWithinHierarchy;
   }
 
+  @NotNull
   public String getNameOfExprType() {
     return Registry.is("ssr.use.regexp.to.specify.type") ? nameOfExprType : expressionTypes;
   }
 
-  public void setNameOfExprType(String nameOfExprType) {
+  public void setNameOfExprType(@NotNull String nameOfExprType) {
     if (Registry.is("ssr.use.regexp.to.specify.type")) {
       this.nameOfExprType = nameOfExprType;
       this.expressionTypes = convertRegExpTypeToTypeString(nameOfExprType);
@@ -271,11 +285,12 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     this.wholeWordsOnly = wholeWordsOnly;
   }
 
+  @NotNull
   public String getNameOfFormalArgType() {
     return Registry.is("ssr.use.regexp.to.specify.type") ? nameOfFormalArgType : expectedTypes;
   }
 
-  public void setNameOfFormalArgType(String nameOfFormalArgType) {
+  public void setNameOfFormalArgType(@NotNull String nameOfFormalArgType) {
     if (Registry.is("ssr.use.regexp.to.specify.type")) {
       this.nameOfFormalArgType = nameOfFormalArgType;
       this.expectedTypes = convertRegExpTypeToTypeString(nameOfFormalArgType);
@@ -369,80 +384,46 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
   public void readExternal(Element element) {
     super.readExternal(element);
 
-    Attribute attribute = element.getAttribute(REGEXP);
-    if (attribute != null) {
-      regExp = attribute.getValue();
-    }
-    withinHierarchy = readBoolean(element, WITHIN_HIERARCHY);
-    invertRegExp = readBoolean(element, NEGATE_NAME_CONDITION);
-    wholeWordsOnly = readBoolean(element, WHOLE_WORDS_ONLY);
+    regExp = StringUtil.notNullize(element.getAttributeValue(REGEXP));
+    withinHierarchy = getBooleanValue(element, WITHIN_HIERARCHY, false);
+    invertRegExp = getBooleanValue(element, NEGATE_NAME_CONDITION, false);
+    wholeWordsOnly = getBooleanValue(element, WHOLE_WORDS_ONLY, false);
 
-    attribute = element.getAttribute(EXPRESSION_TYPES);
-    if (attribute != null) {
-      expressionTypes = attribute.getValue();
-    }
+    expressionTypes = StringUtil.notNullize(element.getAttributeValue(EXPRESSION_TYPES));
 
-    attribute = element.getAttribute(NAME_OF_EXPRTYPE);
-    if (attribute != null) {
-      nameOfExprType = attribute.getValue();
-      if (expressionTypes.isEmpty()) {
-        expressionTypes = convertRegExpTypeToTypeString(nameOfExprType);
-      }
+    nameOfExprType = StringUtil.notNullize(element.getAttributeValue(NAME_OF_EXPRTYPE));
+    if (expressionTypes.isEmpty() && !nameOfExprType.isEmpty()) {
+      expressionTypes = convertRegExpTypeToTypeString(nameOfExprType);
     }
 
-    exprTypeWithinHierarchy = readBoolean(element, EXPRTYPE_WITHIN_HIERARCHY);
-    invertExprType = readBoolean(element, NEGATE_EXPRTYPE_CONDITION);
+    exprTypeWithinHierarchy = getBooleanValue(element, EXPRTYPE_WITHIN_HIERARCHY, false);
+    invertExprType = getBooleanValue(element, NEGATE_EXPRTYPE_CONDITION, false);
+    expectedTypes = StringUtil.notNullize(element.getAttributeValue(EXPECTED_TYPES));
 
-    attribute = element.getAttribute(EXPECTED_TYPES);
-    if (attribute != null) {
-      expectedTypes = attribute.getValue();
+    nameOfFormalArgType = StringUtil.notNullize(element.getAttributeValue(NAME_OF_FORMALTYPE));
+    if (expectedTypes.isEmpty() && !nameOfFormalArgType.isEmpty()) {
+      expectedTypes = convertRegExpTypeToTypeString(nameOfFormalArgType);
     }
 
-    attribute = element.getAttribute(NAME_OF_FORMALTYPE);
-    if (attribute != null) {
-      nameOfFormalArgType = attribute.getValue();
-      if (expectedTypes.isEmpty()) {
-        expectedTypes = convertRegExpTypeToTypeString(nameOfFormalArgType);
-      }
-    }
+    formalArgTypeWithinHierarchy = getBooleanValue(element, FORMALTYPE_WITHIN_HIERARCHY, false);
+    invertFormalType = getBooleanValue(element, NEGATE_FORMALTYPE_CONDITION, false);
 
-    formalArgTypeWithinHierarchy = readBoolean(element, FORMALTYPE_WITHIN_HIERARCHY);
-    invertFormalType = readBoolean(element, NEGATE_FORMALTYPE_CONDITION);
+    minCount = getIntValue(element, MIN_OCCURS, 0);
+    maxCount = getIntValue(element, MAX_OCCURS, 0);
 
-    attribute = element.getAttribute(MIN_OCCURS);
-    if (attribute != null) {
-      try {
-        minCount = attribute.getIntValue();
-      }
-      catch (DataConversionException ignored) {
-      }
-    }
+    referenceConstraint = StringUtil.notNullize(element.getAttributeValue(REFERENCE_CONDITION));
+    invertReference = getBooleanValue(element, NEGATE_REFERENCE_CONDITION, false);
 
-    attribute = element.getAttribute(MAX_OCCURS);
-    if (attribute != null) {
-      try {
-        maxCount = attribute.getIntValue();
-      }
-      catch (DataConversionException ignored) {
-      }
-    }
+    containsConstraint = StringUtil.notNullize(element.getAttributeValue(CONTAINS_CONDITION));
+    invertContainsConstraint = getBooleanValue(element, NEGATE_CONTAINS_CONDITION, false);
 
-    attribute = element.getAttribute(REFERENCE_CONDITION);
-    if (attribute != null) referenceConstraint = attribute.getValue();
-    invertReference = readBoolean(element, NEGATE_REFERENCE_CONDITION);
+    withinConstraint = StringUtil.notNullize(element.getAttributeValue(WITHIN_CONDITION));
+    invertWithinConstraint = getBooleanValue(element, NEGATE_WITHIN_CONDITION, false);
 
-    attribute = element.getAttribute(CONTAINS_CONDITION);
-    if (attribute != null) containsConstraint = attribute.getValue();
-    invertContainsConstraint = readBoolean(element, NEGATE_CONTAINS_CONDITION);
-
-    attribute = element.getAttribute(WITHIN_CONDITION);
-    if (attribute != null) withinConstraint = attribute.getValue();
-    invertWithinConstraint = readBoolean(element, NEGATE_WITHIN_CONDITION);
-
-    partOfSearchResults = readBoolean(element, TARGET);
+    partOfSearchResults = getBooleanValue(element, TARGET, false);
   }
 
-  private static boolean readBoolean(Element element, String attributeName) {
+  public static boolean getBooleanValue(Element element, String attributeName, boolean defaultValue) {
     final Attribute attribute = element.getAttribute(attributeName);
     if (attribute != null) {
       try {
@@ -450,7 +431,19 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
       }
       catch (DataConversionException ignored) {}
     }
-    return false;
+    return defaultValue;
+  }
+
+  public static int getIntValue(Element element, String attributeName, int defaultValue) {
+    final Attribute attribute = element.getAttribute(attributeName);
+    if (attribute != null) {
+      try {
+        return attribute.getIntValue();
+      }
+      catch (DataConversionException ignored) {
+      }
+    }
+    return defaultValue;
   }
 
   @Override
@@ -472,8 +465,8 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     if (exprTypeWithinHierarchy) element.setAttribute(EXPRTYPE_WITHIN_HIERARCHY, TRUE);
     if (formalArgTypeWithinHierarchy) element.setAttribute(FORMALTYPE_WITHIN_HIERARCHY, TRUE);
 
-    if (minCount != 1) element.setAttribute(MIN_OCCURS,String.valueOf(minCount));
-    if (maxCount != 1) element.setAttribute(MAX_OCCURS,String.valueOf(maxCount));
+    if (minCount != 1) element.setAttribute(MIN_OCCURS, String.valueOf(minCount));
+    if (maxCount != 1) element.setAttribute(MAX_OCCURS, String.valueOf(maxCount));
     if (partOfSearchResults) element.setAttribute(TARGET, TRUE);
 
     if (invertRegExp) element.setAttribute(NEGATE_NAME_CONDITION, TRUE);
@@ -488,19 +481,21 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     element.setAttribute(CONTAINS_CONDITION, containsConstraint);
   }
 
+  @NotNull
   public String getWithinConstraint() {
     return withinConstraint;
   }
 
-  public void setWithinConstraint(final String withinConstraint) {
+  public void setWithinConstraint(@NotNull String withinConstraint) {
     this.withinConstraint = withinConstraint;
   }
 
+  @NotNull
   public String getContainsConstraint() {
     return containsConstraint;
   }
 
-  public void setContainsConstraint(final String containsConstraint) {
+  public void setContainsConstraint(@NotNull String containsConstraint) {
     this.containsConstraint = containsConstraint;
   }
 
@@ -508,7 +503,7 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     return invertContainsConstraint;
   }
 
-  public void setInvertContainsConstraint(final boolean invertContainsConstraint) {
+  public void setInvertContainsConstraint(boolean invertContainsConstraint) {
     this.invertContainsConstraint = invertContainsConstraint;
   }
 
@@ -516,7 +511,7 @@ public class MatchVariableConstraint extends NamedScriptableDefinition {
     return invertWithinConstraint;
   }
 
-  public void setInvertWithinConstraint(final boolean invertWithinConstraint) {
+  public void setInvertWithinConstraint(boolean invertWithinConstraint) {
     this.invertWithinConstraint = invertWithinConstraint;
   }
 

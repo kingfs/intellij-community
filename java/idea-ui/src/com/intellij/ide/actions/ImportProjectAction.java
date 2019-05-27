@@ -17,18 +17,17 @@ package com.intellij.ide.actions;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.actionSystem.AnActionEvent;
-import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.project.ProjectBundle;
 import com.intellij.openapi.wm.impl.welcomeScreen.NewWelcomeScreen;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * @author Dmitry Avdeev
- * @since 6.11.2012
  */
 public class ImportProjectAction extends ImportModuleAction {
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
-    ApplicationManager.getApplication().invokeLater(() -> doImport(null));
+   doImport(null);
   }
 
   @Override
@@ -36,5 +35,12 @@ public class ImportProjectAction extends ImportModuleAction {
     if (NewWelcomeScreen.isNewWelcomeScreen(e)) {
       e.getPresentation().setIcon(AllIcons.ToolbarDecorator.Import);
     }
+    NewProjectAction.updateActionText(this, e);
+  }
+
+  @NotNull
+  @Override
+  public String getActionText(boolean isInNewSubmenu, boolean isInJavaIde) {
+    return ProjectBundle.message("import.project.action.text", isInNewSubmenu ? 1 : 0, isInJavaIde ? 1 : 0);
   }
 }

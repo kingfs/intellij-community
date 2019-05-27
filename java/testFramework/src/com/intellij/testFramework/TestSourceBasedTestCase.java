@@ -16,7 +16,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 
 @SuppressWarnings({"HardCodedStringLiteral", "ConstantConditions", "JUnitTestCaseInProductSource"})
-@NonNls public abstract class TestSourceBasedTestCase extends IdeaTestCase {
+@NonNls public abstract class TestSourceBasedTestCase extends JavaProjectTestCase {
   private File myTempDirectory;
 
   @Override
@@ -44,6 +44,9 @@ import java.io.File;
   protected void tearDown() throws Exception {
     try {
       FileEditorManagerEx.getInstanceEx(getProject()).closeAllFiles();
+    }
+    catch (Throwable e) {
+      addSuppressedException(e);
     }
     finally {
       super.tearDown();

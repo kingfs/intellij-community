@@ -18,7 +18,6 @@ import static com.intellij.codeInsight.AnnotationUtil.CHECK_TYPE;
 
 /**
  * @author anna
- * @since 19-Aug-2008
  */
 public interface OverrideImplementsAnnotationsHandler {
   ExtensionPointName<OverrideImplementsAnnotationsHandler> EP_NAME = ExtensionPointName.create("com.intellij.overrideImplementsAnnotationsHandler");
@@ -43,6 +42,10 @@ public interface OverrideImplementsAnnotationsHandler {
     return ArrayUtil.EMPTY_STRING_ARRAY;
   }
 
+  /** Perform post processing on the annotations, such as deleting or renaming or otherwise updating annotations in the override */
+  default void cleanup(PsiModifierListOwner source, @Nullable PsiElement targetClass, PsiModifierListOwner target) {
+  }
+
   static void repeatAnnotationsFromSource(PsiModifierListOwner source, @Nullable PsiElement targetClass, PsiModifierListOwner target) {
     Module module = ModuleUtilCore.findModuleForPsiElement(targetClass != null ? targetClass : target);
     GlobalSearchScope moduleScope = module != null ? GlobalSearchScope.moduleWithDependenciesAndLibrariesScope(module) : null;
@@ -58,6 +61,10 @@ public interface OverrideImplementsAnnotationsHandler {
           each.transferToTarget(annotation, source, target);
         }
       }
+    }
+
+    for (OverrideImplementsAnnotationsHandler each : EP_NAME.getExtensionList()) {
+      each.cleanup(source, targetClass, target);
     }
   }
 

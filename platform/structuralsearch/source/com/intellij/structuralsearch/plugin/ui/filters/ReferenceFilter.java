@@ -39,7 +39,7 @@ public class ReferenceFilter extends FilterAction {
   }
 
   @Override
-  public boolean isApplicable(List<PsiElement> nodes, boolean completePattern, boolean target) {
+  public boolean isApplicable(List<? extends PsiElement> nodes, boolean completePattern, boolean target) {
     return myTable.getProfile().isApplicableConstraint(UIUtil.REFERENCE, nodes, completePattern, target);
   }
 
@@ -53,7 +53,7 @@ public class ReferenceFilter extends FilterAction {
 
   @Override
   public FilterEditor getEditor() {
-    return new FilterEditor(myTable.getConstraint()) {
+    return new FilterEditor(myTable.getConstraint(), myTable.getConstraintChangedCallback()) {
 
       private final JLabel myLabel = new JLabel("reference=");
       private final TextFieldWithAutoCompletion<String> textField =

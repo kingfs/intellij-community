@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -15,16 +15,15 @@ import com.intellij.util.BitUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.ThreeState;
 import com.intellij.util.containers.ContainerUtil;
-import com.siyeh.ig.psiutils.ExpressionUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 
 public class JavaTargetElementEvaluator extends TargetElementEvaluatorEx2 implements TargetElementUtilExtender{
-  public static final int NEW_AS_CONSTRUCTOR = 0x04;
-  public static final int THIS_ACCEPTED = 0x10;
-  public static final int SUPER_ACCEPTED = 0x20;
+  private static final int NEW_AS_CONSTRUCTOR = 0x04;
+  private static final int THIS_ACCEPTED = 0x10;
+  private static final int SUPER_ACCEPTED = 0x20;
 
   @Override
   public int getAllAdditionalFlags() {
@@ -70,13 +69,12 @@ public class JavaTargetElementEvaluator extends TargetElementEvaluatorEx2 implem
 
   @Override
   public boolean isAcceptableNamedParent(@NotNull PsiElement parent) {
-    return !(parent instanceof PsiDocTag);
+    return !(parent instanceof PsiDocTag) && !(parent instanceof PsiAnonymousClass);
   }
 
   @Override
   @NotNull
   public ThreeState isAcceptableReferencedElement(@NotNull final PsiElement element, final PsiElement referenceOrReferencedElement) {
-    if (referenceOrReferencedElement instanceof SyntheticElement) return ThreeState.NO;
     if (isEnumConstantReference(element, referenceOrReferencedElement)) return ThreeState.NO;
     return super.isAcceptableReferencedElement(element, referenceOrReferencedElement);
   }
@@ -84,14 +82,7 @@ public class JavaTargetElementEvaluator extends TargetElementEvaluatorEx2 implem
   private static boolean isEnumConstantReference(final PsiElement element, final PsiElement referenceOrReferencedElement) {
     return element != null &&
            element.getParent() instanceof PsiEnumConstant &&
-           (referenceOrReferencedElement instanceof PsiMethod && ((PsiMethod)referenceOrReferencedElement).isConstructor() || 
-            referenceOrReferencedElement instanceof PsiClass);
-  }
-
-  @Nullable
-  @Override
-  public PsiElement getElementByReference(@NotNull PsiReference ref, int flags) {
-    return null;
+           referenceOrReferencedElement instanceof PsiMethod && ((PsiMethod)referenceOrReferencedElement).isConstructor();
   }
 
   @Nullable
@@ -113,7 +104,7 @@ public class JavaTargetElementEvaluator extends TargetElementEvaluatorEx2 implem
           final PsiElement parent = element.getParent();
           if (parent instanceof PsiFunctionalExpression && 
               (PsiUtil.isJavaToken(element, JavaTokenType.ARROW) || PsiUtil.isJavaToken(element, JavaTokenType.DOUBLE_COLON))) {
-            refElement = PsiUtil.resolveClassInType(((PsiFunctionalExpression)parent).getFunctionalInterfaceType());
+            refElement = LambdaUtil.resolveFunctionalInterfaceClass((PsiFunctionalExpression)parent);
           }
           else if (element instanceof PsiKeyword && 
                    parent instanceof PsiTypeElement && 
@@ -211,7 +202,7 @@ public class JavaTargetElementEvaluator extends TargetElementEvaluatorEx2 implem
   public Collection<PsiElement> getTargetCandidates(@NotNull PsiReference reference) {
     PsiElement parent = reference.getElement().getParent();
     if (parent instanceof PsiMethodCallExpression ||
-        parent instanceof PsiNewExpression && !ExpressionUtils.isArrayCreationExpression((PsiNewExpression)parent)) {
+        parent instanceof PsiNewExpression && !((PsiNewExpression)parent).isArrayCreation()) {
       PsiCallExpression callExpr = (PsiCallExpression)parent;
       boolean allowStatics = false;
       PsiExpression qualifier = callExpr instanceof PsiMethodCallExpression ? ((PsiMethodCallExpression)callExpr).getMethodExpression().getQualifierExpression()

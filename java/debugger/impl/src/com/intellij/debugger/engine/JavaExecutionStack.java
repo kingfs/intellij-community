@@ -2,6 +2,7 @@
 package com.intellij.debugger.engine;
 
 import com.intellij.debugger.DebuggerBundle;
+import com.intellij.debugger.actions.AsyncStacksToggleAction;
 import com.intellij.debugger.engine.evaluation.EvaluateException;
 import com.intellij.debugger.engine.events.SuspendContextCommandImpl;
 import com.intellij.debugger.impl.DebuggerUtilsEx;
@@ -18,6 +19,7 @@ import com.intellij.ui.ColoredTextContainer;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.xdebugger.frame.XExecutionStack;
 import com.intellij.xdebugger.frame.XStackFrame;
+import com.intellij.xdebugger.impl.XDebugSessionImpl;
 import com.intellij.xdebugger.settings.XDebuggerSettingsManager;
 import com.sun.jdi.Location;
 import com.sun.jdi.Method;
@@ -158,14 +160,14 @@ public class JavaExecutionStack extends XExecutionStack {
     private final XStackFrameContainer myContainer;
     private int myAdded;
     private final int mySkip;
-    private final List<StackFrameItem> myAsyncStack;
+    private final List<? extends StackFrameItem> myAsyncStack;
 
     AppendFrameCommand(SuspendContextImpl suspendContext,
-                              Iterator<StackFrameProxyImpl> stackFramesIterator,
-                              XStackFrameContainer container,
-                              int added,
-                              int skip,
-                              List<StackFrameItem> asyncStack) {
+                       Iterator<StackFrameProxyImpl> stackFramesIterator,
+                       XStackFrameContainer container,
+                       int added,
+                       int skip,
+                       List<? extends StackFrameItem> asyncStack) {
       super(suspendContext);
       myStackFramesIterator = stackFramesIterator;
       myContainer = container;
@@ -215,7 +217,9 @@ public class JavaExecutionStack extends XExecutionStack {
         }
 
         List<StackFrameItem> relatedStack = null;
-        if (frame instanceof JavaStackFrame) {
+        if (AsyncStacksToggleAction.isAsyncStacksEnabled(
+          (XDebugSessionImpl)suspendContext.getDebugProcess().getXdebugProcess().getSession()) &&
+            frame instanceof JavaStackFrame) {
           for (AsyncStackTraceProvider asyncStackTraceProvider : AsyncStackTraceProvider.EP.getExtensionList()) {
             relatedStack = asyncStackTraceProvider.getAsyncStackTrace(((JavaStackFrame)frame), suspendContext);
             if (relatedStack != null) {
@@ -235,7 +239,7 @@ public class JavaExecutionStack extends XExecutionStack {
       }
     }
 
-    void appendRelatedStack(@NotNull List<StackFrameItem> asyncStack) {
+    void appendRelatedStack(@NotNull List<? extends StackFrameItem> asyncStack) {
       int i = 0;
       boolean separator = true;
       for (StackFrameItem stackFrame : asyncStack) {

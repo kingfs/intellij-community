@@ -25,7 +25,6 @@ import com.intellij.util.indexing.impl.*;
 import com.intellij.util.io.DataExternalizer;
 import com.intellij.util.io.EnumeratorIntegerDescriptor;
 import com.intellij.util.io.KeyDescriptor;
-import com.intellij.vcs.log.VcsFullCommitDetails;
 import com.intellij.vcs.log.impl.FatalErrorHandler;
 import com.intellij.vcs.log.util.StorageId;
 import gnu.trove.TIntHashSet;
@@ -34,12 +33,10 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
 import java.util.Collection;
-import java.util.Map;
 import java.util.Set;
-import java.util.function.BiPredicate;
 import java.util.function.ObjIntConsumer;
 
-public class VcsLogFullDetailsIndex<T, D extends VcsFullCommitDetails> implements Disposable {
+public class VcsLogFullDetailsIndex<T, D> implements Disposable {
   protected static final String INDEX = "index";
   @NotNull protected final MyMapReduceIndex myMapReduceIndex;
   @NotNull protected final StorageId myStorageId;
@@ -72,10 +69,9 @@ public class VcsLogFullDetailsIndex<T, D extends VcsFullCommitDetails> implement
     return new MyMapReduceIndex(extension, new MyMapIndexStorage<>(myName, myStorageId, dataExternalizer), forwardIndex);
   }
 
-  @NotNull
-  protected ForwardIndex<Integer, T> createForwardIndex(@NotNull IndexExtension<Integer, T, D> extension)
-    throws IOException {
-    return new EmptyForwardIndex<>();
+  @Nullable
+  protected ForwardIndex<Integer, T> createForwardIndex(@NotNull IndexExtension<Integer, T, D> extension) throws IOException {
+    return null;
   }
 
   @NotNull
@@ -107,15 +103,11 @@ public class VcsLogFullDetailsIndex<T, D extends VcsFullCommitDetails> implement
     });
   }
 
-  protected void iterateCommitIdsAndValues(int key, @NotNull ObjIntConsumer<T> consumer) throws StorageException {
+  protected void iterateCommitIdsAndValues(int key, @NotNull ObjIntConsumer<? super T> consumer) throws StorageException {
     myMapReduceIndex.getData(key).forEach((id, value) -> {
       consumer.accept(value, id);
       return true;
     });
-  }
-
-  protected boolean iterateCommitIdsAndValues(int key, @NotNull BiPredicate<T, Integer> consumer) throws StorageException {
-    return myMapReduceIndex.getData(key).forEach((id, value) -> consumer.test(value, id));
   }
 
   @Nullable
@@ -148,8 +140,8 @@ public class VcsLogFullDetailsIndex<T, D extends VcsFullCommitDetails> implement
 
   private class MyMapReduceIndex extends MapReduceIndex<Integer, T, D> {
     MyMapReduceIndex(@NotNull MyIndexExtension<T, D> extension,
-                            @NotNull MyMapIndexStorage<T> mapIndexStorage,
-                            @NotNull ForwardIndex<Integer, T> forwardIndex) {
+                     @NotNull MyMapIndexStorage<T> mapIndexStorage,
+                     @Nullable ForwardIndex<Integer, T> forwardIndex) {
       super(extension, mapIndexStorage, forwardIndex);
     }
 
@@ -191,8 +183,8 @@ public class VcsLogFullDetailsIndex<T, D extends VcsFullCommitDetails> implement
     private final int myVersion;
 
     MyIndexExtension(@NotNull String name, @NotNull DataIndexer<Integer, T, D> indexer,
-                            @NotNull DataExternalizer<T> externalizer,
-                            int version) {
+                     @NotNull DataExternalizer<T> externalizer,
+                     int version) {
       myID = IndexId.create(name);
       myIndexer = indexer;
       myExternalizer = externalizer;
@@ -226,30 +218,6 @@ public class VcsLogFullDetailsIndex<T, D extends VcsFullCommitDetails> implement
     @Override
     public int getVersion() {
       return myVersion;
-    }
-  }
-
-  private static class EmptyForwardIndex<T> implements ForwardIndex<Integer, T> {
-    @NotNull
-    @Override
-    public InputDataDiffBuilder<Integer, T> getDiffBuilder(int inputId) {
-      return new EmptyInputDataDiffBuilder<>(inputId);
-    }
-
-    @Override
-    public void putInputData(int inputId, @NotNull Map<Integer, T> data) {
-    }
-
-    @Override
-    public void flush() {
-    }
-
-    @Override
-    public void clear() {
-    }
-
-    @Override
-    public void close() {
     }
   }
 }

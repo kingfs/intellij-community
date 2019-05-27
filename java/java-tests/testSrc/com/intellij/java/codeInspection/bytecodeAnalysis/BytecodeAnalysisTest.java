@@ -31,7 +31,6 @@ import org.jetbrains.org.objectweb.asm.tree.analysis.AnalyzerException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -50,7 +49,7 @@ public class BytecodeAnalysisTest extends LightCodeInsightFixtureTestCase {
     public void configureModule(@NotNull Module module, @NotNull ModifiableRootModel model, @NotNull ContentEntry contentEntry) {
       super.configureModule(module, model, contentEntry);
       String dataDir = JavaTestUtil.getJavaTestDataPath() + "/codeInspection/bytecodeAnalysis/data";
-      PsiTestUtil.addProjectLibrary(model, "velocity", Arrays.asList(dataDir + "/classes", dataDir + "/conflict"));
+      PsiTestUtil.newLibrary("velocity").classesRoot(dataDir + "/classes").classesRoot(dataDir + "/conflict").addTo(model);
     }
   };
 
@@ -88,7 +87,7 @@ public class BytecodeAnalysisTest extends LightCodeInsightFixtureTestCase {
   public void testLeakingParametersAnalysis() throws IOException {
     Map<String, boolean[]> map = new HashMap<>();
 
-    GlobalSearchScope scope = GlobalSearchScope.moduleWithLibrariesScope(myModule);
+    GlobalSearchScope scope = GlobalSearchScope.moduleWithLibrariesScope(getModule());
     PsiClass psiClass = JavaPsiFacade.getInstance(getProject()).findClass(PACKAGE_NAME + ".data.TestLeakingParametersData", scope);
     assertNotNull(psiClass);
     try (InputStream stream = getVirtualFile(psiClass).getInputStream()) {
@@ -125,7 +124,7 @@ public class BytecodeAnalysisTest extends LightCodeInsightFixtureTestCase {
   }
 
   private void checkAnnotations(String className) {
-    GlobalSearchScope scope = GlobalSearchScope.moduleWithLibrariesScope(myModule);
+    GlobalSearchScope scope = GlobalSearchScope.moduleWithLibrariesScope(getModule());
     PsiClass psiClass = JavaPsiFacade.getInstance(getProject()).findClass(PACKAGE_NAME + '.' + className, scope);
     assertNotNull(psiClass);
     ProjectBytecodeAnalysis service = ProjectBytecodeAnalysis.getInstance(getProject());
@@ -170,7 +169,7 @@ public class BytecodeAnalysisTest extends LightCodeInsightFixtureTestCase {
   }
 
   private void checkCompoundIds(String className) throws IOException {
-    GlobalSearchScope scope = GlobalSearchScope.moduleWithLibrariesScope(myModule);
+    GlobalSearchScope scope = GlobalSearchScope.moduleWithLibrariesScope(getModule());
     PsiClass psiClass = JavaPsiFacade.getInstance(getProject()).findClass(PACKAGE_NAME + '.' + className, scope);
     assertNotNull(psiClass);
     MessageDigest digest = BytecodeAnalysisConverter.getMessageDigest();

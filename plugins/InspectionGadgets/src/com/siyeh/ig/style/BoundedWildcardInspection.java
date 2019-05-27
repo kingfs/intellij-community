@@ -73,10 +73,15 @@ public class BoundedWildcardInspection extends AbstractBaseJavaLocalInspectionTo
         if (owner instanceof PsiClass && !REPORT_INVARIANT_CLASSES && VarianceUtil.getClassVariance((PsiClass)owner, candidate.typeParameter) == Variance.INVARIANT) {
           return; // Nikolay despises List<? extends T>
         }
-        if (!REPORT_PRIVATE_METHODS && candidate.method.hasModifierProperty(PsiModifier.PRIVATE)) {
+        PsiClass containingClass = candidate.method.getContainingClass();
+        if (!REPORT_PRIVATE_METHODS && (candidate.method.hasModifierProperty(PsiModifier.PRIVATE)
+                                        // methods of private class considered private for the purpose of this inspection
+                                        || containingClass != null && containingClass.hasModifierProperty(PsiModifier.PRIVATE))) {
           return; // somebody hates his precious private methods highlighted
         }
-        if (!REPORT_INSTANCE_METHODS && !candidate.method.hasModifierProperty(PsiModifier.STATIC)) {
+        if (!REPORT_INSTANCE_METHODS &&
+            !candidate.method.hasModifierProperty(PsiModifier.STATIC) &&
+            !candidate.method.isConstructor()) {
           return; // somebody don't want to report instance methods highlighted because they can be already overridden
         }
         Project project = holder.getProject();
@@ -167,7 +172,7 @@ public class BoundedWildcardInspection extends AbstractBaseJavaLocalInspectionTo
     }
 
     private static void replaceType(@NotNull Project project, @NotNull PsiTypeElement typeElement, @NotNull PsiType withType) {
-      PsiElementFactory pf = PsiElementFactory.SERVICE.getInstance(project);
+      PsiElementFactory pf = PsiElementFactory.getInstance(project);
       PsiTypeElement newTypeElement = pf.createTypeElement(withType);
       if (typeElement.isPhysical()) {
         WriteCommandAction.runWriteCommandAction(project, (Runnable)() -> typeElement.replace(newTypeElement));
@@ -188,7 +193,7 @@ public class BoundedWildcardInspection extends AbstractBaseJavaLocalInspectionTo
     PsiType type = candidate.type;
 
     PsiManager psiManager = candidate.method.getManager();
-    PsiElementFactory pf = PsiElementFactory.SERVICE.getInstance(psiManager.getProject());
+    PsiElementFactory pf = PsiElementFactory.getInstance(psiManager.getProject());
     PsiTypeElement newInnerTypeElement = pf.createTypeElement(isExtends ? PsiWildcardType
       .createExtends(psiManager, type) : PsiWildcardType.createSuper(psiManager, type));
 
@@ -382,7 +387,7 @@ public class BoundedWildcardInspection extends AbstractBaseJavaLocalInspectionTo
       }
     });
     if (!these.isEmpty()) {
-      PsiElementFactory f = PsiElementFactory.SERVICE.getInstance(containingClass.getProject());
+      PsiElementFactory f = PsiElementFactory.getInstance(containingClass.getProject());
       PsiParameter __this__ = f.createParameter("__this__", f.createType(containingClass));
       methodCopy.getParameterList().add(__this__);
       for (PsiThisExpression thisExpr : these) {
@@ -396,20 +401,18 @@ public class BoundedWildcardInspection extends AbstractBaseJavaLocalInspectionTo
   private static boolean errorChecks(@NotNull PsiElement method, @NotNull List<PsiElement> elementsToIgnore) {
     HighlightVisitor visitor = ContainerUtil.find(HighlightVisitor.EP_HIGHLIGHT_VISITOR.getExtensions(method.getProject()), h -> h instanceof HighlightVisitorImpl).clone();
     HighlightInfoHolder holder = new HighlightInfoHolder(method.getContainingFile());
-    visitor.analyze(method.getContainingFile(), false, holder, ()->{
-      method.accept(new PsiRecursiveElementWalkingVisitor() {
-        @Override
-        public void visitElement(PsiElement element) {
-          if (elementsToIgnore.contains(element)) return; // ignore sub-elements too
-          visitor.visit(element);
-          //System.out.println("element = " + element+"; holder: "+holder.hasErrorResults());
-          if (holder.hasErrorResults()) {
-            stopWalking();
-          }
-          super.visitElement(element);
+    visitor.analyze(method.getContainingFile(), false, holder, ()-> method.accept(new PsiRecursiveElementWalkingVisitor() {
+      @Override
+      public void visitElement(PsiElement element) {
+        if (elementsToIgnore.contains(element)) return; // ignore sub-elements too
+        visitor.visit(element);
+        //System.out.println("element = " + element+"; holder: "+holder.hasErrorResults());
+        if (holder.hasErrorResults()) {
+          stopWalking();
         }
-      });
-    });
+        super.visitElement(element);
+      }
+    }));
     return !holder.hasErrorResults();
   }
 

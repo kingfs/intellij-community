@@ -18,6 +18,7 @@ import com.intellij.openapi.util.Conditions;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.ui.*;
+import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.navigation.History;
 import com.intellij.ui.navigation.Place;
 import com.intellij.ui.treeStructure.Tree;
@@ -39,7 +40,6 @@ import java.util.*;
 
 /**
  * @author anna
- * @since 29-May-2006
  */
 public abstract class MasterDetailsComponent implements Configurable, DetailsComponent.Facade, MasterDetails {
   protected static final Logger LOG = Logger.getInstance("#com.intellij.openapi.ui.MasterDetailsComponent");
@@ -125,7 +125,7 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
   protected void reInitWholePanelIfNeeded() {
     if (!myToReInitWholePanel) return;
 
-    myWholePanel = new JPanel(new BorderLayout()) {
+    myWholePanel = new NonOpaquePanel(new BorderLayout()) {
       @Override
       public void addNotify() {
         super.addNotify();
@@ -166,7 +166,7 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
     left.add(myMaster, BorderLayout.CENTER);
     mySplitter.setFirstComponent(left);
 
-    final JPanel right = new JPanel(new BorderLayout());
+    final JPanel right = new NonOpaquePanel(new BorderLayout());
     right.add(myDetails.getComponent(), BorderLayout.CENTER);
 
     mySplitter.setSecondComponent(right);
@@ -348,9 +348,14 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
       }
     }
     if (!selected) {
-      TreeUtil.selectFirstNode(myTree);
+      TreeUtil.promiseSelectFirst(myTree);
     }
-    updateSelectionFromTree();
+
+    //'updateSelectionFromTree' initializes 'details' components and it may take some time, so if the component isn't showing now
+    //  it's better to postpone calling it until 'addNotify' is called; in complex dialog like Project Structure the component may not be shown at all.
+    if (myWholePanel != null && myWholePanel.isShowing()) {
+      updateSelectionFromTree();
+    }
   }
 
   protected void loadComponentState() {
@@ -437,7 +442,6 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
     ((DefaultTreeModel)myTree.getModel()).setRoot(myRoot);
     myTree.setRootVisible(false);
     myTree.setShowsRootHandles(true);
-    UIUtil.setLineStyleAngled(myTree);
     TreeUtil.installActions(myTree);
     myTree.setCellRenderer(new ColoredTreeCellRenderer() {
       @Override
@@ -707,7 +711,7 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
     removeNodes(nodes);
   }
 
-  protected void removeNodes(final List<MyNode> nodes) {
+  protected void removeNodes(final List<? extends MyNode> nodes) {
     MyNode parentNode = null;
     int idx = -1;
     for (MyNode node : nodes) {
@@ -752,7 +756,7 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
         }
       }
       else {
-        TreeUtil.selectFirstNode(myTree);
+        TreeUtil.promiseSelectFirst(myTree);
       }
     }
   }
@@ -769,7 +773,7 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
 
     public MyDeleteAction(Condition<Object[]> availableCondition) {
       super(CommonBundle.message("button.delete"), CommonBundle.message("button.delete"), PlatformIcons.DELETE_ICON);
-      registerCustomShortcutSet(CommonShortcuts.getDelete(), myTree);
+      registerCustomShortcutSet(CommonActionsPanel.getCommonShortcut(CommonActionsPanel.Buttons.REMOVE), myTree);
       myCondition = availableCondition;
     }
 
@@ -815,8 +819,9 @@ public abstract class MasterDetailsComponent implements Configurable, DetailsCom
     @NotNull
     public String getDisplayName() {
       final NamedConfigurable configurable = (NamedConfigurable)getUserObject();
-      LOG.assertTrue(configurable != null, "Tree was already disposed");
-      return configurable.getDisplayName();
+      if (configurable != null) return configurable.getDisplayName();
+      LOG.debug("Tree was already disposed"); // workaround for IDEA-206547
+      return "DISPOSED";
     }
 
     public NamedConfigurable getConfigurable() {

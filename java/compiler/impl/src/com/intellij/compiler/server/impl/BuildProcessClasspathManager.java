@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.compiler.server.impl;
 
 import com.intellij.compiler.server.BuildProcessParametersProvider;
@@ -14,17 +14,13 @@ import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.PathUtil;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.io.URLUtil;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.util.Enumeration;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.jar.JarFile;
 
 /**
@@ -56,7 +52,7 @@ public class BuildProcessClasspathManager {
   }
 
   private static List<String> computeCompileServerPluginsClasspath() {
-    final List<String> classpath = ContainerUtil.newArrayList();
+    final List<String> classpath = new ArrayList<>();
 
     for (CompileServerPlugin serverPlugin : CompileServerPlugin.EP_NAME.getExtensions()) {
       final PluginId pluginId = serverPlugin.getPluginDescriptor().getPluginId();
@@ -148,16 +144,16 @@ public class BuildProcessClasspathManager {
   }
 
   private static List<String> getDynamicClasspath(Project project) {
-    final List<String> classpath = ContainerUtil.newArrayList();
-    for (BuildProcessParametersProvider provider : project.getExtensions(BuildProcessParametersProvider.EP_NAME)) {
+    final List<String> classpath = new ArrayList<>();
+    for (BuildProcessParametersProvider provider : BuildProcessParametersProvider.EP_NAME.getExtensionList(project)) {
       classpath.addAll(provider.getClassPath());
     }
     return classpath;
   }
 
   public static List<String> getLauncherClasspath(Project project) {
-    final List<String> classpath = ContainerUtil.newArrayList();
-    for (BuildProcessParametersProvider provider : project.getExtensions(BuildProcessParametersProvider.EP_NAME)) {
+    final List<String> classpath = new ArrayList<>();
+    for (BuildProcessParametersProvider provider : BuildProcessParametersProvider.EP_NAME.getExtensionList(project)) {
       classpath.addAll(provider.getLauncherClassPath());
     }
     return classpath;

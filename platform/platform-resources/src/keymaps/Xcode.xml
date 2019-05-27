@@ -448,6 +448,7 @@
     <keyboard-shortcut first-keystroke="control 2"/>
     <keyboard-shortcut first-keystroke="control 3"/>
   </action>
+  <action id="SwitcherRecentEditedChangedToggleCheckBox"/>
   <action id="RecentChangedFiles" />
   <action id="ToggleLineBreakpoint">
     <keyboard-shortcut first-keystroke="meta BACK_SLASH"/>
@@ -483,6 +484,8 @@
   <action id="Diff.NextChange">
     <keyboard-shortcut first-keystroke="meta shift CLOSE_BRACKET"/>
   </action>
+  <action id="Diff.ApplyLeftSide"/>
+  <action id="Diff.ApplyRightSide"/>
   <action id="Back">
     <keyboard-shortcut first-keystroke="meta control LEFT"/>
     <mouse-shortcut keystroke="button4"/>

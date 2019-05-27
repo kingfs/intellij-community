@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.java.codeInsight.completion;
 
 import com.intellij.codeInsight.CodeInsightSettings;
@@ -18,8 +18,11 @@ import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.registry.RegistryValue;
 import com.intellij.psi.JavaCodeFragmentFactory;
 import com.intellij.psi.PsiExpressionCodeFragment;
+import com.intellij.psi.PsiMethod;
 import com.intellij.testFramework.EditorTestUtil;
 import com.intellij.testFramework.fixtures.EditorMouseFixture;
+
+import java.util.LinkedHashMap;
 
 public class CompletionHintsTest extends AbstractParameterInfoTestCase {
   private boolean myStoredSettingValue;
@@ -35,6 +38,9 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
   protected void tearDown() throws Exception {
     try {
       CodeInsightSettings.getInstance().SHOW_PARAMETER_NAME_HINTS_ON_COMPLETION = myStoredSettingValue;
+    }
+    catch (Throwable e) {
+      addSuppressedException(e);
     }
     finally {
       super.tearDown();
@@ -559,7 +565,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
       settings.setShowParameterNameHints(oldValue);
     }
   }
-  
+
   public void testLargeNumberOfParameters() {
     disableVirtualComma();
 
@@ -573,7 +579,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
                           "    void m2() { mmm(<HINT text=\"a:\"/><caret>, <Hint text=\"b:\"/>, <Hint text=\"c:\"/>, <Hint text=\"d:\"/>, <Hint text=\"e:\"/>, <Hint text=\"f:\"/>); }\n" +
                           "}");
   }
-  
+
   public void testNestedContextIsNotDisposedOnTabbingOutToOuterContext() {
     disableVirtualComma();
 
@@ -609,7 +615,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     checkHintContents("<html><b>String</b>&nbsp;&nbsp;<i>a default value.  </i></html>");
     showParameterInfo();
     waitForAllAsyncStuff();
-    checkHintContents("<html><font color=gray>@NotNull String key</font color=gray></html>\n" +
+    checkHintContents("<html><font color=a8a8a8>@NonNls @NotNull String key</font></html>\n" +
                       "-\n" +
                       "[<html>@NotNull String key, <b>String def</b></html>]");
   }
@@ -621,14 +627,14 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     complete("setProperty");
     waitForAllAsyncStuff();
     checkResultWithInlays("class C { void m() { System.setProperty(<HINT text=\"key:\"/><caret>, <Hint text=\"value:\"/>) } }");
-    checkHintContents("<html><b>@NotNull String</b>&nbsp;&nbsp;<i>the name of the system property.  </i></html>");
+    checkHintContents("<html><b>@NonNls @NotNull String</b>&nbsp;&nbsp;<i>the name of the system property.  </i></html>");
     next();
     waitForAllAsyncStuff();
     checkResultWithInlays("class C { void m() { System.setProperty(<Hint text=\"key:\"/>, <HINT text=\"value:\"/><caret>) } }");
-    checkHintContents("<html><b>String</b>&nbsp;&nbsp;<i>the value of the system property.  </i></html>");
+    checkHintContents("<html><b>@NonNls @NotNull String</b>&nbsp;&nbsp;<i>the value of the system property.  </i></html>");
     showParameterInfo();
     waitForAllAsyncStuff();
-    checkHintContents("<html>@NotNull String key, <b>String value</b></html>");
+    checkHintContents("<html>@NonNls @NotNull String key, <b>@NonNls @NotNull String value</b></html>");
   }
 
   public void testUpInEditor() {
@@ -640,7 +646,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     checkHintContents("<html><b>@NotNull String</b>&nbsp;&nbsp;<i>the name of the system property.  </i></html>");
     showParameterInfo();
     waitForAllAsyncStuff();
-    checkHintContents("<html><b>@NotNull String key</b></html>\n" +
+    checkHintContents("<html><b>@NonNls @NotNull String key</b></html>\n" +
                       "-\n" +
                       "[<html><b>@NotNull String key</b>, String def</html>]");
     up();
@@ -658,7 +664,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     checkHintContents("<html><b>@NotNull String</b>&nbsp;&nbsp;<i>the name of the system property.  </i></html>");
     showParameterInfo();
     waitForAllAsyncStuff();
-    checkHintContents("<html><b>@NotNull String key</b></html>\n" +
+    checkHintContents("<html><b>@NonNls @NotNull String key</b></html>\n" +
                       "-\n" +
                       "[<html><b>@NotNull String key</b>, String def</html>]");
     myFixture.performEditorAction(IdeActions.ACTION_EDITOR_MOVE_CARET_DOWN);
@@ -687,7 +693,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     configureJava("class C { void m() { System.getPro<caret> } }");
     complete("getProperty(String key)");
     waitForAllAsyncStuff();
-    checkHintContents("<html><b>@NotNull String</b>&nbsp;&nbsp;<i>the name of the system property.  </i></html>");
+    checkHintContents("<html><b>@NonNls @NotNull String</b>&nbsp;&nbsp;<i>the name of the system property.  </i></html>");
   }
 
   public void testSwitchIsPossibleForManuallyEnteredUnmatchedMethodCall() {
@@ -724,7 +730,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     complete("getProperty(String key, String def)");
     waitForAllAsyncStuff();
     showParameterInfo();
-    checkHintContents("<html><b>@NotNull String key</b></html>\n" +
+    checkHintContents("<html><b>@NonNls @NotNull String key</b></html>\n" +
                       "-\n" +
                       "[<html><b>@NotNull String key</b>, String def</html>]");
     escape();
@@ -742,7 +748,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     complete("getProperty(String key, String def)");
     checkResultWithInlays("class C { void m() { System.getProperty(<caret>) } }");
     waitForAllAsyncStuff();
-    checkHintContents("<html><b>@NotNull String key</b></html>\n" +
+    checkHintContents("<html><b>@NonNls @NotNull String key</b></html>\n" +
                       "-\n" +
                       "[<html><b>@NotNull String key</b>, String def</html>]");
   }
@@ -873,7 +879,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     complete("format(String format, Object... args)");
     checkResultWithInlays("class C { void m() { String.format(<HINT text=\"format:\"/><caret><Hint text=\",args:\"/>) } }");
     waitForAllAsyncStuff();
-    checkHintContents("<html><b>String</b>&nbsp;&nbsp;<i>         A format string  </i></html>");
+    checkHintContents("<html><b>@NotNull String</b>&nbsp;&nbsp;<i>         A format string  </i></html>");
   }
 
   public void testBasicScenarioForConstructor() {
@@ -1026,7 +1032,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     checkResultWithInlays("class C { void m() { System.setProperty(<Hint text=\"key:\"/>\"a\", <HINT text=\"value:\"/>\"<caret>b\"); } }");
   }
 
-  public void testQuickDocForOverloadSelectedOnCompletion() throws Exception {
+  public void testQuickDocForOverloadSelectedOnCompletion() {
     disableVirtualComma();
 
     configureJava("class C { void m() { System.getPro<caret> } }");
@@ -1036,7 +1042,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     assertTrue(doc.contains("<code>null</code> if there is no property with that key"));
   }
 
-  public void testQuickDocForConstructorOverloadSelectedOnCompletion() throws Exception {
+  public void testQuickDocForConstructorOverloadSelectedOnCompletion() {
     configureJava("class C { void m() { new Strin<caret> } }");
     complete("String(byte[] bytes, String charsetName)");
     checkResultWithInlays("class C { void m() { new String(<HINT text=\"bytes:\"/><caret><Hint text=\",charsetName:\"/>) } }");
@@ -1657,6 +1663,7 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     complete("toChars(int codePoint, char[] dst, int dstIndex)");
     type("codePoin");
     completeSmart("codePoint");
+    checkResultWithInlays("class C { int codePoint = 123; void m() { Character.toChars(<HINT text=\"codePoint:\"/>codePoint, <hint text=\"dst:\"/><caret><Hint text=\",dstIndex:\"/>) } }");
     waitForAllAsyncStuff();
     checkResultWithInlays("class C { int codePoint = 123; void m() { Character.toChars(<Hint text=\"codePoint:\"/>codePoint, <HINT text=\"dst:\"/><caret><Hint text=\",dstIndex:\"/>) } }");
   }
@@ -1672,6 +1679,55 @@ public class CompletionHintsTest extends AbstractParameterInfoTestCase {
     showParameterInfo();
     methodOverloadUp();
     checkResultWithInlays("class C { void some(int a) {} void some(int a, int... b) {} void m() { some(<HINT text=\"a:\"/>1<caret>); } }");
+  }
+
+  public void testHideHintsForIncompleteCallIfOverloadMatches() {
+    configureJava("class C { void m() { System.getPro<caret> } }");
+    complete("getProperty(String key, String def)");
+    type("\"a");
+    home();
+    waitForAllAsyncStuff();
+    checkResultWithInlays("<caret>class C { void m() { System.getProperty(\"a\") } }");
+  }
+
+  public void testConstructorInSmartCompletion() {
+    configureJava("class C { void m() { throw new <caret> } }");
+    completeSmart("Error(String message, Throwable cause)");
+    checkResultWithInlays("class C { void m() { throw new Error(<HINT text=\"message:\"/><caret><Hint text=\",cause:\"/>); } }");
+  }
+
+  public void testSuggestConstructorsForNonImportedTypeAfterNew() {
+    configureJava("class C { new LinkedHashMa<caret>x } }");
+    complete();
+    PsiMethod[] constructors = myFixture.findClass(LinkedHashMap.class.getName()).getConstructors();
+    assertSize(constructors.length, myItems);
+    for (LookupElement item : myItems) {
+      assertInstanceOf(item.getPsiElement(), PsiMethod.class);
+    }
+  }
+
+  public void testCommasAutoInsertOnNextWord() {
+    configureJava("class C { void m() { Character.to<caret> } }");
+    complete("toChars(int codePoint, char[] dst, int dstIndex)");
+    checkResultWithInlays("class C { void m() { Character.toChars(<HINT text=\"codePoint:\"/><caret><Hint text=\",dst:\"/><Hint text=\",dstIndex:\"/>) } }");
+    myFixture.performEditorAction(IdeActions.ACTION_EDITOR_NEXT_WORD);
+    waitForAllAsyncStuff();
+    checkResultWithInlays(
+      "class C { void m() { Character.toChars(<hint text=\"codePoint:\"/><hint text=\",dst:\"/><hint text=\",dstIndex:\"/>)<caret> } }");
+    myFixture.performEditorAction(IdeActions.ACTION_EDITOR_PREVIOUS_WORD);
+    waitForAllAsyncStuff();
+    checkResultWithInlays("class C { void m() { Character.toChars(<Hint text=\"codePoint:\"/>, <Hint text=\"dst:\"/>, <HINT text=\"dstIndex:\"/><caret>) } }");
+  }
+
+  public void testPreferSamePackageClassesToConstructorsFromNonImportedClass() {
+    myFixture.addClass("package pkg; public class SubmissionPublisher {" +
+                       "public SubmissionPublisher(int a) {}" +
+                       "public SubmissionPublisher(int a, int b) {}" +
+                       "}");
+    myFixture.addClass("class Submarine {}");
+    configureJava("class C { new Subm<caret> } }");
+    myFixture.completeBasic();
+    myFixture.assertPreferredCompletionItems(0, "Submarine", "SubmissionPublisher");
   }
 
   private void checkResultWithInlays(String text) {

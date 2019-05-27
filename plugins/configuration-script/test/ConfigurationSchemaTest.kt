@@ -3,34 +3,51 @@ package com.intellij.configurationScript
 import com.intellij.codeInsight.completion.CompletionTestCase
 import com.intellij.codeInsight.lookup.LookupElement
 import com.intellij.codeInsight.lookup.LookupElementPresentation
+import com.intellij.configurationScript.schemaGenerators.ComponentStateJsonSchemaGenerator
+import com.intellij.configurationScript.schemaGenerators.RunConfigurationJsonSchemaGenerator
 import com.intellij.json.JsonFileType
+import com.intellij.openapi.components.BaseState
 import com.intellij.testFramework.EditorTestUtil
 import com.intellij.testFramework.LightVirtualFile
+import com.intellij.testFramework.PlatformTestUtil.getCommunityPath
 import com.intellij.testFramework.assertions.Assertions.assertThat
+import com.intellij.util.io.sanitizeFileName
 import com.jetbrains.jsonSchema.impl.JsonSchemaCompletionContributor
 import com.jetbrains.jsonSchema.impl.JsonSchemaReader
 import org.intellij.lang.annotations.Language
-import java.nio.charset.StandardCharsets
+import java.nio.file.Paths
 
 // this test requires YamlJsonSchemaCompletionContributor, that's why intellij.yaml is added as test dependency
 internal class ConfigurationSchemaTest : CompletionTestCase() {
   companion object {
-    private val schemaFile by lazy {
-      LightVirtualFile("scheme.json", JsonFileType.INSTANCE, generateConfigurationSchema(), StandardCharsets.UTF_8, 0)
-    }
+    private val testSnapshotDir = Paths.get(getCommunityPath(), "plugins/configuration-script", "testSnapshots")
   }
 
   fun `test map and description`() {
     val variants = test("""
     runConfigurations:
-      jvmMainMethod:
+      java:
         <caret>
     """.trimIndent())
 
     checkDescription(variants, "env", "Environment variables")
-    checkDescription(variants, "isAllowRunningInParallel", "Allow running in parallel")
+    checkDescription(variants, "isAllowRunningInParallel", "Allow parallel run")
     checkDescription(variants, "isShowConsoleOnStdErr", "Show console when a message is printed to standard error stream")
     checkDescription(variants, "isShowConsoleOnStdOut", "Show console when a message is printed to standard output stream")
+  }
+
+  fun `test array or object`() {
+    val variants = test("""
+    runConfigurations:
+      java: <caret>
+    """.trimIndent())
+
+    val texts = variants.map {
+      val presentation = LookupElementPresentation()
+      it.renderElement(presentation)
+      presentation.itemText
+    }
+    assertThat(texts).contains("{...}", "[...]")
   }
 
   fun `test no isAllowRunningInParallel if singleton policy not configurable`() {
@@ -44,7 +61,44 @@ internal class ConfigurationSchemaTest : CompletionTestCase() {
     configurations (array)
     """.trimIndent())
   }
-  
+
+  private class Foo : BaseState() {
+    @Suppress("unused")
+    var a by string()
+  }
+
+  fun `test component state`() {
+    doTestComponentState("foo".trimIndent(), """
+      foo:
+        <caret>
+    """)
+  }
+
+  fun `test component state - nested key`() {
+    doTestComponentState("foo.bar", """
+      foo:
+        bar:
+          <caret>
+    """)
+  }
+
+  private fun doTestComponentState(path: String, fileContent: String) {
+    val variants = test(fileContent.trimIndent(), listOf(object : SchemaGenerator {
+      override fun generate(rootBuilder: JsonObjectBuilder) {
+        val pathToStateClass = mapOf(path to Foo::class.java)
+        val schemaGenerator = ComponentStateJsonSchemaGenerator()
+        schemaGenerator.doGenerate(rootBuilder, pathToStateClass)
+      }
+    }), schemaValidator = {
+      val snapshotFile = testSnapshotDir.resolve(sanitizeFileName(name) + ".json")
+      assertThat(it.toString()).toMatchSnapshot(snapshotFile)
+    })
+
+    assertThat(variantsToText(variants)).isEqualTo("""
+    a (string)
+    """.trimIndent())
+  }
+
   private fun checkDescription(variants: List<LookupElement>, name: String, expectedDescription: String) {
     val variant = variants.first { it.lookupString == name }
     val presentation = LookupElementPresentation()
@@ -52,13 +106,18 @@ internal class ConfigurationSchemaTest : CompletionTestCase() {
     assertThat(presentation.typeText).isEqualTo(expectedDescription)
   }
 
-  private fun test(@Language("YAML") text: String): List<LookupElement> {
+  private fun test(@Language("YAML") text: String, generators: List<SchemaGenerator> = listOf(RunConfigurationJsonSchemaGenerator()), schemaValidator: ((CharSequence) -> Unit)? = null): List<LookupElement> {
     val position = EditorTestUtil.getCaretPosition(text)
     assertThat(position).isGreaterThan(0)
 
+    @Suppress("SpellCheckingInspection")
     val file = createFile(myModule, "intellij.yaml", text.replace("<caret>", "IntelliJIDEARulezzz"))
     val element = file.findElementAt(position)
     assertThat(element).isNotNull
+
+    val schemaContent = doGenerateConfigurationSchema(generators)
+    schemaValidator?.invoke(schemaContent)
+    val schemaFile = LightVirtualFile("scheme.json", JsonFileType.INSTANCE, schemaContent, Charsets.UTF_8, 0)
 
     val schemaObject = JsonSchemaReader.readFromFile(myProject, schemaFile)
     assertThat(schemaObject).isNotNull

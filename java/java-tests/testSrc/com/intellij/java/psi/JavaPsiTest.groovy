@@ -1,6 +1,4 @@
-/*
- * Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.java.psi
 
 import com.intellij.openapi.command.WriteCommandAction
@@ -31,13 +29,13 @@ class JavaPsiTest extends LightCodeInsightFixtureTestCase {
     def file = configureFile("module M { opens pkg; }")
     def statement = file.moduleDeclaration.opens.first()
     def facade = myFixture.javaFacade.parserFacade
-    runCommand { statement.add(facade.createModuleReferenceFromText("M1")) }
+    runCommand { statement.add(facade.createModuleReferenceFromText("M1", null)) }
     assert statement.text == "opens pkg to M1;"
-    runCommand { statement.add(facade.createModuleReferenceFromText("M2")) }
+    runCommand { statement.add(facade.createModuleReferenceFromText("M2", null)) }
     assert statement.text == "opens pkg to M1, M2;"
     runCommand { statement.lastChild.delete() }
     assert statement.text == "opens pkg to M1, M2"
-    runCommand { statement.add(facade.createModuleReferenceFromText("M3")) }
+    runCommand { statement.add(facade.createModuleReferenceFromText("M3", null)) }
     assert statement.text == "opens pkg to M1, M2, M3"
   }
 
@@ -75,6 +73,12 @@ class JavaPsiTest extends LightCodeInsightFixtureTestCase {
     runCommand { file.setPackageName('foo') }
     PsiTestUtil.checkFileStructure(file)
     assert myFixture.editor.document.text.startsWith('package foo;')
+  }
+
+  void "test deleting lone import after semicolon leaves PSI consistent"() {
+    def file = configureFile("package p;;import javax.swing.*;")
+    runCommand { file.importList.importStatements[0].delete() }
+    PsiTestUtil.checkPsiMatchesTextIgnoringNonCode(file)
   }
 
   private PsiJavaFile configureFile(String text) {

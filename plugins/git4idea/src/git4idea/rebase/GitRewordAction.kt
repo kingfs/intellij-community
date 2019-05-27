@@ -52,9 +52,7 @@ class GitRewordAction : GitCommitEditingAction() {
     prohibitRebaseDuringRebase(e, "reword", true)
   }
 
-  override fun actionPerformed(e: AnActionEvent) {
-    super.actionPerformed(e)
-
+  override fun actionPerformedAfterChecks(e: AnActionEvent) {
     val commit = getSelectedCommit(e)
     val project = e.project!!
     val repository = getRepository(e)
@@ -97,7 +95,7 @@ class GitRewordAction : GitCommitEditingAction() {
             "", error, NotificationType.ERROR, null)
           VcsNotifier.getInstance(project).notify(notification)
         }
-      }, "Loading Commit Message", true, project)
+      }, "Loading Commit Message...", true, project)
     return commitData
   }
 

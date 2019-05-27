@@ -123,7 +123,7 @@ public class CyclicDependenciesPanel extends JPanel implements Disposable, DataP
     mySettings.UI_FILTER_LEGALS = false;
     mySettings.UI_FLATTEN_PACKAGES = false;
 
-    TreeUtil.selectFirstNode(myLeftTree);
+    TreeUtil.promiseSelectFirst(myLeftTree);
   }
 
   private static void getPackageNodesHierarchy(PackageNode node, Set<? super PackageNode> result){
@@ -206,8 +206,6 @@ public class CyclicDependenciesPanel extends JPanel implements Disposable, DataP
     tree.setCellRenderer(new MyTreeCellRenderer(tree == myLeftTree));
     tree.setRootVisible(false);
     tree.setShowsRootHandles(true);
-    UIUtil.setLineStyleAngled(tree);
-
     TreeUtil.installActions(tree);
     SmartExpander.installOn(tree);
     EditSourceOnDoubleClickHandler.install(tree);

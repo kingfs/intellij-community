@@ -1,21 +1,6 @@
-/*
- * Copyright 2000-2014 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.source.tree.java;
 
-import com.intellij.codeInsight.PsiEquivalenceUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.source.resolve.ParameterTypeInferencePolicy;
@@ -33,6 +18,7 @@ import com.intellij.psi.util.MethodSignature;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.psi.util.TypeConversionUtil;
+import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -72,7 +58,7 @@ public class MethodReferenceResolver implements ResolveCache.PolyVariantContextR
             }
           }
           ClassCandidateInfo candidateInfo = null;
-          final boolean isArray = PsiEquivalenceUtil.areElementsEquivalent(containingClass, JavaPsiFacade.getElementFactory(reference.getProject()).getArrayClass(PsiUtil.getLanguageLevel(reference)));
+          final boolean isArray = PsiUtil.isArrayClass(containingClass);
           if (signature == null ||
               !isArray && (containingClass.getContainingClass() == null || !isLocatedInStaticContext(containingClass, reference)) && signature.getParameterTypes().length == 0 ||
               isArray && arrayCreationSignature(signature)) {
@@ -109,7 +95,8 @@ public class MethodReferenceResolver implements ResolveCache.PolyVariantContextR
                 @NotNull
                 @Override
                 public PsiSubstitutor inferTypeArguments(@NotNull ParameterTypeInferencePolicy policy, boolean includeReturnConstraint) {
-                  return inferTypeArguments(includeReturnConstraint);
+                  return includeReturnConstraint ? inferTypeArguments(true) 
+                                                 : ObjectUtils.assertNotNull(MethodCandidateInfo.ourOverloadGuard.doPreventingRecursion(reference, false, () -> inferTypeArguments(false)));
                 }
 
                 private PsiSubstitutor inferTypeArguments(boolean includeReturnConstraint) {
@@ -136,7 +123,7 @@ public class MethodReferenceResolver implements ResolveCache.PolyVariantContextR
                       session.registerReturnTypeConstraints(returnType, interfaceMethodReturnType, reference);
                     }
                   }
-                  return session.infer(method.getParameterList().getParameters(), null, null);
+                  return session.infer(method.getParameterList().getParameters(), null, null, null);
                 }
 
                 @Override
@@ -303,13 +290,23 @@ public class MethodReferenceResolver implements ResolveCache.PolyVariantContextR
       }
 
       if ((varargs || functionalInterfaceParamTypes.length == parameterTypes.length) &&
-          isCorrectAssignment(parameterTypes, functionalInterfaceParamTypes, interfaceMethod, varargs, referenceExpression, conflict, 0)) {
+          isCorrectAssignment(parameterTypes, functionalInterfaceParamTypes, interfaceMethod, varargs, conflict, 0)) {
+        //reject static interface methods called on something else but interface class
+        if (psiMethod.hasModifierProperty(PsiModifier.STATIC)) {
+          PsiClass containingClass = psiMethod.getContainingClass();
+          if (containingClass != null && containingClass.isInterface()) {
+            final PsiClass qualifierClass = PsiMethodReferenceUtil.getQualifierResolveResult(referenceExpression).getContainingClass();
+            if (!containingClass.getManager().areElementsEquivalent(qualifierClass, containingClass)) {
+              return null;
+            }
+          }
+        }
         return true;
       }
 
       if (hasReceiver &&
           (varargs || functionalInterfaceParamTypes.length == parameterTypes.length + 1) &&
-          isCorrectAssignment(parameterTypes, functionalInterfaceParamTypes, interfaceMethod, varargs, referenceExpression, conflict, 1)) {
+          isCorrectAssignment(parameterTypes, functionalInterfaceParamTypes, interfaceMethod, varargs, conflict, 1)) {
         return false;
       }
       return null;
@@ -319,7 +316,6 @@ public class MethodReferenceResolver implements ResolveCache.PolyVariantContextR
                                                PsiType[] functionalInterfaceParamTypes,
                                                PsiMethod interfaceMethod,
                                                boolean varargs,
-                                               PsiMethodReferenceExpression referenceExpression,
                                                CandidateInfo conflict,
                                                int offset) {
       final int min = Math.min(parameterTypes.length, functionalInterfaceParamTypes.length - offset);
@@ -329,37 +325,32 @@ public class MethodReferenceResolver implements ResolveCache.PolyVariantContextR
         if (varargs && i == parameterTypes.length - 1) {
           if (!TypeConversionUtil.isAssignable(parameterType, argType) &&
               !TypeConversionUtil.isAssignable(((PsiArrayType)parameterType).getComponentType(), argType)) {
-            reportParameterConflict(referenceExpression, conflict, argType, parameterType);
+            markNotApplicable(conflict);
             return false;
           }
         }
         else if (!TypeConversionUtil.isAssignable(parameterType, argType)) {
-          reportParameterConflict(referenceExpression, conflict, argType, parameterType);
+          markNotApplicable(conflict);
           return false;
         }
       }
       return !varargs || parameterTypes.length - 1 <= functionalInterfaceParamTypes.length - offset;
     }
 
-    private static void reportParameterConflict(PsiMethodReferenceExpression referenceExpression,
-                                                CandidateInfo conflict,
-                                                PsiType argType, 
-                                                PsiType parameterType) {
+    private static void markNotApplicable(CandidateInfo conflict) {
       if (conflict instanceof MethodCandidateInfo) {
-        ((MethodCandidateInfo)conflict).setApplicabilityError("Invalid " +
-                                                              (referenceExpression.isConstructor() ? "constructor" :"method") +
-                                                              " reference: " + argType.getPresentableText() + " cannot be converted to " + parameterType.getPresentableText());
+        ((MethodCandidateInfo)conflict).markNotApplicable();
       }
     }
 
     private CandidateInfo resolveConflicts(List<CandidateInfo> firstCandidates, List<CandidateInfo> secondCandidates, int applicabilityLevel) {
 
       final int firstApplicability = checkApplicability(firstCandidates);
-      checkSpecifics(firstCandidates, applicabilityLevel, myLanguageLevel);
+      checkSpecifics(firstCandidates, applicabilityLevel);
 
       final int secondApplicability = checkApplicability(secondCandidates);
-      checkSpecifics(secondCandidates, applicabilityLevel, myLanguageLevel);
-      
+      checkSpecifics(secondCandidates, applicabilityLevel, null, 1);
+
       if (firstApplicability < secondApplicability) {
         return secondCandidates.size() == 1 ? secondCandidates.get(0) : null;
       }

@@ -1,4 +1,4 @@
-// Copyright 2000-2017 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.java;
 
 import com.intellij.ide.highlighter.JavaFileType;
@@ -9,7 +9,6 @@ import com.intellij.psi.impl.source.JavaFileElementType;
 import com.intellij.psi.impl.source.tree.ElementType;
 import com.intellij.psi.impl.source.tree.JavaElementType;
 import com.intellij.psi.impl.source.tree.LightTreeUtil;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.*;
 import com.intellij.util.io.BooleanDataDescriptor;
 import com.intellij.util.io.DataExternalizer;
@@ -25,6 +24,8 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 public class JavaBinaryPlusExpressionIndex extends FileBasedIndexExtension<Boolean, JavaBinaryPlusExpressionIndex.PlusOffsets> implements PsiDependentIndex {
   public static final ID<Boolean, PlusOffsets> INDEX_ID = ID.create("java.binary.plus.expression");
@@ -43,20 +44,20 @@ public class JavaBinaryPlusExpressionIndex extends FileBasedIndexExtension<Boole
       int[] offsets = new StringSearcher("+", true, true).findAllOccurrences(text);
       if (offsets.length == 0) return Collections.emptyMap();
 
-      LighterAST tree = ((FileContentImpl)inputData).getLighterASTForPsiDependentIndex();
+      LighterAST tree = ((PsiDependentFileContent)inputData).getLighterAST();
       TIntArrayList result = new TIntArrayList(offsets.length);
-      for (int offset : offsets) {
-        LighterASTNode leaf = LightTreeUtil.findLeafElementAt(tree, offset);
+      Map<LighterASTNode, Boolean> stringConcatenations = new HashMap<>();
+      LightTreeUtil.processLeavesAtOffsets(offsets, tree, (leaf, offset) -> {
         LighterASTNode element = leaf == null ? null : tree.getParent(leaf);
-        if (element == null) continue;
+        if (element == null) return;
 
         if ((element.getTokenType() == JavaElementType.BINARY_EXPRESSION
              || element.getTokenType() == JavaElementType.POLYADIC_EXPRESSION) &&
-            !isStringConcatenation(element, tree)) {
+            !stringConcatenations.computeIfAbsent(element, __ -> isStringConcatenation(element, tree))) {
           result.add(offset);
         }
-      }
-      THashMap<Boolean, PlusOffsets> resultMap = ContainerUtil.newTroveMap();
+      });
+      THashMap<Boolean, PlusOffsets> resultMap = new THashMap<>();
       resultMap.put(Boolean.TRUE, new PlusOffsets(result.toNativeArray()));
       return resultMap;
     };

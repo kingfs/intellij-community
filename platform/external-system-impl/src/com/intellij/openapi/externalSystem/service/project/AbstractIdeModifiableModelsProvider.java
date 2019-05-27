@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.externalSystem.service.project;
 
 import com.intellij.facet.Facet;
@@ -69,7 +55,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.isRelated;
 import static com.intellij.openapi.externalSystem.util.ExternalSystemApiUtil.toCanonicalPath;
@@ -322,7 +307,7 @@ public abstract class AbstractIdeModifiableModelsProvider extends IdeModelsProvi
       @NotNull
       @Override
       public Collection<Module> getNodes() {
-        return ContainerUtil.list(getModules());
+        return Arrays.asList(getModules());
       }
 
       @NotNull
@@ -393,7 +378,7 @@ public abstract class AbstractIdeModifiableModelsProvider extends IdeModelsProvi
     }
 
     @Override
-    public Module getModule(String name) {
+    public Module getModule(@NotNull String name) {
       return AbstractIdeModifiableModelsProvider.this.findIdeModule(name);
     }
 
@@ -402,6 +387,7 @@ public abstract class AbstractIdeModifiableModelsProvider extends IdeModelsProvi
       return AbstractIdeModifiableModelsProvider.this.getModifiableRootModel(module);
     }
 
+    @NotNull
     @Override
     public FacetModel getFacetModel(@NotNull Module module) {
       return AbstractIdeModifiableModelsProvider.this.getModifiableFacetModel(module);
@@ -579,16 +565,14 @@ public abstract class AbstractIdeModifiableModelsProvider extends IdeModelsProvi
     ModifiableWorkspace workspace = getModifiableWorkspace();
     if (workspace == null) return;
 
-    final List<String> oldModules = Arrays.stream(ModuleManager.getInstance(myProject).getModules())
-                                          .map(module -> module.getName()).collect(Collectors.toList());
-    final List<String> newModules = Arrays.stream(myModifiableModuleModel.getModules())
-                                          .map(module -> module.getName()).collect(Collectors.toList());
+    final List<String> oldModules = ContainerUtil.map(ModuleManager.getInstance(myProject).getModules(), module -> module.getName());
+    final List<String> newModules = ContainerUtil.map(myModifiableModuleModel.getModules(), module -> module.getName());
 
     final Collection<String> removedModules = new THashSet<>(oldModules);
     removedModules.removeAll(newModules);
 
 
-    Map<String, String> toSubstitute = ContainerUtil.newHashMap();
+    Map<String, String> toSubstitute = new HashMap<>();
     for (ExternalSystemManager<?, ?, ?, ?, ?> manager: ExternalSystemApiUtil.getAllManagers()) {
       final Collection<ExternalProjectInfo> projectsData =
         ProjectDataManager.getInstance().getExternalProjectsData(myProject, manager.getSystemId());

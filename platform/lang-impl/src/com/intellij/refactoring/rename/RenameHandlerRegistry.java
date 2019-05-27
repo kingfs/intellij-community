@@ -19,13 +19,17 @@ import com.intellij.refactoring.rename.inplace.MemberInplaceRenameHandler;
 import com.intellij.refactoring.util.RadioUpDownListener;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
 import javax.swing.*;
 import java.awt.event.ItemEvent;
 import java.awt.event.ItemListener;
-import java.util.*;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Function;
 
 /**
@@ -33,9 +37,8 @@ import java.util.function.Function;
  */
 public class RenameHandlerRegistry {
   public static final Key<Boolean> SELECT_ALL = Key.create("rename.selectAll");
-  private final Set<RenameHandler> myHandlers  = new HashSet<>();
   private final PsiElementRenameHandler myDefaultElementRenameHandler;
-  private Function<Collection<RenameHandler>, RenameHandler> myRenameHandlerSelectorInTests = ContainerUtil::getFirstItem;
+  private Function<? super Collection<RenameHandler>, ? extends RenameHandler> myRenameHandlerSelectorInTests = ContainerUtil::getFirstItem;
 
   public static RenameHandlerRegistry getInstance() {
     return ServiceManager.getService(RenameHandlerRegistry.class);
@@ -46,23 +49,17 @@ public class RenameHandlerRegistry {
     myDefaultElementRenameHandler = new PsiElementRenameHandler();
   }
 
-  public boolean hasAvailableHandler(DataContext dataContext) {
+  public boolean hasAvailableHandler(@NotNull DataContext dataContext) {
     for (RenameHandler renameHandler : RenameHandler.EP_NAME.getExtensionList()) {
-      if (renameHandler.isAvailableOnDataContext(dataContext)) return true;
-    }
-    for (RenameHandler renameHandler : myHandlers) {
       if (renameHandler.isAvailableOnDataContext(dataContext)) return true;
     }
     return myDefaultElementRenameHandler.isAvailableOnDataContext(dataContext);
   }
 
   @Nullable
-  public RenameHandler getRenameHandler(DataContext dataContext) {
+  public RenameHandler getRenameHandler(@NotNull DataContext dataContext) {
     final Map<String, RenameHandler> availableHandlers = new TreeMap<>();
     for (RenameHandler renameHandler : RenameHandler.EP_NAME.getExtensionList()) {
-      checkHandler(renameHandler, dataContext, availableHandlers);
-    }
-    for (RenameHandler renameHandler : myHandlers) {
       checkHandler(renameHandler, dataContext, availableHandlers);
     }
     if (availableHandlers.size() == 1) return availableHandlers.values().iterator().next();
@@ -95,7 +92,7 @@ public class RenameHandlerRegistry {
   }
 
   @TestOnly
-  public void setRenameHandlerSelectorInTests(Function<Collection<RenameHandler>, RenameHandler> selector, Disposable parentDisposable) {
+  public void setRenameHandlerSelectorInTests(Function<? super Collection<RenameHandler>, ? extends RenameHandler> selector, Disposable parentDisposable) {
     myRenameHandlerSelectorInTests = selector;
     Disposer.register(parentDisposable, new Disposable() {
       @Override
@@ -106,7 +103,7 @@ public class RenameHandlerRegistry {
   }
 
   private static String getHandlerTitle(RenameHandler renameHandler) {
-    return renameHandler instanceof TitledHandler ? StringUtil.capitalize(((TitledHandler)renameHandler).getActionTitle().toLowerCase()) : renameHandler.toString();
+    return renameHandler instanceof TitledHandler ? StringUtil.capitalize(StringUtil.toLowerCase(((TitledHandler)renameHandler).getActionTitle())) : renameHandler.toString();
   }
 
   private static class HandlersChooser extends DialogWrapper {

@@ -22,6 +22,7 @@ import com.intellij.ui.mac.MacMessages;
 import com.intellij.util.Function;
 import com.intellij.util.PairFunction;
 import com.intellij.util.execution.ParametersListUtil;
+import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UI;
 import com.intellij.util.ui.UIUtil;
 import org.intellij.lang.annotations.MagicConstant;
@@ -56,6 +57,10 @@ public class Messages {
     if (application != null) {
       LOG.assertTrue(application.isUnitTestMode(), "This method is available for tests only");
     }
+    if (newValue == null) {
+      ourTestImplementation = TestDialog.DEFAULT;
+      throw new IllegalArgumentException("Attempt to set TestDialog to null: default implementation was restored instead");
+    }
     TestDialog oldValue = ourTestImplementation;
     ourTestImplementation = newValue;
     return oldValue;
@@ -66,6 +71,10 @@ public class Messages {
     Application application = ApplicationManager.getApplication();
     if (application != null) {
       LOG.assertTrue(application.isUnitTestMode(), "This method is available for tests only");
+    }
+    if (newValue == null) {
+      ourTestInputImplementation = TestInputDialog.DEFAULT;
+      throw new IllegalArgumentException("Attempt to set TestInputDialog to null: default implementation was restored instead");
     }
     TestInputDialog oldValue = ourTestInputImplementation;
     ourTestInputImplementation = newValue;
@@ -177,7 +186,8 @@ public class Messages {
   @NotNull
   public static Runnable createMessageDialogRemover(@Nullable Project project) {
     Window projectWindow = project == null ? null : WindowManager.getInstance().suggestParentWindow(project);
-    return () -> UIUtil.invokeLaterIfNeeded(() -> makeCurrentMessageDialogGoAway(
+    //noinspection SSBasedInspection
+    return () -> SwingUtilities.invokeLater(() -> makeCurrentMessageDialogGoAway(
       projectWindow != null ? projectWindow.getOwnedWindows() : Window.getWindows()));
   }
 
@@ -625,8 +635,10 @@ public class Messages {
 
   /**
    * @return {@link #OK} if user pressed "Ok" or {@link #CANCEL} if user pressed "Cancel" button.
+   * @deprecated Please provide meaningful action names via {@link #showOkCancelDialog(Project, String, String, String, String, Icon)} instead
    */
   @OkCancelResult
+  @Deprecated
   public static int showOkCancelDialog(Project project,
                                        String message,
                                        @Nls(capitalization = Nls.Capitalization.Title) String title,
@@ -661,8 +673,10 @@ public class Messages {
 
   /**
    * @return {@link #OK} if user pressed "Ok" or {@link #CANCEL} if user pressed "Cancel" button.
+   * @deprecated Please provide meaningful action names via {@link #showOkCancelDialog(Component, String, String, String, String, Icon)} instead
    */
   @OkCancelResult
+  @Deprecated
   public static int showOkCancelDialog(@NotNull Component parent,
                                        String message,
                                        @Nls(capitalization = Nls.Capitalization.Title) String title,
@@ -674,10 +688,10 @@ public class Messages {
    * Use this method only if you do not know project or component
    *
    * @return {@link #OK} if user pressed "Ok" or {@link #CANCEL} if user pressed "Cancel" button.
-   * @see #showOkCancelDialog(Project, String, String, Icon)
-   * @see #showOkCancelDialog(Component, String, String, Icon)
+   * @deprecated Please provide meaningful action names via {@link #showOkCancelDialog(String, String, String, String, Icon)} instead
    */
   @OkCancelResult
+  @Deprecated
   public static int showOkCancelDialog(String message, @Nls(capitalization = Nls.Capitalization.Title) String title, Icon icon) {
     return showOkCancelDialog(message, title, OK_BUTTON, CANCEL_BUTTON, icon, null);
   }
@@ -1472,7 +1486,9 @@ public class Messages {
     }
 
     protected JTextComponent createTextFieldComponent() {
-      return new JTextField(30);
+      JTextField field = new JTextField(30);
+      field.setMargin(JBUI.insets(0, 5));
+      return field;
     }
 
     @Override
@@ -1509,6 +1525,24 @@ public class Messages {
     @Override
     protected JComponent createScrollableTextComponent() {
       return new JBScrollPane(myField);
+    }
+
+    @Override
+    protected JComponent createNorthPanel() {
+      return null;
+    }
+
+    @Override
+    protected JComponent createCenterPanel() {
+      JPanel messagePanel = new JPanel(new BorderLayout());
+      if (myMessage != null) {
+        JComponent textComponent = createTextComponent();
+        messagePanel.add(textComponent, BorderLayout.NORTH);
+      }
+
+      myField = createTextFieldComponent();
+      messagePanel.add(createScrollableTextComponent(), BorderLayout.CENTER);
+      return messagePanel;
     }
   }
 

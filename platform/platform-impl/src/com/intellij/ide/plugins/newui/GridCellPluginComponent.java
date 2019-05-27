@@ -11,6 +11,7 @@ import com.intellij.util.ui.JBInsets;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import javax.swing.border.Border;
@@ -117,24 +118,34 @@ public class GridCellPluginComponent extends CellPluginComponent {
   }
 
   @NotNull
-  private static JLabel createRatingLabel(@NotNull JPanel panel, @NotNull String text, @NotNull Icon icon) {
+  static JLabel createRatingLabel(@NotNull JPanel panel, @NotNull String text, @Nullable Icon icon) {
+    return createRatingLabel(panel, null, text, icon, null, true);
+  }
+
+  @NotNull
+  static JLabel createRatingLabel(@NotNull JPanel panel,
+                                  @Nullable Object constraints,
+                                  @NotNull String text,
+                                  @Nullable Icon icon,
+                                  @Nullable Color color,
+                                  boolean tiny) {
     JLabel label = new JLabel(text, icon, SwingConstants.CENTER);
     label.setOpaque(false);
     label.setIconTextGap(2);
-    panel.add(PluginManagerConfigurableNew.installTiny(label));
+    if (color != null) {
+      label.setForeground(color);
+    }
+    panel.add(tiny ? PluginManagerConfigurableNew.installTiny(label) : label, constraints);
     return label;
   }
 
   private void addInstallButton() {
     if (InstalledPluginsState.getInstance().wasInstalled(myPlugin.getPluginId())) {
-      RestartButton restartButton = new RestartButton(myPluginModel);
-      restartButton.setFocusable(false);
-      add(myLastComponent = restartButton);
+      add(myLastComponent = new RestartButton(myPluginModel));
       return;
     }
 
-    myInstallButton.setFocusable(false);
-    myInstallButton.addActionListener(e -> myPluginModel.installOrUpdatePlugin(myPlugin, true));
+    myInstallButton.addActionListener(e -> myPluginModel.installOrUpdatePlugin(myPlugin, null));
     myInstallButton.setEnabled(PluginManager.getPlugin(myPlugin.getPluginId()) == null);
     add(myLastComponent = myInstallButton);
 
@@ -143,33 +154,33 @@ public class GridCellPluginComponent extends CellPluginComponent {
     }
   }
 
+  @Override
   public void showProgress() {
     showProgress(true);
   }
 
   private void showProgress(boolean repaint) {
     TwoLineProgressIndicator indicator = new TwoLineProgressIndicator();
-    indicator.setCancelRunnable(() -> myPluginModel.finishInstall(myPlugin, false));
+    indicator.setCancelRunnable(() -> myPluginModel.finishInstall(myPlugin, false, false));
     myIndicator = indicator;
 
     myInstallButton.setVisible(false);
     add(myLastComponent = indicator.getComponent());
     doLayout();
 
-    myPluginModel.addProgress(myPlugin, indicator);
+    MyPluginModel.addProgress(myPlugin, indicator);
 
     if (repaint) {
       fullRepaint();
     }
   }
 
+  @Override
   public void hideProgress(boolean success) {
     myIndicator = null;
     JComponent lastComponent = myLastComponent;
     if (success) {
-      RestartButton restartButton = new RestartButton(myPluginModel);
-      restartButton.setFocusable(false);
-      add(myLastComponent = restartButton);
+      add(myLastComponent = new RestartButton(myPluginModel));
     }
     else {
       myLastComponent = myInstallButton;
@@ -199,7 +210,7 @@ public class GridCellPluginComponent extends CellPluginComponent {
   }
 
   @Override
-  public void setListeners(@NotNull LinkListener<IdeaPluginDescriptor> listener,
+  public void setListeners(@NotNull LinkListener<? super IdeaPluginDescriptor> listener,
                            @NotNull LinkListener<String> searchListener,
                            @NotNull EventHandler eventHandler) {
     super.setListeners(listener, searchListener, eventHandler);
@@ -245,9 +256,14 @@ public class GridCellPluginComponent extends CellPluginComponent {
   @Override
   public void close() {
     if (myIndicator != null) {
-      myPluginModel.removeProgress(myPlugin, myIndicator);
+      MyPluginModel.removeProgress(myPlugin, myIndicator);
       myIndicator = null;
     }
     myPluginModel.removeComponent(this);
+  }
+
+  @Override
+  public boolean isMarketplace() {
+    return true;
   }
 }

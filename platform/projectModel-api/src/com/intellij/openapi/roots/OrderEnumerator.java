@@ -23,6 +23,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.NotNullFunction;
 import com.intellij.util.PathsList;
 import com.intellij.util.Processor;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
@@ -37,14 +38,15 @@ import java.util.List;
  * <p>Note that all configuration methods modify {@link OrderEnumerator} instance instead of creating a new one.</p>
  *
  * @author nik
- * @since 10.0
  */
+@ApiStatus.NonExtendable
 public abstract class OrderEnumerator {
   /**
    * Skip test dependencies
    *
    * @return this instance
    */
+  @NotNull
   public abstract OrderEnumerator productionOnly();
 
   /**
@@ -52,6 +54,7 @@ public abstract class OrderEnumerator {
    *
    * @return this instance
    */
+  @NotNull
   public abstract OrderEnumerator compileOnly();
 
   /**
@@ -59,32 +62,41 @@ public abstract class OrderEnumerator {
    *
    * @return this instance
    */
+  @NotNull
   public abstract OrderEnumerator runtimeOnly();
 
+  @NotNull
   public abstract OrderEnumerator withoutSdk();
 
+  @NotNull
   public abstract OrderEnumerator withoutLibraries();
 
+  @NotNull
   public abstract OrderEnumerator withoutDepModules();
 
   /**
    * Skip root module's entries
    * @return this
    */
+  @NotNull
   public abstract OrderEnumerator withoutModuleSourceEntries();
 
+  @NotNull
   public OrderEnumerator librariesOnly() {
     return withoutSdk().withoutDepModules().withoutModuleSourceEntries();
   }
 
+  @NotNull
   public OrderEnumerator sdkOnly() {
     return withoutDepModules().withoutLibraries().withoutModuleSourceEntries();
   }
 
+  @NotNull
   public VirtualFile[] getAllLibrariesAndSdkClassesRoots() {
     return withoutModuleSourceEntries().withoutDepModules().recursively().exportedOnly().classes().usingCache().getRoots();
   }
 
+  @NotNull
   public VirtualFile[] getAllSourceRoots() {
     return recursively().exportedOnly().sources().usingCache().getRoots();
   }
@@ -95,6 +107,7 @@ public abstract class OrderEnumerator {
    *
    * @return this instance
    */
+  @NotNull
   public abstract OrderEnumerator recursively();
 
   /**
@@ -102,6 +115,7 @@ public abstract class OrderEnumerator {
    *
    * @return this instance
    */
+  @NotNull
   public abstract OrderEnumerator exportedOnly();
 
   /**
@@ -110,7 +124,8 @@ public abstract class OrderEnumerator {
    * @param condition filtering condition
    * @return this instance
    */
-  public abstract OrderEnumerator satisfying(Condition<OrderEntry> condition);
+  @NotNull
+  public abstract OrderEnumerator satisfying(@NotNull Condition<? super OrderEntry> condition);
 
   /**
    * Use {@code provider.getRootModel()} to process module dependencies
@@ -118,6 +133,7 @@ public abstract class OrderEnumerator {
    * @param provider provider
    * @return this instance
    */
+  @NotNull
   public abstract OrderEnumerator using(@NotNull RootModelProvider provider);
 
   /**
@@ -133,28 +149,33 @@ public abstract class OrderEnumerator {
   /**
    * @return {@link OrderRootsEnumerator} instance for processing classes roots
    */
+  @NotNull
   public abstract OrderRootsEnumerator classes();
 
   /**
    * @return {@link OrderRootsEnumerator} instance for processing source roots
    */
+  @NotNull
   public abstract OrderRootsEnumerator sources();
 
   /**
    * @param rootType root type
    * @return {@link OrderRootsEnumerator} instance for processing roots of the specified type
    */
+  @NotNull
   public abstract OrderRootsEnumerator roots(@NotNull OrderRootType rootType);
 
   /**
    * @param rootTypeProvider custom root type provider
    * @return {@link OrderRootsEnumerator} instance for processing roots of the provided type
    */
+  @NotNull
   public abstract OrderRootsEnumerator roots(@NotNull NotNullFunction<? super OrderEntry, ? extends OrderRootType> rootTypeProvider);
 
   /**
    * @return classes roots for all entries processed by this enumerator
    */
+  @NotNull
   public VirtualFile[] getClassesRoots() {
     return classes().getRoots();
   }
@@ -162,6 +183,7 @@ public abstract class OrderEnumerator {
   /**
    * @return source roots for all entries processed by this enumerator
    */
+  @NotNull
   public VirtualFile[] getSourceRoots() {
     return sources().getRoots();
   }
@@ -169,6 +191,7 @@ public abstract class OrderEnumerator {
   /**
    * @return list containing classes roots for all entries processed by this enumerator
    */
+  @NotNull
   public PathsList getPathsList() {
     return classes().getPathsList();
   }
@@ -176,6 +199,7 @@ public abstract class OrderEnumerator {
   /**
    * @return list containing source roots for all entries processed by this enumerator
    */
+  @NotNull
   public PathsList getSourcePathsList() {
     return sources().getPathsList();
   }
@@ -185,21 +209,21 @@ public abstract class OrderEnumerator {
    *
    * @param processor processor
    */
-  public abstract void forEach(@NotNull Processor<OrderEntry> processor);
+  public abstract void forEach(@NotNull Processor<? super OrderEntry> processor);
 
   /**
    * Runs {@code processor.process()} for each library processed by this enumerator.
    *
    * @param processor processor
    */
-  public abstract void forEachLibrary(@NotNull Processor<Library> processor);
+  public abstract void forEachLibrary(@NotNull Processor<? super Library> processor);
 
   /**
    * Runs {@code processor.process()} for each module processed by this enumerator.
    *
    * @param processor processor
    */
-  public abstract void forEachModule(@NotNull Processor<Module> processor);
+  public abstract void forEachModule(@NotNull Processor<? super Module> processor);
 
   /**
    * Passes order entries to the specified visitor.

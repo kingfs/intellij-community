@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.file.impl;
 
 import com.intellij.AppTopics;
@@ -54,7 +54,7 @@ public class PsiVFSListener implements BulkFileListener {
 
   private static final AtomicBoolean ourGlobalListenerInstalled = new AtomicBoolean(false);
 
-  public PsiVFSListener(Project project) {
+  public PsiVFSListener(@NotNull Project project) {
     installGlobalListener();
 
     myProject = project;
@@ -63,8 +63,9 @@ public class PsiVFSListener implements BulkFileListener {
     myManager = (PsiManagerImpl) PsiManager.getInstance(project);
     myFileManager = (FileManagerImpl) myManager.getFileManager();
 
+    // events must handled only after pre-startup (https://upsource.jetbrains.com/intellij/review/IDEA-CR-47395)
     StartupManager.getInstance(project).registerPreStartupActivity(() -> {
-      MessageBusConnection connection = project.getMessageBus().connect(project);
+      MessageBusConnection connection = project.getMessageBus().connect();
       connection.subscribe(ProjectTopics.PROJECT_ROOTS, new MyModuleRootListener());
       connection.subscribe(FileTypeManager.TOPIC, new FileTypeListener() {
         @Override
@@ -80,34 +81,34 @@ public class PsiVFSListener implements BulkFileListener {
    * This code is implemented as static method (and not static constructor, as it was done before) to prevent installing listeners in Upsource
    */
   private static void installGlobalListener() {
-    if (ourGlobalListenerInstalled.compareAndSet(false, true)) {
-      Topics.subscribe(VirtualFileManager.VFS_CHANGES, null, new BulkFileListener() {
-        @Override
-        public void before(@NotNull List<? extends VFileEvent> events) {
-          for (Project project : ProjectManager.getInstance().getOpenProjects()) {
-            PsiVFSListener listener = project.getComponent(PsiVFSListener.class);
-            listener.before(events);
-          }
-        }
-
-        @Override
-        public void after(@NotNull List<? extends VFileEvent> events) {
-          Project[] projects = ProjectManager.getInstance().getOpenProjects();
-
-          // let PushedFilePropertiesUpdater process all pending vfs events and update file properties before we issue PSI events
-          for (Project project : projects) {
-            PushedFilePropertiesUpdater updater = PushedFilePropertiesUpdater.getInstance(project);
-            if (updater instanceof PushedFilePropertiesUpdaterImpl) { // false in upsource
-              ((PushedFilePropertiesUpdaterImpl)updater).processAfterVfsChanges(events);
-            }
-          }
-          for (Project project : projects) {
-            PsiVFSListener listener = project.getComponent(PsiVFSListener.class);
-            listener.after(events);
-          }
-        }
-      });
+    if (!ourGlobalListenerInstalled.compareAndSet(false, true)) {
+      return;
     }
+
+    Topics.subscribe(VirtualFileManager.VFS_CHANGES, null, new BulkFileListener() {
+      @Override
+      public void before(@NotNull List<? extends VFileEvent> events) {
+        for (Project project : ProjectManager.getInstance().getOpenProjects()) {
+          project.getComponent(PsiVFSListener.class).before(events);
+        }
+      }
+
+      @Override
+      public void after(@NotNull List<? extends VFileEvent> events) {
+        Project[] projects = ProjectManager.getInstance().getOpenProjects();
+        // let PushedFilePropertiesUpdater process all pending vfs events and update file properties before we issue PSI events
+        for (Project project : projects) {
+          PushedFilePropertiesUpdater updater = PushedFilePropertiesUpdater.getInstance(project);
+          // false in upsource
+          if (updater instanceof PushedFilePropertiesUpdaterImpl) {
+            ((PushedFilePropertiesUpdaterImpl)updater).processAfterVfsChanges(events);
+          }
+        }
+        for (Project project : projects) {
+          project.getComponent(PsiVFSListener.class).after(events);
+        }
+      }
+    });
   }
 
   @Nullable
@@ -157,6 +158,7 @@ public class PsiVFSListener implements BulkFileListener {
     );
   }
 
+  // optimization: call myFileManager.removeInvalidFilesAndDirs() once for group of delete events, instead of once for each event
   private void filesDeleted(@NotNull List<? extends VFileEvent> events) {
     boolean needToRemoveInvalidFilesAndDirs = false;
     for (VFileEvent event : events) {
@@ -456,6 +458,7 @@ public class PsiVFSListener implements BulkFileListener {
     );
   }
 
+  // optimization: call myFileManager.removeInvalidFilesAndDirs() once for group of move events, instead of once for each event
   private void filesMoved(@NotNull List<? extends VFileEvent> events) {
     List<PsiElement> oldElements = new ArrayList<>(events.size());
     List<PsiDirectory> oldParentDirs = new ArrayList<>(events.size());
@@ -647,7 +650,7 @@ public class PsiVFSListener implements BulkFileListener {
     }
 
     ProjectFileIndex index = ProjectFileIndex.SERVICE.getInstance(myProject);
-    return index.isInContent(file) || index.isInLibraryClasses(file) || index.isInLibrarySource(file);
+    return index.isInContent(file) || index.isInLibrary(file);
   }
 
   @Override
@@ -672,10 +675,10 @@ public class PsiVFSListener implements BulkFileListener {
     myReportedUnloadedPsiChange = false;
   }
 
-  // group same type events together and call fireForGrouped() for the whole batch
+  // group same type events together and call fireForGrouped() for the each batch
   private void groupAndFire(@NotNull List<? extends VFileEvent> events) {
     StreamEx.of(events)
-      // group sequential VFileDeleteEvent or VFileMoveEvent together, place all other events into one-element lists
+      // group several VFileDeleteEvents together, several VFileMoveEvents together, place all other events into one-element lists
       .groupRuns((event1, event2) ->
                     event1 instanceof VFileDeleteEvent && event2 instanceof VFileDeleteEvent
                  || event1 instanceof VFileMoveEvent && event2 instanceof VFileMoveEvent)

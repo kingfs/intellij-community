@@ -1,61 +1,70 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.checkin
-
 
 import com.intellij.codeInsight.CodeSmellInfo
 import com.intellij.diff.tools.util.text.LineOffsetsUtil
 import com.intellij.diff.util.Range
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.WriteAction
+import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.CodeSmellDetector
+import com.intellij.openapi.vcs.ProjectLevelVcsManager
+import com.intellij.openapi.vcs.VcsBundle
 import com.intellij.openapi.vcs.VcsException
-import com.intellij.openapi.vcs.changes.Change
 import com.intellij.openapi.vcs.changes.ChangeListManager
-import com.intellij.openapi.vcs.changes.ChangeListManagerEx
-import com.intellij.openapi.vcs.changes.LocalChangeList
-import com.intellij.openapi.vcs.changes.shelf.ShelveChangesManager
-import com.intellij.openapi.vcs.changes.shelf.ShelvedChangeList
-import com.intellij.openapi.vcs.changes.ui.RollbackWorker
+import com.intellij.openapi.vcs.changes.ChangesUtil
+import com.intellij.openapi.vcs.changes.VcsPreservingExecutor
 import com.intellij.openapi.vcs.ex.compareLines
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.PsiDocumentManager
-import com.intellij.psi.PsiFile
-import com.intellij.util.containers.ContainerUtil
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.psi.impl.PsiDocumentManagerImpl
 import com.intellij.util.containers.MultiMap
+import gnu.trove.THashMap
 
-
-object CodeAnalysisBeforeCheckinShowOnlyNew {
+internal object CodeAnalysisBeforeCheckinShowOnlyNew {
+  val LOG = logger<CodeAnalysisBeforeCheckinShowOnlyNew>()
 
   @JvmStatic
-  fun runAnalysis(project: Project, selectedFiles: List<VirtualFile>) : List<CodeSmellInfo> {
+  fun runAnalysis(project: Project, selectedFiles: List<VirtualFile>, progressIndicator: ProgressIndicator) : List<CodeSmellInfo> {
+    progressIndicator.isIndeterminate = false
     val codeSmellDetector = CodeSmellDetector.getInstance(project)
     val newCodeSmells = codeSmellDetector.findCodeSmells(selectedFiles)
     val location2CodeSmell = MultiMap<Pair<VirtualFile, Int>, CodeSmellInfo>()
-    val file2Changes = HashMap<PsiFile, List<Range>>()
+    val fileToChanges: MutableMap<VirtualFile, List<Range>> = THashMap()
     val changeListManager = ChangeListManager.getInstance(project)
+    val files4Update = ChangesUtil.getFilesFromChanges(changeListManager.allChanges)
+    val fileDocumentManager = FileDocumentManager.getInstance()
     newCodeSmells.forEach { codeSmellInfo ->
-      val psiFile = PsiDocumentManager.getInstance(project).getPsiFile(codeSmellInfo.document) ?: return@forEach
-      val unchanged = file2Changes.getOrPut(psiFile) {
+      val virtualFile = fileDocumentManager.getFile(codeSmellInfo.document) ?: return@forEach
+      val unchanged = fileToChanges.getOrPut(virtualFile) {
         try {
-          val contentFromVcs = changeListManager.getChange(psiFile.virtualFile)?.beforeRevision?.content ?: return@getOrPut emptyList()
+          val contentFromVcs = changeListManager.getChange(virtualFile)?.beforeRevision?.content ?: return@getOrPut emptyList()
           val documentContent = codeSmellInfo.document.immutableCharSequence
-          ContainerUtil.newArrayList(compareLines(documentContent, contentFromVcs,
-                                         LineOffsetsUtil.create(documentContent), LineOffsetsUtil.create(contentFromVcs)).iterateUnchanged())
-
+          compareLines(documentContent, contentFromVcs,
+                       LineOffsetsUtil.create(documentContent),
+                       LineOffsetsUtil.create(contentFromVcs)).iterateUnchanged().toList()
         }
         catch (e: VcsException) {
+          LOG.warn("Couldn't load content", e)
           emptyList()
         }
       }
       val startLine = codeSmellInfo.startLine
       val range = unchanged.firstOrNull { it.start1 <= startLine && startLine < it.end1 } ?: return@forEach
-      location2CodeSmell.putValue(Pair(psiFile.virtualFile, range.start2 + startLine - range.start1), codeSmellInfo)
+      location2CodeSmell.putValue(Pair(virtualFile, range.start2 + startLine - range.start1), codeSmellInfo)
     }
 
     val commonCodeSmells = HashSet<CodeSmellInfo>()
-    runAnalysisAfterShelvingSync(project) {
+    runAnalysisAfterShelvingSync(project, selectedFiles, progressIndicator) {
+      VfsUtil.markDirtyAndRefresh(false, false, false, *files4Update)
+      WriteAction.runAndWait<Exception> { PsiDocumentManagerImpl.getInstance(project).commitAllDocuments() }
       codeSmellDetector.findCodeSmells(selectedFiles.filter { it.exists() }).forEach { oldCodeSmell ->
-        val file = FileDocumentManager.getInstance().getFile(oldCodeSmell.document) ?: return@forEach
+        val file = fileDocumentManager.getFile(oldCodeSmell.document) ?: return@forEach
         location2CodeSmell[Pair(file, oldCodeSmell.startLine)].forEach inner@{ newCodeSmell ->
           if (oldCodeSmell.description == newCodeSmell.description) {
             commonCodeSmells.add(newCodeSmell)
@@ -64,50 +73,20 @@ object CodeAnalysisBeforeCheckinShowOnlyNew {
         }
       }
     }
-    return newCodeSmells.filter { !commonCodeSmells.contains(it) }
-  }
-
-  private fun runAnalysisAfterShelvingSync(project: Project, afterShelve: () -> Unit) {
-    val operation = StashOperation(project)
-    operation.changeListManager.blockModalNotifications()
-    val changes = operation.save()
-    val rollbackWorker = RollbackWorker(project, "Code Analysis", true)
-    operation.changeListManager.freeze("Performing rollback")
-    rollbackWorker.doRollback(changes, true, false, null, null)
-    try {
-      afterShelve()
-    }
-    finally {
-      try {
-        operation.load()
+    return newCodeSmells.filter { !commonCodeSmells.contains(it) }.map {
+      val file = fileDocumentManager.getFile(it.document) ?: return@map it
+      if (file.isValid) {
+        return@map it
       }
-      finally {
-        operation.changeListManager.unblockModalNotifications()
-        operation.changeListManager.unfreeze()
-      }
+      val newFile = VirtualFileManager.getInstance().findFileByUrl(file.url) ?: return@map it
+      val document = ReadAction.compute<Document?, Exception> { fileDocumentManager.getDocument(newFile) } ?: return@map it
+      CodeSmellInfo(document, it.description, it.textRange, it.severity)
     }
   }
 
-  private class StashOperation(project: Project) {
-    val changeListManager = ChangeListManager.getInstance(project) as ChangeListManagerEx
-    private val shelveChangeManager = ShelveChangesManager.getInstance(project)
-    private var shelvedChangeListPairs = ArrayList<Pair<LocalChangeList, ShelvedChangeList>>()
-
-    fun save(): List<Change>  {
-      val changes = ArrayList<Change>()
-      changeListManager.changeLists.forEach {
-        val shelveChanges = shelveChangeManager.shelveChanges(it.changes, it.name, false)
-        changes.addAll(it.changes)
-        shelvedChangeListPairs.add(Pair(it, shelveChanges))
-      }
-      return changes
-    }
-
-    fun load() {
-      shelvedChangeListPairs.forEach { (local, shelved) ->
-        shelveChangeManager.unshelveChangeList(shelved, null, null, local, false)
-        shelveChangeManager.deleteChangeList(shelved)
-      }
-    }
+  private fun runAnalysisAfterShelvingSync(project: Project, files: List<VirtualFile>, progressIndicator: ProgressIndicator,  afterShelve: () -> Unit) {
+    val versionedRoots = files.mapNotNull { ProjectLevelVcsManager.getInstance(project).getVcsRootFor(it) }.toSet()
+    val message = VcsBundle.message("searching.for.code.smells.freezing.process")
+    VcsPreservingExecutor.executeOperation(project, versionedRoots, message, progressIndicator) { afterShelve() }
   }
 }

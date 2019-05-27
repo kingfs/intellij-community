@@ -17,6 +17,8 @@ import java.util.List;
 public abstract class ToolWindowManagerEx extends ToolWindowManager {
   public abstract void initToolWindow(@NotNull ToolWindowEP bean);
 
+  public abstract boolean fallbackToEditor();
+
   public static ToolWindowManagerEx getInstanceEx(final Project project) {
     return (ToolWindowManagerEx)getInstance(project);
   }
@@ -52,11 +54,12 @@ public abstract class ToolWindowManagerEx extends ToolWindowManager {
    * @return {@code ID} of tool window which was last activated among tool windows satisfying the current condition
    */
   @Nullable
-  public abstract String getLastActiveToolWindowId(@Nullable Condition<JComponent> condition);
+  public abstract String getLastActiveToolWindowId(@Nullable Condition<? super JComponent> condition);
 
   /**
    * @return layout of tool windows.
    */
+  @NotNull
   public abstract DesktopLayout getLayout();
 
   public abstract void setLayoutToRestoreLater(DesktopLayout layout);

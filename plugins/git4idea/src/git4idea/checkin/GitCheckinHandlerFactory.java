@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.checkin;
 
 import com.intellij.CommonBundle;
@@ -19,7 +19,6 @@ import com.intellij.openapi.vcs.checkin.CheckinHandler;
 import com.intellij.openapi.vcs.checkin.VcsCheckinHandlerFactory;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.PairConsumer;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.xml.util.XmlStringUtil;
 import git4idea.GitUtil;
@@ -103,7 +102,7 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
       final Collection<VirtualFile> files = myPanel.getVirtualFiles(); // deleted files aren't included, but for them we don't care about CRLFs.
       final AtomicReference<GitCrlfProblemsDetector> crlfHelper = new AtomicReference<>();
       ProgressManager.getInstance().run(
-        new Task.Modal(myProject, "Checking for Line Separator Issues", true) {
+        new Task.Modal(myProject, "Checking for Line Separator Issues...", true) {
           @Override
           public void run(@NotNull ProgressIndicator indicator) {
             crlfHelper.set(GitCrlfProblemsDetector.detect(GitCheckinHandlerFactory.MyCheckinHandler.this.myProject,
@@ -202,8 +201,8 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
     private static Map<VirtualFile, Couple<String>> getDefinedUserNames(@NotNull final Project project,
                                                                         @NotNull final Collection<VirtualFile> roots,
                                                                         final boolean stopWhenFoundFirst) {
-      final Map<VirtualFile, Couple<String>> defined = ContainerUtil.newHashMap();
-      ProgressManager.getInstance().run(new Task.Modal(project, "Checking Git User Name", true) {
+      final Map<VirtualFile, Couple<String>> defined = new HashMap<>();
+      ProgressManager.getInstance().run(new Task.Modal(project, "Checking Git User Name...", true) {
         @Override
         public void run(@NotNull ProgressIndicator pi) {
           for (VirtualFile root : roots) {
@@ -365,10 +364,11 @@ public class GitCheckinHandlerFactory extends VcsCheckinHandlerFactory {
       Collection<VirtualFile> result = new HashSet<>();
       for (FilePath path : ChangesUtil.getPaths(myPanel.getSelectedChanges())) {
         VcsRoot vcsRoot = vcsManager.getVcsRootObjectFor(path);
-        VirtualFile root = vcsRoot.getPath();
-        AbstractVcs vcs = vcsRoot.getVcs();
-        if (git.equals(vcs) && root != null) {
-          result.add(root);
+        if (vcsRoot != null) {
+          VirtualFile root = vcsRoot.getPath();
+          if (git.equals(vcsRoot.getVcs()) && root != null) {
+            result.add(root);
+          }
         }
       }
       return result;

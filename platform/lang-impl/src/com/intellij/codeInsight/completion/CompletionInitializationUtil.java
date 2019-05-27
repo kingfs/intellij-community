@@ -35,7 +35,7 @@ import java.util.Objects;
 public class CompletionInitializationUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.codeInsight.completion.CompletionServiceUtil");
 
-  public static CompletionInitializationContextImpl createCompletionInitializationContext(@NotNull Project project,
+  static CompletionInitializationContextImpl createCompletionInitializationContext(@NotNull Project project,
                                                                                @NotNull Editor editor,
                                                                                @NotNull Caret caret,
                                                                                int invocationCount,
@@ -83,24 +83,8 @@ public class CompletionInitializationUtil {
     return context;
   }
 
-  public static CompletionParameters prepareCompletionParameters(CompletionInitializationContext initContext,
-                                                                 CompletionProcessEx indicator) {
-    OffsetsInFile hostCopyOffsets = insertDummyIdentifier(initContext, indicator, indicator.getHostOffsets());
-    if (hostCopyOffsets == null) {
-      return null;
-    }
-
-    indicator.registerChildDisposable(hostCopyOffsets::getOffsets);
-    OffsetsInFile finalOffsets = toInjectedIfAny(initContext.getFile(), hostCopyOffsets);
-    indicator.registerChildDisposable(finalOffsets::getOffsets);
-
-    CompletionParameters parameters = createCompletionParameters(initContext, indicator, finalOffsets);
-    indicator.setParameters(parameters);
-    return parameters;
-  }
-
   @NotNull
-  private static CompletionParameters createCompletionParameters(CompletionInitializationContext initContext,
+  static CompletionParameters createCompletionParameters(CompletionInitializationContext initContext,
                                                                  CompletionProcessEx indicator, OffsetsInFile finalOffsets) {
     int offset = finalOffsets.getOffsets().getOffset(CompletionInitializationContext.START_OFFSET);
     PsiFile fileCopy = finalOffsets.getFile();
@@ -112,10 +96,12 @@ public class CompletionInitializationUtil {
   }
 
 
-  private static OffsetsInFile insertDummyIdentifier(CompletionInitializationContext initContext,
-                                                     CompletionProcessEx indicator,
-                                                     OffsetsInFile topLevelOffsets) {
+  static OffsetsInFile insertDummyIdentifier(CompletionInitializationContext initContext, CompletionProgressIndicator indicator) {
+    OffsetsInFile topLevelOffsets = indicator.getHostOffsets();
     CompletionAssertions.checkEditorValid(initContext.getEditor());
+    if (initContext.getDummyIdentifier().isEmpty()) {
+      return topLevelOffsets;
+    }
 
     Editor hostEditor = InjectedLanguageUtil.getTopLevelEditor(initContext.getEditor());
     OffsetMap hostMap = topLevelOffsets.getOffsets();
@@ -130,18 +116,25 @@ public class CompletionInitializationUtil {
     indicator.registerChildDisposable(
       () -> new OffsetTranslator(hostEditor.getDocument(), initContext.getFile(), copyDocument, startOffset, endOffset, dummyIdentifier));
 
-    OffsetsInFile copyOffsets = topLevelOffsets.replaceInCopy(hostCopy, startOffset, endOffset, dummyIdentifier);
-    return hostCopy.isValid() ? copyOffsets : null;
+    copyDocument.setText(hostEditor.getDocument().getText());
+
+    OffsetMap copyOffsets = topLevelOffsets.getOffsets().copyOffsets(copyDocument);
+    indicator.registerChildDisposable(() -> copyOffsets);
+
+    copyDocument.replaceString(startOffset, endOffset, dummyIdentifier);
+    return new OffsetsInFile(hostCopy, copyOffsets);
   }
 
-  private static OffsetsInFile toInjectedIfAny(PsiFile originalFile, OffsetsInFile hostCopyOffsets) {
+  static OffsetsInFile toInjectedIfAny(PsiFile originalFile, OffsetsInFile hostCopyOffsets) {
     CompletionAssertions.assertHostInfo(hostCopyOffsets.getFile(), hostCopyOffsets.getOffsets());
 
     int hostStartOffset = hostCopyOffsets.getOffsets().getOffset(CompletionInitializationContext.START_OFFSET);
     OffsetsInFile translatedOffsets = hostCopyOffsets.toInjectedIfAny(hostStartOffset);
     if (translatedOffsets != hostCopyOffsets) {
       PsiFile injected = translatedOffsets.getFile();
-      if (injected instanceof PsiFileImpl && InjectedLanguageManager.getInstance(originalFile.getProject()).isInjectedFragment(originalFile)) {
+      if (originalFile != injected &&
+          injected instanceof PsiFileImpl &&
+          InjectedLanguageManager.getInstance(originalFile.getProject()).isInjectedFragment(originalFile)) {
         ((PsiFileImpl)injected).setOriginalFile(originalFile);
       }
       DocumentWindow documentWindow = InjectedLanguageUtil.getDocumentWindow(injected);
@@ -158,7 +151,7 @@ public class CompletionInitializationUtil {
   @NotNull
   private static PsiElement findCompletionPositionLeaf(OffsetsInFile offsets, int offset, PsiFile originalFile) {
     PsiElement insertedElement = offsets.getFile().findElementAt(offset);
-    if (insertedElement == null && offsets.getFile().getTextLength() == 0) {
+    if (insertedElement == null && offsets.getFile().getTextLength() == offset) {
       insertedElement = PsiTreeUtil.getDeepestLast(offsets.getFile());
     }
     CompletionAssertions.assertCompletionPositionPsiConsistent(offsets, offset, originalFile, insertedElement);

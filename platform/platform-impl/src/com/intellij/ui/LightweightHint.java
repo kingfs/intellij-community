@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui;
 
 import com.intellij.codeInsight.hint.TooltipController;
@@ -216,8 +202,8 @@ public class LightweightHint extends UserDataHolderBase implements Hint {
       }
 
       myPopup = JBPopupFactory.getInstance().createComponentPopupBuilder(actualComponent, myFocusRequestor)
-        .setRequestFocus(myFocusRequestor != null)
-        .setFocusable(myFocusRequestor != null)
+        .setRequestFocus(myFocusRequestor != null || hintHint.isRequestFocus())
+        .setFocusable(myFocusRequestor != null || hintHint.isRequestFocus())
         .setResizable(myResizable)
         .setMovable(myTitle != null)
         .setTitle(myTitle)
@@ -264,7 +250,6 @@ public class LightweightHint extends UserDataHolderBase implements Hint {
   }
 
   protected void beforeShow() {
-
   }
 
   public boolean vetoesHiding() {
@@ -471,7 +456,7 @@ public class LightweightHint extends UserDataHolderBase implements Hint {
   }
 
   public void setSize(final Dimension size) {
-    if (myIsRealPopup && myPopup != null) {
+    if (myIsRealPopup && myPopup != null && !myPopup.isDisposed()) {
       // There is a possible case that a popup wraps target content component into other components which might have borders.
       // That's why we can't just apply component's size to the whole popup. It needs to be adjusted before that.
       JComponent popupContent = myPopup.getContent();
@@ -531,7 +516,7 @@ public class LightweightHint extends UserDataHolderBase implements Hint {
   }
 
   public boolean isInsideHint(RelativePoint target) {
-    if (myComponent == null || !myComponent.isShowing()) return false;
+    if (!myComponent.isShowing()) return false;
 
     if (myIsRealPopup) {
       Window wnd = SwingUtilities.getWindowAncestor(myComponent);

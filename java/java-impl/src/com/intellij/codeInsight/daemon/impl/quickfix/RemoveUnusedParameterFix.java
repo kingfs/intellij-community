@@ -5,6 +5,7 @@ package com.intellij.codeInsight.daemon.impl.quickfix;
 
 import com.intellij.codeInsight.FileModificationService;
 import com.intellij.codeInsight.daemon.QuickFixBundle;
+import com.intellij.codeInsight.intention.impl.BaseIntentionAction;
 import com.intellij.codeInspection.LocalQuickFixAndIntentionActionOnPsiElement;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
@@ -45,13 +46,13 @@ public class RemoveUnusedParameterFix extends LocalQuickFixAndIntentionActionOnP
     final PsiParameter myParameter = (PsiParameter)startElement;
     return
       myParameter.getDeclarationScope() instanceof PsiMethod
-      && myParameter.getManager().isInProject(myParameter);
+      && BaseIntentionAction.canModify(myParameter);
   }
 
   @Override
   public void invoke(@NotNull Project project,
                      @NotNull PsiFile file,
-                     @Nullable("is null when called from inspection") Editor editor,
+                     @Nullable Editor editor,
                      @NotNull PsiElement startElement,
                      @NotNull PsiElement endElement) {
     final PsiParameter myParameter = (PsiParameter)startElement;

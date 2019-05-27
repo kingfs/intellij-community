@@ -71,8 +71,8 @@ public class GenericsUtil {
       final PsiType componentType1 = ((PsiArrayType)type1).getComponentType();
       final PsiType componentType2 = ((PsiArrayType)type2).getComponentType();
       final PsiType componentType = getLeastUpperBound(componentType1, componentType2, compared, manager);
-      if (componentType1 instanceof PsiPrimitiveType && 
-          componentType2 instanceof PsiPrimitiveType && 
+      if ((componentType1 instanceof PsiPrimitiveType ||
+           componentType2 instanceof PsiPrimitiveType) &&
           componentType.equalsToText(CommonClassNames.JAVA_LANG_OBJECT)) {
         final PsiElementFactory factory = JavaPsiFacade.getElementFactory(manager.getProject());
         final GlobalSearchScope resolveScope = GlobalSearchScope.allScope(manager.getProject());
@@ -307,8 +307,10 @@ public class GenericsUtil {
     if (refClass instanceof PsiAnonymousClass) {
       type = ((PsiAnonymousClass)refClass).getBaseClassType();
     }
-    if (type instanceof PsiCapturedWildcardType) {
-      type = ((PsiCapturedWildcardType)type).getUpperBound();
+    PsiType deepComponentType = type.getDeepComponentType();
+    if (deepComponentType instanceof PsiCapturedWildcardType) {
+      type = PsiTypesUtil.createArrayType(((PsiCapturedWildcardType)deepComponentType).getUpperBound(),
+                                          type.getArrayDimensions());
     }
     PsiType transformed = type.accept(new PsiTypeVisitor<PsiType>() {
       @Override

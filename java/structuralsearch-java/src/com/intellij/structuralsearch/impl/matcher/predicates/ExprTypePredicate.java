@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.impl.matcher.predicates;
 
 import com.intellij.openapi.util.registry.Registry;
@@ -53,7 +53,11 @@ public class ExprTypePredicate extends MatchPredicate {
   }
 
   protected PsiType evalType(PsiExpression match, MatchContext context) {
-    if (match instanceof PsiReferenceExpression) {
+    if (match instanceof PsiFunctionalExpression) {
+      final PsiFunctionalExpression functionalExpression = (PsiFunctionalExpression)match;
+      return functionalExpression.getFunctionalInterfaceType();
+    }
+    else if (match instanceof PsiReferenceExpression) {
       final PsiElement parent = match.getParent();
       if (parent instanceof PsiMethodCallExpression) {
         return ((PsiMethodCallExpression)parent).getType();
@@ -62,7 +66,7 @@ public class ExprTypePredicate extends MatchPredicate {
     return match.getType();
   }
 
-  private boolean doMatchWithTheType(final PsiType type, MatchContext context, PsiElement matchedNode, Set<PsiType> visited) {
+  private boolean doMatchWithTheType(final PsiType type, MatchContext context, PsiElement matchedNode, Set<? super PsiType> visited) {
     final List<String> permutations = getTextPermutations(type);
     for (String permutation : permutations) {
       if (delegate == null ? doMatch(permutation) : delegate.doMatch(permutation, context, matchedNode)) {
@@ -135,7 +139,7 @@ public class ExprTypePredicate extends MatchPredicate {
     return result;
   }
 
-  private static void addWithoutTypeParameters(String typeText, String suffix, List<String> result) {
+  private static void addWithoutTypeParameters(String typeText, String suffix, List<? super String> result) {
     final int lt = typeText.indexOf("<");
     if (lt >= 0) {
       result.add(typeText.substring(0, lt) + suffix);

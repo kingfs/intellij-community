@@ -139,7 +139,7 @@ public class ManagePackagesDialog extends DialogWrapper {
       }
     });
 
-    UiNotifyConnector.doWhenFirstShown(myPackages, () -> initModel());
+    UiNotifyConnector.doWhenFirstShown(myPackages, this::initModel);
     myOptionsCheckBox.addActionListener(new ActionListener() {
       @Override
       public void actionPerformed(ActionEvent event) {
@@ -171,7 +171,7 @@ public class ManagePackagesDialog extends DialogWrapper {
   }
 
   private void addManageAction() {
-    if (myController.getAllRepositories() != null) {
+    if (myController.canManageRepositories()) {
       myManageButton.addActionListener(new ActionListener() {
         @Override
         public void actionPerformed(ActionEvent event) {
@@ -340,9 +340,7 @@ public class ManagePackagesDialog extends DialogWrapper {
           if (e.getKeyCode() == KeyEvent.VK_ENTER) {
             e.consume();
             filter();
-            IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> {
-              IdeFocusManager.getGlobalInstance().requestFocus(myPackages, true);
-            });
+            IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> IdeFocusManager.getGlobalInstance().requestFocus(myPackages, true));
           } else if (e.getKeyCode() == KeyEvent.VK_ESCAPE) {
             onEscape(e);
           }
@@ -392,12 +390,10 @@ public class ManagePackagesDialog extends DialogWrapper {
       filter(filtered, toSelect);
     }
 
-    public void filter(List<RepoPackage> filtered, @Nullable final RepoPackage toSelect){
+    public void filter(List<? extends RepoPackage> filtered, @Nullable final RepoPackage toSelect){
       myView.clear();
       myPackages.clearSelection();
-      for (RepoPackage repoPackage : filtered) {
-        myView.add(repoPackage);
-      }
+      myView.addAll(filtered);
       if (toSelect != null)
         myPackages.setSelectedValue(toSelect, true);
       Collections.sort(myView);

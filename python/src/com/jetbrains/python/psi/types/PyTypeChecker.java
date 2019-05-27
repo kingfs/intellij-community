@@ -17,11 +17,13 @@ import com.jetbrains.python.psi.impl.PyTypeProvider;
 import com.jetbrains.python.psi.resolve.PyResolveContext;
 import com.jetbrains.python.psi.resolve.RatedResolveResult;
 import com.jetbrains.python.pyi.PyiFile;
+import com.jetbrains.python.sdk.PythonSdkType;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.function.Function;
 
 import static com.jetbrains.python.codeInsight.typing.PyProtocolsKt.inspectProtocolSubclass;
 import static com.jetbrains.python.psi.PyUtil.as;
@@ -198,8 +200,9 @@ public class PyTypeChecker {
     final PyType substitution = context.substitutions.get(expected);
     PyType bound = expected.getBound();
     // Promote int in Type[TypeVar('T', int)] to Type[int] before checking that bounds match
-    if (expected.isDefinition() && bound instanceof PyInstantiableType) {
-      bound = ((PyInstantiableType)bound).toClass();
+    if (expected.isDefinition()) {
+      final Function<PyType, PyType> toDefinition = t -> t instanceof PyInstantiableType ? ((PyInstantiableType)t).toClass() : t;
+      bound = PyUnionType.union(PyTypeUtil.toStream(bound).map(toDefinition).toList());
     }
 
     Optional<Boolean> match = match(bound, actual, context);
@@ -419,22 +422,33 @@ public class PyTypeChecker {
   }
 
   @NotNull
-  private static Optional<Boolean> match(@NotNull PyCallableType expected, @NotNull PyCallableType actual, @NotNull MatchContext context) {
+  private static Optional<Boolean> match(@NotNull PyCallableType expected,
+                                         @NotNull PyCallableType actual,
+                                         @NotNull MatchContext matchContext) {
     if (expected.isCallable() && actual.isCallable()) {
-      final List<PyCallableParameter> expectedParameters = expected.getParameters(context.context);
-      final List<PyCallableParameter> actualParameters = actual.getParameters(context.context);
+      final TypeEvalContext context = matchContext.context;
+      final List<PyCallableParameter> expectedParameters = expected.getParameters(context);
+      final List<PyCallableParameter> actualParameters = actual.getParameters(context);
       if (expectedParameters != null && actualParameters != null) {
         final int size = Math.min(expectedParameters.size(), actualParameters.size());
         for (int i = 0; i < size; i++) {
           final PyCallableParameter expectedParam = expectedParameters.get(i);
           final PyCallableParameter actualParam = actualParameters.get(i);
           // TODO: Check named and star params, not only positional ones
-          if (!match(expectedParam.getType(context.context), actualParam.getType(context.context), context).orElse(true)) {
-            return Optional.of(false);
+          if (expectedParam.isSelf() && actualParam.isSelf()) {
+            if (!match(expectedParam.getType(context), actualParam.getType(context), matchContext).orElse(true)) {
+              return Optional.of(false);
+            }
+          }
+          else {
+            // actual callable type could accept more general parameter type
+            if (!match(actualParam.getType(context), expectedParam.getType(context), matchContext).orElse(true)) {
+              return Optional.of(false);
+            }
           }
         }
       }
-      if (!match(expected.getReturnType(context.context), actual.getReturnType(context.context), context).orElse(true)) {
+      if (!match(expected.getReturnType(context), actual.getReturnType(context), matchContext).orElse(true)) {
         return Optional.of(false);
       }
       return Optional.of(true);
@@ -838,7 +852,7 @@ public class PyTypeChecker {
     final PsiFile subClassFile = subClass.getContainingFile();
 
     final boolean isPy2 = subClassFile instanceof PyiFile
-                          ? PyBuiltinCache.getInstance(subClass).getObjectType(PyNames.TYPE_UNICODE) != null
+                          ? PythonSdkType.getLanguageLevelForSdk(PythonSdkType.findPythonSdk(subClassFile)).isPython2()
                           : LanguageLevel.forElement(subClass).isPython2();
 
     final String superClassName = superClass.getName();
@@ -860,7 +874,11 @@ public class PyTypeChecker {
       return true;
     }
     if (type instanceof PyGenericType) {
-      return ((PyGenericType)type).isDefinition();
+      if (((PyGenericType)type).isDefinition()) {
+        return true;
+      }
+
+      return isCallable(((PyGenericType)type).getBound());
     }
     return false;
   }

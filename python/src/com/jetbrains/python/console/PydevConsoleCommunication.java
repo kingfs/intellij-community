@@ -52,6 +52,7 @@ import static com.jetbrains.python.console.PydevConsoleCommunicationUtil.*;
 public abstract class PydevConsoleCommunication extends AbstractConsoleCommunication implements PyFrameAccessor {
   private static final Logger LOG = Logger.getInstance(PydevConsoleCommunication.class);
 
+  protected volatile boolean keyboardInterruption;
   /**
    * Input that should be sent to the server (waiting for raw_input)
    */
@@ -183,7 +184,7 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
 
   protected abstract boolean isCommunicationClosed();
 
-  /**
+  /*
    * Variables that control when we're expecting to give some input to the server or when we're
    * adding some line to be executed
    */
@@ -204,9 +205,7 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
   private boolean execIPythonEditor(String path) {
     final VirtualFile file = StringUtil.isEmpty(path) ? null : LocalFileSystem.getInstance().findFileByPath(path);
     if (file != null) {
-      ApplicationManager.getApplication().invokeLater(() -> {
-        FileEditorManager.getInstance(myProject).openFile(file, true);
-      });
+      ApplicationManager.getApplication().invokeLater(() -> FileEditorManager.getInstance(myProject).openFile(file, true));
 
       return true;
     }
@@ -224,9 +223,10 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
     myExecuting = executing;
   }
 
-  private Object execRequestInput() {
+  private Object execRequestInput() throws KeyboardInterruptException {
     waitingForInput = true;
     inputReceived = null;
+    keyboardInterruption = false;
     boolean needInput = true;
 
     //let the busy loop from execInterpreter free and enter a busy loop
@@ -237,6 +237,11 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
 
     //busy loop until we have an input
     while (inputReceived == null) {
+      if (keyboardInterruption) {
+        waitingForInput = false;
+
+        throw new KeyboardInterruptException();
+      }
       synchronized (lock) {
         try {
           lock.wait(10);
@@ -450,6 +455,12 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
 
   @Override
   public void interrupt() {
+    if (waitingForInput) {
+      // we do not want to forcibly `interrupt()` the `requestInput()` on the
+      // Python side otherwise the message queue to the IDE will be broken
+      keyboardInterruption = true;
+      return;
+    }
     try {
       getPythonConsoleBackendClient().interrupt();
     }
@@ -538,7 +549,9 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
   public XValueChildrenList loadVariable(PyDebugValue var) throws PyDebuggerException {
     if (!isCommunicationClosed()) {
       try {
-        List<DebugValue> ret = getPythonConsoleBackendClient().getVariable(GetVariableCommand.composeName(var));
+        final String name = var.getOffset() == 0 ? GetVariableCommand.composeName(var)
+                                                 : var.getOffset() + "\t" + GetVariableCommand.composeName(var);
+        List<DebugValue> ret = getPythonConsoleBackendClient().getVariable(name);
         return parseVars(ret, var, this);
       }
       catch (CommunicationClosedException | PyConsoleProcessFinishedException e) {
@@ -589,6 +602,12 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
       try {
         GetArrayResponse ret = getPythonConsoleBackendClient().getArray(var.getName(), rowOffset, colOffset, rows, cols, format);
         return createArrayChunk(ret, this);
+      }
+      catch (UnsupportedArrayTypeException e) {
+        throw new IllegalArgumentException(var.getType() + " is not supported", e);
+      }
+      catch (ExceedingArrayDimensionsException e) {
+        throw new IllegalArgumentException(var.getName() + " has more than two dimensions", e);
       }
       catch (Exception e) {
         throw new PyDebuggerException("Evaluate in console failed", e);
@@ -675,7 +694,7 @@ public abstract class PydevConsoleCommunication extends AbstractConsoleCommunica
     }
 
     @Override
-    public String requestInput(String path) {
+    public String requestInput(String path) throws KeyboardInterruptException {
       return (String)execRequestInput();
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInsight.AnnotationUtil;
@@ -10,6 +10,7 @@ import com.intellij.codeInsight.daemon.impl.analysis.JavaGenericsUtil;
 import com.intellij.codeInspection.dataFlow.instructions.Instruction;
 import com.intellij.codeInspection.dataFlow.instructions.MethodCallInstruction;
 import com.intellij.codeInspection.dataFlow.instructions.ReturnInstruction;
+import com.intellij.codeInspection.util.OptionalUtil;
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.util.Ref;
 import com.intellij.psi.*;
@@ -102,7 +103,7 @@ public class DfaPsiUtil {
       return inferParameterNullability((PsiParameter)owner);
     }
 
-    if (owner instanceof PsiMethod) {
+    if (owner instanceof PsiMethod && ((PsiMethod)owner).getParameterList().isEmpty()) {
       PsiField field = PropertyUtil.getFieldOfGetter((PsiMethod)owner);
       if (field != null && getElementNullability(resultType, field) == Nullability.NULLABLE) {
         return Nullability.NULLABLE;
@@ -137,7 +138,7 @@ public class DfaPsiUtil {
       PsiElement gParent = parent.getParent();
       if (gParent instanceof PsiLambdaExpression) {
         return getFunctionalParameterNullability((PsiLambdaExpression)gParent, ((PsiParameterList)parent).getParameterIndex(parameter));
-      } else if (gParent instanceof PsiMethod && DfaOptionalSupport.OPTIONAL_OF_NULLABLE.methodMatches((PsiMethod)gParent)) {
+      } else if (gParent instanceof PsiMethod && OptionalUtil.OPTIONAL_OF_NULLABLE.methodMatches((PsiMethod)gParent)) {
         return Nullability.NULLABLE;
       }
     }
@@ -277,7 +278,7 @@ public class DfaPsiUtil {
 
     PsiMethod[] constructors = containingClass.getConstructors();
     if (constructors.length == 0) return false;
-    
+
     for (PsiMethod method : constructors) {
       if (!getNotNullInitializedFields(method, containingClass).contains(field)) {
         return false;
@@ -288,21 +289,20 @@ public class DfaPsiUtil {
 
   private static Set<PsiField> getNotNullInitializedFields(final PsiMethod constructor, final PsiClass containingClass) {
     if (!constructor.getLanguage().isKindOf(JavaLanguage.INSTANCE)) return Collections.emptySet();
-    
+
     final PsiCodeBlock body = constructor.getBody();
     if (body == null) return Collections.emptySet();
-    
+
     return CachedValuesManager.getCachedValue(constructor, new CachedValueProvider<Set<PsiField>>() {
       @NotNull
       @Override
       public Result<Set<PsiField>> compute() {
         final PsiCodeBlock body = constructor.getBody();
-        final Map<PsiField, Boolean> map = ContainerUtil.newHashMap();
+        final Map<PsiField, Boolean> map = new HashMap<>();
         final StandardDataFlowRunner dfaRunner = new StandardDataFlowRunner(false, null) {
 
           private boolean isCallExposingNonInitializedFields(Instruction instruction) {
-            if (!(instruction instanceof MethodCallInstruction) ||
-                ((MethodCallInstruction)instruction).getMethodType() != MethodCallInstruction.MethodType.REGULAR_METHOD_CALL) {
+            if (!(instruction instanceof MethodCallInstruction)) {
               return false;
             }
 
@@ -356,11 +356,11 @@ public class DfaPsiUtil {
           }
         };
         final RunnerResult rc = dfaRunner.analyzeMethod(body, new StandardInstructionVisitor());
-        Set<PsiField> notNullFields = ContainerUtil.newHashSet();
+        Set<PsiField> notNullFields = new HashSet<>();
         if (rc == RunnerResult.OK) {
-          for (PsiField field : map.keySet()) {
-            if (map.get(field)) {
-              notNullFields.add(field);
+          for (Map.Entry<PsiField, Boolean> entry : map.entrySet()) {
+            if (entry.getValue()) {
+              notNullFields.add(entry.getKey());
             }
           }
         }
@@ -389,7 +389,7 @@ public class DfaPsiUtil {
       @NotNull
       @Override
       public Result<MultiMap<PsiField, PsiExpression>> compute() {
-        final Set<String> fieldNames = ContainerUtil.newHashSet();
+        final Set<String> fieldNames = new HashSet<>();
         for (PsiField field : psiClass.getFields()) {
           ContainerUtil.addIfNotNull(fieldNames, field.getName());
         }

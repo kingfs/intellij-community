@@ -1,24 +1,11 @@
-/*
- * Copyright 2000-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl;
 
 import com.intellij.lang.java.JavaLanguage;
 import com.intellij.openapi.components.ServiceManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.ProgressIndicatorProvider;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.roots.FileIndexFacade;
 import com.intellij.openapi.util.*;
 import com.intellij.openapi.util.registry.Registry;
@@ -46,6 +33,7 @@ import com.intellij.ui.RowIcon;
 import com.intellij.util.*;
 import com.intellij.util.containers.ConcurrentFactoryMap;
 import com.intellij.util.containers.ContainerUtil;
+import gnu.trove.THashMap;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -57,7 +45,6 @@ import java.util.concurrent.ConcurrentMap;
 
 /**
  * @author ik
- * @since 24.10.2003
  */
 public class PsiClassImplUtil {
   private static final Logger LOG = Logger.getInstance("#com.intellij.psi.impl.PsiClassImplUtil");
@@ -360,9 +347,9 @@ public class PsiClassImplUtil {
 
   private static ConcurrentMap<MemberType, Map<String, PsiMember[]>> createMembersMap(PsiClass psiClass, GlobalSearchScope scope) {
     return ConcurrentFactoryMap.createMap(key -> {
-      final Map<String, List<PsiMember>> map = ContainerUtil.newTroveMap();
+      final Map<String, List<PsiMember>> map = new THashMap<>();
 
-      final List<PsiMember> allMembers = ContainerUtil.newArrayList();
+      final List<PsiMember> allMembers = new ArrayList<>();
       map.put(ALL, allMembers);
 
       ElementClassFilter filter = key == MemberType.CLASS ? ElementClassFilter.CLASS :
@@ -394,7 +381,7 @@ public class PsiClassImplUtil {
 
       processDeclarationsInClassNotCached(psiClass, processor, ResolveState.initial(), null, null, psiClass, false,
                                           PsiUtil.getLanguageLevel(psiClass), scope);
-      Map<String, PsiMember[]> result = ContainerUtil.newTroveMap();
+      Map<String, PsiMember[]> result = new THashMap<>();
       for (Map.Entry<String, List<PsiMember>> entry : map.entrySet()) {
         result.put(entry.getKey(), entry.getValue().toArray(PsiMember.EMPTY_ARRAY));
       }
@@ -514,7 +501,7 @@ public class PsiClassImplUtil {
             PsiUtilCore.ensureValid(candidateField);
             if (containingClass == null) {
               PsiElement parent = candidateField.getParent();
-              LOG.error("No class for field " + candidateField.getName() + " of " + candidateField.getClass() + 
+              LOG.error("No class for field " + candidateField.getName() + " of " + candidateField.getClass() +
                         ", parent " + parent + " of " + (parent == null ? null : parent.getClass()));
               continue;
             }
@@ -652,6 +639,7 @@ public class PsiClassImplUtil {
                                                              final boolean isRaw,
                                                              @NotNull final LanguageLevel languageLevel,
                                                              @NotNull final GlobalSearchScope resolveScope) {
+    ProgressManager.checkCanceled();
     if (visited == null) visited = new THashSet<>();
     if (!visited.add(aClass)) return true;
     processor.handleEvent(PsiScopeProcessor.Event.SET_DECLARATION_HOLDER, aClass);
@@ -999,7 +987,7 @@ public class PsiClassImplUtil {
     }
     PsiType upperBound = psiClass instanceof PsiTypeParameter ? TypeConversionUtil.getInferredUpperBoundForSynthetic((PsiTypeParameter)psiClass) : null;
     if (upperBound == null && psiClass instanceof PsiTypeParameter) {
-      upperBound = LambdaUtil.getFunctionalTypeMap().get(psiClass);
+      upperBound = ThreadLocalTypes.getElementType(psiClass);
     }
     if (upperBound instanceof PsiIntersectionType) {
       final PsiType[] conjuncts = ((PsiIntersectionType)upperBound).getConjuncts();
@@ -1042,7 +1030,7 @@ public class PsiClassImplUtil {
     }
     PsiType upperBound = psiClass instanceof PsiTypeParameter ? TypeConversionUtil.getInferredUpperBoundForSynthetic((PsiTypeParameter)psiClass) : null;
     if (upperBound == null && psiClass instanceof PsiTypeParameter) {
-      upperBound = LambdaUtil.getFunctionalTypeMap().get(psiClass);
+      upperBound = ThreadLocalTypes.getElementType(psiClass);
     }
     if (upperBound instanceof PsiIntersectionType) {
       final PsiType[] conjuncts = ((PsiIntersectionType)upperBound).getConjuncts();
@@ -1156,7 +1144,7 @@ public class PsiClassImplUtil {
     final PsiFile original1 = file1.getUserData(PsiFileFactory.ORIGINAL_FILE);
     final PsiFile original2 = file2.getUserData(PsiFileFactory.ORIGINAL_FILE);
     if (original1 == original2 && original1 != null || original1 == file2 || original2 == file1 || file1 == file2) {
-      return compareClassSeqNumber(aClass, (PsiClass)another);
+      return true;
     }
 
     final FileIndexFacade fileIndex = ServiceManager.getService(file1.getProject(), FileIndexFacade.class);
@@ -1176,28 +1164,6 @@ public class PsiClassImplUtil {
       throw new IllegalStateException("No containing file for " + aClass.getLanguage() + " " + aClass.getClass());
     }
     return file.getOriginalFile();
-  }
-
-  private static boolean compareClassSeqNumber(@NotNull PsiClass aClass, @NotNull PsiClass another) {
-    // there may be several classes in one file, they must not be equal
-    int index1 = getSeqNumber(aClass);
-    if (index1 == -1) return true;
-    int index2 = getSeqNumber(another);
-    return index1 == index2;
-  }
-
-  private static int getSeqNumber(@NotNull PsiClass aClass) {
-    // sequence number of this class among its parent' child classes named the same
-    PsiElement parent = aClass.getParent();
-    if (parent == null) return -1;
-    int seqNo = 0;
-    for (PsiElement child : parent.getChildren()) {
-      if (child == aClass) return seqNo;
-      if (child instanceof PsiClass && Comparing.strEqual(aClass.getName(), ((PsiClass)child).getName())) {
-        seqNo++;
-      }
-    }
-    return -1;
   }
 
   public static boolean isFieldEquivalentTo(@NotNull PsiField field, PsiElement another) {

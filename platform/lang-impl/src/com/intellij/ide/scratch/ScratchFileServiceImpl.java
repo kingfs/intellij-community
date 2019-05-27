@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.scratch;
 
 import com.intellij.icons.AllIcons;
@@ -9,7 +9,6 @@ import com.intellij.lang.LanguageUtil;
 import com.intellij.lang.PerFileMappings;
 import com.intellij.lang.PerFileMappingsBase;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.WriteAction;
@@ -41,7 +40,6 @@ import com.intellij.psi.PsiFileSystemItem;
 import com.intellij.psi.search.LocalSearchScope;
 import com.intellij.psi.search.SearchScope;
 import com.intellij.psi.search.UseScopeEnlarger;
-import com.intellij.psi.stubs.StubElementTypeHolderEP;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.usages.impl.rules.UsageType;
 import com.intellij.usages.impl.rules.UsageTypeProvider;
@@ -50,42 +48,38 @@ import com.intellij.util.containers.ConcurrentFactoryMap;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.indexing.IndexableSetContributor;
 import com.intellij.util.indexing.LightDirectoryIndex;
-import com.intellij.util.messages.MessageBus;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.SystemIndependent;
 
 import javax.swing.*;
 import java.io.IOException;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentMap;
 
 @State(name = "ScratchFileService", storages = @Storage(value = "scratches.xml", roamingType = RoamingType.DISABLED))
 public class ScratchFileServiceImpl extends ScratchFileService implements PersistentStateComponent<Element>, Disposable {
-
-  private static final RootType NULL_TYPE = new RootType("", null) {};
+  private static final RootType NO_ROOT_TYPE = new RootType("", "NO_ROOT_TYPE") {};
 
   private final LightDirectoryIndex<RootType> myIndex;
   private final MyLanguages myScratchMapping = new MyLanguages();
 
-  protected ScratchFileServiceImpl(Application application) {
+  protected ScratchFileServiceImpl() {
     Disposer.register(this, myScratchMapping);
-    myIndex = new LightDirectoryIndex<>(application, NULL_TYPE, index -> {
+    myIndex = new LightDirectoryIndex<>(ApplicationManager.getApplication(), NO_ROOT_TYPE, index -> {
       LocalFileSystem fileSystem = LocalFileSystem.getInstance();
-      for (RootType r : RootType.getAllRootIds()) {
+      for (RootType r : RootType.getAllRootTypes()) {
         index.putInfo(fileSystem.findFileByPath(getRootPath(r)), r);
       }
     });
-    initFileOpenedListener(application.getMessageBus());
+    initFileOpenedListener();
   }
 
   @NotNull
   @Override
-  public String getRootPath(@NotNull RootType rootId) {
-    return getRootPath() + "/" + rootId.getId();
+  public String getRootPath(@NotNull RootType rootType) {
+    return getScratchesPath() + "/" + rootType.getId();
   }
 
   @Nullable
@@ -94,10 +88,10 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
     if (file == null || !file.isInLocalFileSystem()) return null;
     VirtualFile directory = file.isDirectory() ? file : file.getParent();
     RootType result = myIndex.getInfoForFile(directory);
-    return result == NULL_TYPE ? null : result;
+    return result == NO_ROOT_TYPE ? null : result;
   }
 
-  private void initFileOpenedListener(MessageBus messageBus) {
+  private void initFileOpenedListener() {
     final FileEditorManagerListener editorListener = new FileEditorManagerListener() {
       @Override
       public void fileOpened(@NotNull FileEditorManager source, @NotNull VirtualFile file) {
@@ -129,11 +123,12 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
         editorListener.fileOpened(editorManager, virtualFile);
       }
     }
-    messageBus.connect().subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, editorListener);
+    ApplicationManager.getApplication().getMessageBus().connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, editorListener);
   }
 
   @NotNull
-  protected String getRootPath() {
+  @SystemIndependent
+  static String getScratchesPath() {
     return FileUtil.toSystemIndependentName(PathManager.getScratchPath());
   }
 
@@ -158,21 +153,10 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
   public void dispose() {
   }
 
-  private static class LanguageLoader {
-    static {
-      // make sure languages are initialized to avoid PerFileMappingsBase.handleUnknownMapping()
-      for (StubElementTypeHolderEP holderEP : StubElementTypeHolderEP.EP_NAME.getExtensionList()) {
-        holderEP.initialize();
-      }
-    }
-    static void ensureLoaded() {}
-  }
-
   private static class MyLanguages extends PerFileMappingsBase<Language> {
 
     @Override
     public List<Language> getAvailableValues() {
-      LanguageLoader.ensureLoaded();
       return LanguageUtil.getFileLanguages();
     }
 
@@ -190,10 +174,6 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
   }
 
   public static class TypeFactory extends FileTypeFactory {
-    /** @noinspection unused*/
-    public TypeFactory(ScratchFileService service) {
-    }
-
     @Override
     public void createFileTypes(@NotNull FileTypeConsumer consumer) {
       consumer.consume(ScratchFileType.INSTANCE);
@@ -288,10 +268,10 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
     @NotNull
     @Override
     public Collection<VirtualFile> additionalRoots(Project project) {
-      Set<VirtualFile> result = ContainerUtil.newLinkedHashSet();
+      Set<VirtualFile> result = new LinkedHashSet<>();
       LocalFileSystem fileSystem = LocalFileSystem.getInstance();
       ScratchFileService app = ScratchFileService.getInstance();
-      for (RootType r : RootType.getAllRootIds()) {
+      for (RootType r : RootType.getAllRootTypes()) {
         ContainerUtil.addIfNotNull(result, fileSystem.findFileByPath(app.getRootPath(r)));
       }
       return result;
@@ -324,7 +304,7 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
 
   @Nullable
   private static Language getLanguageByFileName(@Nullable VirtualFile file) {
-    return file == null ? null : LanguageUtil.getFileTypeLanguage(FileTypeManager.getInstance().getFileTypeByFileName(file.getName()));
+    return file == null ? null : LanguageUtil.getFileTypeLanguage(FileTypeManager.getInstance().getFileTypeByFileName(file.getNameSequence()));
   }
 
   public static class UseScopeExtension extends UseScopeEnlarger {
@@ -358,8 +338,8 @@ public class ScratchFileServiceImpl extends ScratchFileService implements Persis
     public Set<VirtualFile> getAdditionalRootsToIndex() {
       ScratchFileService instance = ScratchFileService.getInstance();
       LocalFileSystem fileSystem = LocalFileSystem.getInstance();
-      HashSet<VirtualFile> result = ContainerUtil.newHashSet();
-      for (RootType rootType : RootType.getAllRootIds()) {
+      HashSet<VirtualFile> result = new HashSet<>();
+      for (RootType rootType : RootType.getAllRootTypes()) {
         if (rootType.isHidden()) continue;
         ContainerUtil.addIfNotNull(result, fileSystem.findFileByPath(instance.getRootPath(rootType)));
       }

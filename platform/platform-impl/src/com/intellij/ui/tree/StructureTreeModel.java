@@ -7,10 +7,12 @@ import com.intellij.ide.util.treeView.NodeDescriptor;
 import com.intellij.ide.util.treeView.ValidateableNode;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.util.concurrency.Invoker;
 import com.intellij.util.concurrency.InvokerSupplier;
 import com.intellij.util.ui.tree.AbstractTreeModel;
 import com.intellij.util.ui.tree.TreeUtil;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.concurrency.AsyncPromise;
@@ -28,32 +30,58 @@ import java.util.function.Function;
 import static java.util.Collections.emptyList;
 import static java.util.Collections.enumeration;
 import static java.util.Collections.unmodifiableList;
+import static org.jetbrains.concurrency.Promises.rejectedPromise;
 
 /**
  * @author Sergey.Malenkov
  */
-public class StructureTreeModel extends AbstractTreeModel implements Disposable, InvokerSupplier, ChildrenProvider<TreeNode> {
+public class StructureTreeModel<Structure extends AbstractTreeStructure>
+  extends AbstractTreeModel implements Disposable, InvokerSupplier, ChildrenProvider<TreeNode> {
+
+  private static final TreePath ROOT_INVALIDATED = new TreePath(new DefaultMutableTreeNode());
   private static final Logger LOG = Logger.getInstance(StructureTreeModel.class);
   private final Reference<Node> root = new Reference<>();
   private final String description;
   private final Invoker invoker;
-  private volatile AbstractTreeStructure structure;
+  private final Structure structure;
   private volatile Comparator<? super Node> comparator;
 
-  private StructureTreeModel(@NotNull String prefix, boolean background) {
-    description = format(prefix);
+  private StructureTreeModel(@NotNull Structure structure, boolean background, @NotNull Disposable parentDisposable) {
+    this.structure = structure;
+    description = format(structure.toString());
     invoker = background
               ? new Invoker.BackgroundThread(this)
               : new Invoker.EDT(this);
+    Disposer.register(parentDisposable, this);
   }
 
-  public StructureTreeModel(@NotNull AbstractTreeStructure structure) {
-    this(structure.toString(), true);
-    this.structure = structure;
+  /**
+   * @deprecated Please use {@link #StructureTreeModel(AbstractTreeStructure, Disposable)}
+   */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2019.3")
+  public StructureTreeModel(@NotNull Structure structure) {
+    this(structure, Disposer.newDisposable());
   }
 
-  public StructureTreeModel(@NotNull AbstractTreeStructure structure, @NotNull Comparator<? super NodeDescriptor> comparator) {
-    this(structure);
+  /**
+   * @deprecated Please use {@link #StructureTreeModel(AbstractTreeStructure, Comparator, Disposable)}
+   */
+  @Deprecated
+  @ApiStatus.ScheduledForRemoval(inVersion = "2019.3")
+  public StructureTreeModel(@NotNull Structure structure,
+                            @NotNull Comparator<? super NodeDescriptor> comparator) {
+    this(structure, comparator, Disposer.newDisposable());
+  }
+
+  public StructureTreeModel(@NotNull Structure structure, @NotNull Disposable parentDisposable) {
+    this(structure, true, parentDisposable);
+  }
+
+  public StructureTreeModel(@NotNull Structure structure,
+                            @NotNull Comparator<? super NodeDescriptor> comparator,
+                            @NotNull Disposable parentDisposable) {
+    this(structure, parentDisposable);
     this.comparator = wrapToNodeComparator(comparator);
   }
 
@@ -77,22 +105,14 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
     }
   }
 
-  /**
-   * @param structure a structure to build tree model or {@code null} to clear its content
-   */
-  public void setStructure(@Nullable AbstractTreeStructure structure) {
-    if (disposed) return;
-    this.structure = structure;
-    invalidate();
-  }
-
   @Override
   public void dispose() {
-    super.dispose();
     comparator = null;
-    structure = null;
     Node node = root.set(null);
     if (node != null) node.dispose();
+    // notify tree to clean up inner structures
+    treeStructureChanged(null, null, null);
+    super.dispose(); // remove listeners after notification
   }
 
   @NotNull
@@ -108,18 +128,65 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
   }
 
   /**
+   * @param function a function to process current structure on a valid thread
+   * @return a promise that will be succeed if the specified function returns non-null value
+   */
+  @NotNull
+  private <Result> Promise<Result> onValidThread(@NotNull Function<? super Structure, ? extends Result> function) {
+    AsyncPromise<Result> promise = new AsyncPromise<>();
+    invoker.runOrInvokeLater(() -> {
+      if (!disposed) {
+        Result result = function.apply(structure);
+        if (result != null) promise.setResult(result);
+      }
+      if (!promise.isDone()) promise.cancel();
+    }).onError(promise::setError);
+    return promise;
+  }
+
+  /**
+   * @param path     a path to the node
+   * @param function a function to process corresponding node on a valid thread
+   * @return a promise that will be succeed if the specified function returns non-null value
+   */
+  @NotNull
+  private <Result> Promise<Result> onValidThread(@NotNull TreePath path, @NotNull Function<? super Node, ? extends Result> function) {
+    Object component = path.getLastPathComponent();
+    if (component instanceof Node) {
+      Node node = (Node)component;
+      return onValidThread(structure -> disposed || isNodeRemoved(node) ? null : function.apply(node));
+    }
+    return rejectedPromise("unexpected node: " + component);
+  }
+
+  /**
+   * @param element  an element of the internal tree structure
+   * @param function a function to process corresponding node on a valid thread
+   * @return a promise that will be succeed if the specified function returns non-null value
+   */
+  @NotNull
+  private <Result> Promise<Result> onValidThread(@NotNull Object element, @NotNull Function<? super Node, ? extends Result> function) {
+    return onValidThread(structure -> {
+      Node node = root.get();
+      if (node == null) return null;
+      if (node.matches(element)) return function.apply(node);
+      ArrayDeque<Object> stack = new ArrayDeque<>();
+      for (Object e = element; e != null; e = structure.getParentElement(e)) stack.push(e);
+      if (!node.matches(stack.pop())) return null;
+      while (!stack.isEmpty()) {
+        node = node.findChild(stack.pop());
+        if (node == null) return null;
+      }
+      return function.apply(node);
+    });
+  }
+
+  /**
    * Invalidates all nodes and notifies Swing model that a whole tree hierarchy is changed.
    */
   @NotNull
   public final Promise<?> invalidate() {
-    return invoker.runOrInvokeLater(() -> {
-      if (disposed) return;
-      root.invalidate();
-      Node node = root.get();
-      LOG.debug("root invalidated: ", node);
-      if (node != null) node.invalidate();
-      treeStructureChanged(null, null, null);
-    });
+    return onValidThread(structure -> invalidateInternal(null, true));
   }
 
   /**
@@ -128,37 +195,12 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
    * @param path      a path to the node to invalidate
    * @param structure {@code true} means that all child nodes must be invalidated;
    *                  {@code false} means that only the node specified by {@code path} must be updated
+   * @return a promise that will be succeed if path to invalidate is found
    * @see #invalidate(Object, boolean)
    */
-  public final void invalidate(@NotNull TreePath path, boolean structure) {
-    Object component = path.getLastPathComponent();
-    if (component instanceof Node) {
-      invoker.runOrInvokeLater(() -> {
-        Node node = (Node)component;
-        if (disposed) return;
-        if (isNodeRemoved(node)) return;
-        if (isValid(node.getElement())) {
-          boolean updated = node.update();
-          if (structure) {
-            node.invalidate();
-            treeStructureChanged(path, null, null);
-          }
-          else if (updated) {
-            treeNodesChanged(path, null, null);
-          }
-        }
-        else {
-          LOG.debug("invalid element cannot be updated: ", path);
-          TreePath parent = path.getParentPath();
-          if (parent != null) {
-            invalidate(parent, true);
-          }
-          else {
-            invalidate();
-          }
-        }
-      });
-    }
+  @NotNull
+  public final Promise<TreePath> invalidate(@NotNull TreePath path, boolean structure) {
+    return onValidThread(path, node -> invalidateInternal(node, structure));
   }
 
   /**
@@ -171,18 +213,40 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
    * @return a promise that will be succeed if path to invalidate is found
    * @see #invalidate(TreePath, boolean)
    */
+  @NotNull
   public final Promise<TreePath> invalidate(@NotNull Object element, boolean structure) {
-    return forElement(element, stack -> {
-      Node node = root.get();
-      if (node == null || !node.matches(stack.pop())) return null;
-      while (!stack.isEmpty()) {
-        node = node.findChild(stack.pop());
-        if (node == null) return null;
-      }
+    return onValidThread(element, node -> invalidateInternal(node, structure));
+  }
+
+  @Nullable
+  private TreePath invalidateInternal(@Nullable Node node, boolean structure) {
+    assert invoker.isValidThread();
+    while (node != null && !isValid(node)) {
+      LOG.debug("invalid element cannot be updated: ", node);
+      node = (Node)node.getParent();
+      structure = true;
+    }
+    if (node == null) {
+      node = root.get();
+      if (node != null) node.invalidate();
+      root.invalidate();
+      LOG.debug("root invalidated: ", node);
+      treeStructureChanged(null, null, null);
+      return ROOT_INVALIDATED;
+    }
+    boolean updated = node.update();
+    if (structure) {
+      node.invalidate();
       TreePath path = TreePathUtil.pathToTreeNode(node);
-      invalidate(path, structure);
+      treeStructureChanged(path, null, null);
       return path;
-    });
+    }
+    if (updated) {
+      TreePath path = TreePathUtil.pathToTreeNode(node);
+      treeNodesChanged(path, null, null);
+      return path;
+    }
+    return null;
   }
 
   /**
@@ -226,30 +290,11 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
    * @see TreeUtil#promiseExpand(JTree, TreeVisitor)
    * @see TreeUtil#promiseSelect(JTree, TreeVisitor)
    */
+  @NotNull
   public final Promise<TreeVisitor> promiseVisitor(@NotNull Object element) {
-    return forElement(element, stack -> new TreeVisitor.ByTreePath<>(
-      TreePathUtil.convertCollectionToTreePath(stack),
+    return onValidThread(structure -> new TreeVisitor.ByTreePath<>(
+      TreePathUtil.pathToCustomNode(element, structure::getParentElement),
       node -> node instanceof Node ? ((Node)node).getElement() : null));
-  }
-
-  private <T> Promise<T> forElement(@NotNull Object element, @NotNull Function<Deque<Object>, T> function) {
-    AsyncPromise<T> promise = new AsyncPromise<>();
-    invoker.runOrInvokeLater(() -> {
-      T result = null;
-      AbstractTreeStructure structure = this.structure;
-      if (!disposed && structure != null) {
-        Deque<Object> stack = new ArrayDeque<>();
-        for (Object e = element; e != null; e = structure.getParentElement(e)) stack.push(e);
-        result = function.apply(stack); // convert nodes chain to default tree visitor
-      }
-      if (result != null) {
-        promise.setResult(result);
-      }
-      else {
-        promise.cancel();
-      }
-    }).onError(promise::setError);
-    return promise;
   }
 
   @Override
@@ -301,7 +346,7 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
   }
 
   @Override
-  public final Object getChild(Object object, int index) {
+  public final TreeNode getChild(Object object, int index) {
     Node node = getNode(object, true);
     return node == null ? null : node.getChildAt(index);
   }
@@ -321,10 +366,11 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
   public void valueForPathChanged(TreePath path, Object value) {
   }
 
-  private boolean isValid(Object element) {
-    AbstractTreeStructure structure = this.structure;
-    if (structure == null) return false;
+  private boolean isValid(@NotNull Node node) {
+    return isValid(structure, node.getElement());
+  }
 
+  private static boolean isValid(@NotNull AbstractTreeStructure structure, Object element) {
     if (element == null) return false;
     if (element instanceof AbstractTreeNode) {
       AbstractTreeNode node = (AbstractTreeNode)element;
@@ -337,12 +383,10 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
     return structure.isValid(element);
   }
 
+  @Nullable
   private Node getValidRoot() {
-    AbstractTreeStructure structure = this.structure;
-    if (structure == null) return null;
-
     Object element = structure.getRootElement();
-    if (!isValid(element)) return null;
+    if (!isValid(structure, element)) return null;
 
     Node newNode = new Node(structure, element, null); // an exception may be thrown while getting a root
     Node oldNode = root.get();
@@ -354,27 +398,33 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
 
   @Nullable
   private List<Node> getValidChildren(@NotNull Node node) {
-    AbstractTreeStructure structure = this.structure;
-    if (structure == null) return null;
-
     NodeDescriptor descriptor = node.getDescriptor();
     if (descriptor == null) return null;
 
     Object parent = descriptor.getElement();
-    if (!isValid(parent)) return null;
+    if (!isValid(structure, parent)) return null;
 
     Object[] elements = structure.getChildElements(parent);
     if (elements.length == 0) return null;
 
     List<Node> list = new ArrayList<>(elements.length);
     for (Object element : elements) {
-      if (isValid(element)) {
+      if (isValid(structure, element)) {
         list.add(new Node(structure, element, descriptor)); // an exception may be thrown while getting children
       }
     }
     Comparator<? super Node> comparator = this.comparator;
-    if (comparator != null) list.sort(comparator); // an exception may be thrown while sorting children
-
+    if (comparator != null) {
+      try {
+        list.sort(comparator); // an exception may be thrown while sorting children
+      }
+      catch (IllegalArgumentException exception) {
+        StringBuilder sb = new StringBuilder("unexpected sorting failed in ");
+        sb.append(this);
+        for (Node next : list) sb.append('\n').append(next);
+        LOG.error(sb.toString(), exception);
+      }
+    }
     HashMap<Object, Node> map = new HashMap<>();
     node.getChildren().forEach(child -> {
       Object element = child.getElement();
@@ -519,7 +569,7 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
       return isLeaf(null);
     }
 
-    private boolean isLeaf(@Nullable Consumer<Node> validator) {
+    private boolean isLeaf(@Nullable Consumer<? super Node> validator) {
       // root node should not be a leaf node when it is not visible in a tree
       // javax.swing.tree.VariableHeightLayoutCache.TreeStateNode.expand(boolean)
       if (null == getParent()) return false;
@@ -550,7 +600,6 @@ public class StructureTreeModel extends AbstractTreeModel implements Disposable,
    * @return a descriptive name for the instance to help a tree identification
    * @see Invoker#Invoker(String, Disposable)
    */
-  @SuppressWarnings("JavadocReference")
   @Override
   public String toString() {
     return description;

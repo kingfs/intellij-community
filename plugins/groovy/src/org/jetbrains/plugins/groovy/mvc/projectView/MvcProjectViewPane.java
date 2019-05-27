@@ -38,6 +38,7 @@ import com.intellij.openapi.module.ModuleUtilCore;
 import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.roots.ui.configuration.actions.ModuleDeleteProvider;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ToolWindow;
@@ -159,7 +160,7 @@ public class MvcProjectViewPane extends AbstractProjectViewPSIPane implements Id
     AnAction collapseAction = actionsManager.createCollapseAllAction(expander, myTree);
     collapseAction.getTemplatePresentation().setIcon(AllIcons.General.CollapseAll);
 
-    toolWindow.setTitleActions(new AnAction[]{new ScrollFromSourceAction(), collapseAction});
+    toolWindow.setTitleActions(new ScrollFromSourceAction(), collapseAction);
   }
 
   @NotNull
@@ -238,7 +239,9 @@ public class MvcProjectViewPane extends AbstractProjectViewPSIPane implements Id
   @NotNull
   @Override
   protected AbstractTreeUpdater createTreeUpdater(@NotNull final AbstractTreeBuilder treeBuilder) {
-    return new AbstractTreeUpdater(treeBuilder);
+    return new AbstractTreeUpdater(treeBuilder) {
+      // unique class to simplify search through the logs
+    };
   }
 
   @Override
@@ -268,7 +271,7 @@ public class MvcProjectViewPane extends AbstractProjectViewPSIPane implements Id
       return this;
     }
     if (dataId.equals(PlatformDataKeys.HELP_ID.getName())) {
-      return "reference.toolwindows." + myId.toLowerCase();
+      return "reference.toolwindows." + StringUtil.toLowerCase(myId);
     }
     if (PlatformDataKeys.CUT_PROVIDER.getName().equals(dataId)) {
       return myCopyPasteDelegator.getCutProvider();

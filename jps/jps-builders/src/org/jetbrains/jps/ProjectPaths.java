@@ -36,7 +36,6 @@ import java.util.*;
 
 /**
  * @author Eugene Zhuravlev
- * @since 30.09.2011
  */
 public class ProjectPaths {
   private ProjectPaths() { }
@@ -142,7 +141,7 @@ public class ProjectPaths {
     return sourcePaths;
   }
 
-  private static void processModulesRecursively(ModuleChunk chunk, JpsJavaClasspathKind kind, Consumer<JpsModule> processor) {
+  private static void processModulesRecursively(ModuleChunk chunk, JpsJavaClasspathKind kind, Consumer<? super JpsModule> processor) {
     JpsJavaExtensionService.getInstance().enumerateDependencies(chunk.getModules()).includedIn(kind).recursively().processModules(processor);
   }
 

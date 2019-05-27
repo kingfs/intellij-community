@@ -1,15 +1,15 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl
 
 import com.intellij.ide.highlighter.JavaFileType
 import com.intellij.lang.LighterASTNode
+import com.intellij.lang.java.JavaParserDefinition
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.JavaTokenType
 import com.intellij.psi.PsiField
 import com.intellij.psi.impl.cache.RecordUtil
-import com.intellij.psi.impl.java.stubs.JavaStubElementTypes
 import com.intellij.psi.impl.source.JavaLightStubBuilder
 import com.intellij.psi.impl.source.JavaLightTreeUtil
 import com.intellij.psi.impl.source.PsiMethodImpl
@@ -22,7 +22,6 @@ import com.intellij.psi.stub.JavaStubImplUtil
 import com.intellij.psi.tree.TokenSet
 import com.intellij.psi.util.PropertyUtil
 import com.intellij.psi.util.PropertyUtilBase
-import com.intellij.util.containers.ContainerUtil
 import com.intellij.util.indexing.*
 import com.intellij.util.io.DataExternalizer
 import com.intellij.util.io.EnumeratorIntegerDescriptor
@@ -65,11 +64,11 @@ data class PropertyIndexValue(val propertyRefText: String, val getter: Boolean)
 class JavaSimplePropertyIndex : FileBasedIndexExtension<Int, PropertyIndexValue>(), PsiDependentIndex {
   private val allowedExpressions by lazy {
     TokenSet.create(ElementType.REFERENCE_EXPRESSION, ElementType.THIS_EXPRESSION, ElementType.SUPER_EXPRESSION)
-  } 
-  
+  }
+
   override fun getIndexer(): DataIndexer<Int, PropertyIndexValue, FileContent> = DataIndexer { inputData ->
-    val result = ContainerUtil.newHashMap<Int, PropertyIndexValue>()
-    val tree = (inputData as FileContentImpl).lighterASTForPsiDependentIndex
+    val result = HashMap<Int, PropertyIndexValue>()
+    val tree = (inputData as PsiDependentFileContent).lighterAST
 
     object : RecursiveLighterASTNodeWalkingVisitor(tree) {
       var methodIndex = 0
@@ -163,16 +162,16 @@ class JavaSimplePropertyIndex : FileBasedIndexExtension<Int, PropertyIndexValue>
           .singleOrNull { ElementType.JAVA_STATEMENT_BIT_SET.contains(it.tokenType) }
           ?.takeIf { it.tokenType == JavaElementType.RETURN_STATEMENT}
           ?.let { LightTreeUtil.firstChildOfType(tree, it, allowedExpressions) }
-          ?.takeIf(this::checkQulifiers)
+          ?.takeIf(this::checkQualifiers)
           ?.let { LightTreeUtil.toFilteredString(tree, it, null) }
       }
 
-      private fun checkQulifiers(expression: LighterASTNode): Boolean {
+      private fun checkQualifiers(expression: LighterASTNode): Boolean {
         if (!allowedExpressions.contains(expression.tokenType)) {
           return false
         }
         val qualifier = JavaLightTreeUtil.findExpressionChild(tree, expression)
-        return qualifier == null || checkQulifiers(qualifier)
+        return qualifier == null || checkQualifiers(qualifier)
       }
     }.visitNode(tree.root)
     result
@@ -193,7 +192,7 @@ class JavaSimplePropertyIndex : FileBasedIndexExtension<Int, PropertyIndexValue>
   override fun getName(): ID<Int, PropertyIndexValue> = indexId
 
   override fun getInputFilter(): FileBasedIndex.InputFilter = object : DefaultFileTypeSpecificInputFilter(JavaFileType.INSTANCE) {
-    override fun acceptInput(file: VirtualFile): Boolean = JavaStubElementTypes.JAVA_FILE.shouldBuildStubFor(file)
+    override fun acceptInput(file: VirtualFile): Boolean = JavaParserDefinition.JAVA_FILE.shouldBuildStubFor(file)
   }
 
   override fun dependsOnFileContent(): Boolean = true

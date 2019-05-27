@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.intellij.openapi.application.ApplicationManager.getApplication;
 import static com.intellij.openapi.util.Disposer.register;
+import static com.intellij.openapi.util.registry.Registry.is;
 import static java.awt.EventQueue.isDispatchThread;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
@@ -48,7 +49,9 @@ public abstract class Invoker implements Disposable {
   @Override
   public void dispose() {
     disposed = true;
-    indicators.keySet().forEach(AsyncPromise::cancel);
+    while (!indicators.isEmpty()) {
+      indicators.keySet().forEach(AsyncPromise::cancel);
+    }
   }
 
   /**
@@ -148,6 +151,7 @@ public abstract class Invoker implements Disposable {
         else {
           // try to execute a task until it stops throwing ProcessCanceledException
           while (!ProgressIndicatorUtils.runInReadActionWithWriteActionPriority(task, indicator(promise))) {
+            if (!is("invoker.can.yield.to.pending.write.actions")) throw new ProcessCanceledException();
             if (!canInvoke(task, promise)) return; // stop execution of obsolete task
             ProgressIndicatorUtils.yieldToPendingWriteActions();
             if (!canRestart(task, promise, attempt)) return;
@@ -229,7 +233,8 @@ public abstract class Invoker implements Disposable {
     ProgressIndicatorBase indicator = indicators.get(promise);
     if (indicator == null) {
       indicator = new ProgressIndicatorBase(true);
-      indicators.put(promise, indicator);
+      ProgressIndicatorBase old = indicators.put(promise, indicator);
+      if (old != null) LOG.error("the same task is running in parallel");
       promise.onProcessed(done -> indicators.remove(promise).cancel());
     }
     return indicator;

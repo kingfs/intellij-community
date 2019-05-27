@@ -2,24 +2,34 @@
 package com.intellij.ide.projectWizard.kotlin.model
 
 import com.intellij.testGuiFramework.framework.Timeouts
+import com.intellij.testGuiFramework.impl.ScreenshotOnFailure
 import com.intellij.testGuiFramework.impl.jTree
-import com.intellij.testGuiFramework.impl.selectWithKeyboard
-import com.intellij.testGuiFramework.util.logError
-import com.intellij.testGuiFramework.util.logUIStep
-import com.intellij.testGuiFramework.util.scenarios.*
+import com.intellij.testGuiFramework.util.scenarios.ProjectStructureDialogModel
+import com.intellij.testGuiFramework.util.scenarios.checkLibraryPresent
+import com.intellij.testGuiFramework.util.scenarios.checkModule
+import com.intellij.testGuiFramework.util.step
+import org.fest.swing.exception.ComponentLookupException
 
 // Attention: it's supposed that Project Structure dialog is open both before the function
 // executed and after
 fun ProjectStructureDialogModel.checkFacetInOneModule(expectedFacet: FacetStructure, vararg path: String) {
   checkModule {
     with(guiTestCase) {
-      try {
-        jTree(path[0], timeout = Timeouts.seconds05).selectWithKeyboard(this, *path)
-        logUIStep("Check facet for module `${path.joinToString(" -> ")}`")
-        (this as KotlinGuiTestCase).checkFacetState(expectedFacet)
-      }
-      catch (e: Exception) {
-        guiTestCase.logError("Kotlin facet for module `${path.joinToString(" -> ")}` not found")
+      step("Check facet for module `${path.joinToString(" -> ")}`") {
+        try {
+          val tree = jTree(*path, timeout = Timeouts.seconds30)
+          tree.clickPath()
+          screenshot("path is clicked")
+          assert(tree.isPathSelected()) {
+            "path ${path.joinToString()} is not selected"
+          }
+
+          (this as KotlinGuiTestCase).checkFacetState(expectedFacet)
+        }
+        catch (e: ComponentLookupException) {
+          val errorMessage = "Kotlin facet for module `${path.joinToString(" -> ")}` not found"
+          throw IllegalStateException(errorMessage, e as Throwable)
+        }
       }
     }
   }

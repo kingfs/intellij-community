@@ -24,6 +24,7 @@ public final class EndUserAgreement {
   private static final String POLICY_TEXT_PROPERTY = "jb.privacy.policy.text"; // to be used in tests to pass arbitrary policy text
 
   private static final String PRIVACY_POLICY_DOCUMENT_NAME = "privacy";
+  private static final String PRIVACY_POLICY_EAP_DOCUMENT_NAME = PRIVACY_POLICY_DOCUMENT_NAME + "Eap";
   private static final String EULA_DOCUMENT_NAME = "eua";
 
   private static final String PRIVACY_POLICY_CONTENT_FILE_NAME = "Cached";
@@ -50,7 +51,11 @@ public final class EndUserAgreement {
 
   @NotNull
   private static File getDocumentNameFile() {
-    return new File(getDataRoot(), ApplicationInfoImpl.getShadowInstance().isEAP() ? ACTIVE_DOC_EAP_FILE_NAME : ACTIVE_DOC_FILE_NAME);
+    return new File(getDataRoot(), isEAP() ? ACTIVE_DOC_EAP_FILE_NAME : ACTIVE_DOC_FILE_NAME);
+  }
+
+  private static boolean isEAP() {
+    return ApplicationInfoImpl.getShadowInstance().isEAP();
   }
 
   private static File getDataRoot() {
@@ -99,6 +104,36 @@ public final class EndUserAgreement {
     return loadContent(docName, EndUserAgreement.class.getResourceAsStream(getBundledResourcePath(docName)));
   }
 
+  public static boolean updateCachedContentToLatestBundledVersion() {
+    try {
+      final String docName = getDocumentName();
+      final File cacheFile = getDocumentContentFile(docName);
+      if (cacheFile.exists()) {
+        final Document cached = loadContent(docName, new FileInputStream(cacheFile));
+        if (!cached.getVersion().isUnknown()) {
+          final Document bundled = loadContent(docName, EndUserAgreement.class.getResourceAsStream(getBundledResourcePath(docName)));
+          if (!bundled.getVersion().isUnknown() && bundled.getVersion().isNewer(cached.getVersion())) {
+            try {
+              // update content only and not the active document name
+              // active document name can be changed by JBA only
+              FileUtil.writeToFile(getDocumentContentFile(docName), bundled.getText());
+            }
+            catch (FileNotFoundException e) {
+              LOG.info(e.getMessage());
+            }
+            catch (IOException e) {
+              LOG.info(e);
+            }
+            return true;
+          }
+        }
+      }
+    }
+    catch (Throwable ignored) {
+    }
+    return false;
+  }
+
   public static void update(String docName, String text) {
     try {
       FileUtil.writeToFile(getDocumentContentFile(docName), text);
@@ -114,19 +149,14 @@ public final class EndUserAgreement {
 
   @NotNull
   private static Document loadContent(final String docName, InputStream stream) {
-    try {
-      if (stream != null) {
-        final Reader reader = new InputStreamReader(stream instanceof ByteArrayInputStream? stream : new BufferedInputStream(stream), StandardCharsets.UTF_8);
-        try {
-          return new Document(docName, new String(FileUtil.adaptiveLoadText(reader)));
-        }
-        finally {
-          reader.close();
-        }
+    if (stream != null) {
+      try (Reader reader = new InputStreamReader(stream instanceof ByteArrayInputStream ? stream : new BufferedInputStream(stream),
+                                                 StandardCharsets.UTF_8)) {
+        return new Document(docName, new String(FileUtil.adaptiveLoadText(reader)));
       }
-    }
-    catch (IOException e) {
-      LOG.info(e);
+      catch (IOException e) {
+        LOG.info(e);
+      }
     }
     return new Document(docName, "");
   }
@@ -134,7 +164,7 @@ public final class EndUserAgreement {
   @NotNull
   private static String getDocumentName() {
     if (!PlatformUtils.isCommercialEdition()) {
-      return PRIVACY_POLICY_DOCUMENT_NAME;
+      return isEAP()? PRIVACY_POLICY_EAP_DOCUMENT_NAME : PRIVACY_POLICY_DOCUMENT_NAME;
     }
     try {
       final String docName = new String(FileUtilRt.loadFileText(getDocumentNameFile(), StandardCharsets.UTF_8));
@@ -148,7 +178,7 @@ public final class EndUserAgreement {
     if (DEFAULT_DOC_NAME.equals(PRIVACY_POLICY_DOCUMENT_NAME)) {
       return PRIVACY_POLICY_DOCUMENT_NAME;
     }
-    return ApplicationInfoImpl.getShadowInstance().isEAP() ? DEFAULT_DOC_EAP_NAME : DEFAULT_DOC_NAME;
+    return isEAP()? DEFAULT_DOC_EAP_NAME : DEFAULT_DOC_NAME;
   }
 
   @NotNull
@@ -168,7 +198,7 @@ public final class EndUserAgreement {
     }
 
     public boolean isPrivacyPolicy() {
-      return PRIVACY_POLICY_DOCUMENT_NAME.equals(myName);
+      return PRIVACY_POLICY_DOCUMENT_NAME.equals(myName) || PRIVACY_POLICY_EAP_DOCUMENT_NAME.equals(myName);
     }
 
     public boolean isAccepted() {
@@ -195,22 +225,16 @@ public final class EndUserAgreement {
     @NotNull
     private static Version parseVersion(String text) {
       if (!StringUtil.isEmptyOrSpaces(text)) {
-        try {
-          final BufferedReader reader = new BufferedReader(new StringReader(text));
-          try {
-            final String line = reader.readLine();
-            if (line != null) {
-              final int startComment = line.indexOf(VERSION_COMMENT_START);
-              if (startComment >= 0 ) {
-                final int endComment = line.indexOf(VERSION_COMMENT_END);
-                if (endComment > startComment) {
-                  return Version.fromString(line.substring(startComment + VERSION_COMMENT_START.length(), endComment).trim());
-                }
+        try (BufferedReader reader = new BufferedReader(new StringReader(text))) {
+          final String line = reader.readLine();
+          if (line != null) {
+            final int startComment = line.indexOf(VERSION_COMMENT_START);
+            if (startComment >= 0) {
+              final int endComment = line.indexOf(VERSION_COMMENT_END);
+              if (endComment > startComment) {
+                return Version.fromString(line.substring(startComment + VERSION_COMMENT_START.length(), endComment).trim());
               }
             }
-          }
-          finally {
-            reader.close();
           }
         }
         catch (IOException e) {

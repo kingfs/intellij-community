@@ -26,7 +26,6 @@ import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
-import com.intellij.openapi.project.DumbAwareRunnable;
 import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Key;
@@ -250,6 +249,13 @@ class PassExecutorService implements Disposable {
         @Override
         public void doApplyInformationToEditor() {
           pass.applyInformationToEditor();
+          if (document != null) {
+            VirtualFile file = FileDocumentManager.getInstance().getFile(document);
+            FileEditor[] editors = file == null ? new FileEditor[0] : FileEditorManager.getInstance(myProject).getEditors(file);
+            for (FileEditor editor : editors) {
+              repaintErrorStripeAndIcon(editor);
+            }
+          }
         }
       };
       textEditorHighlightingPass.setId(id.incrementAndGet());
@@ -478,7 +484,7 @@ class PassExecutorService implements Disposable {
                                               @NotNull final DaemonProgressIndicator updateProgress,
                                               @NotNull final AtomicInteger threadsToStartCountdown,
                                               @NotNull Runnable callbackOnApplied) {
-    ApplicationManager.getApplication().invokeLater((DumbAwareRunnable)() -> {
+    ApplicationManager.getApplication().invokeLater(() -> {
       if (isDisposed() || myProject.isDisposed() || !fileEditor.isValid()) {
         updateProgress.cancel();
       }
@@ -490,6 +496,7 @@ class PassExecutorService implements Disposable {
       try {
         if (fileEditor.getComponent().isDisplayable() || ApplicationManager.getApplication().isHeadlessEnvironment()) {
           pass.applyInformationToEditor();
+          repaintErrorStripeAndIcon(fileEditor);
           FileStatusMap fileStatusMap = DaemonCodeAnalyzerEx.getInstanceEx(myProject).getFileStatusMap();
           if (document != null) {
             fileStatusMap.markFileUpToDate(document, pass.getId());
@@ -518,6 +525,12 @@ class PassExecutorService implements Disposable {
       }
       callbackOnApplied.run();
     }, updateProgress.getModalityState());
+  }
+
+  private void repaintErrorStripeAndIcon(@NotNull FileEditor fileEditor) {
+    if (fileEditor instanceof TextEditor) {
+      DefaultHighlightInfoProcessor.repaintErrorStripeAndIcon(((TextEditor)fileEditor).getEditor(), myProject);
+    }
   }
 
   protected boolean isDisposed() {

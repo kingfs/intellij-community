@@ -171,7 +171,7 @@ public abstract class PythonSdkFlavor {
   }
 
   public boolean isValidSdkPath(@NotNull File file) {
-    return FileUtil.getNameWithoutExtension(file).toLowerCase().startsWith("python");
+    return StringUtil.toLowerCase(FileUtil.getNameWithoutExtension(file)).startsWith("python");
   }
 
   @Nullable
@@ -241,7 +241,7 @@ public abstract class PythonSdkFlavor {
   }
 
   @NotNull
-  private LanguageLevel getLanguageLevelFromVersionString(@Nullable String version) {
+  public LanguageLevel getLanguageLevelFromVersionString(@Nullable String version) {
     final String prefix = getName() + " ";
     if (version != null && version.startsWith(prefix)) {
       return LanguageLevel.fromPythonVersion(version.substring(prefix.length()));

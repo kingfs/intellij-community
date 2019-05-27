@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.jetbrains.python.psi;
 
 import com.google.common.collect.Collections2;
@@ -14,6 +14,7 @@ import com.intellij.ide.scratch.ScratchFileService;
 import com.intellij.injected.editor.VirtualFileWindow;
 import com.intellij.lang.ASTFactory;
 import com.intellij.lang.ASTNode;
+import com.intellij.notebook.editor.BackedVirtualFile;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.impl.ApplicationImpl;
 import com.intellij.openapi.editor.Document;
@@ -31,6 +32,7 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.projectRoots.Sdk;
 import com.intellij.openapi.roots.ModuleRootManager;
+import com.intellij.openapi.roots.impl.FilePropertyPusher;
 import com.intellij.openapi.ui.MessageType;
 import com.intellij.openapi.ui.popup.Balloon;
 import com.intellij.openapi.ui.popup.JBPopupFactory;
@@ -211,10 +213,10 @@ public class PyUtil {
                   .createBalloon().show(point, Balloon.Position.atLeft);
   }
 
-  @NonNls
   /**
    * Returns a quoted string representation, or "null".
    */
+  @NonNls
   public static String nvl(Object s) {
     if (s != null) {
       return "'" + s.toString() + "'";
@@ -346,10 +348,12 @@ public class PyUtil {
       if (binaryExpression.getOperator() == PyTokenTypes.OR_KEYWORD) {
         return isNameEqualsMain(binaryExpression.getLeftExpression()) || isNameEqualsMain(binaryExpression.getRightExpression());
       }
-      final PyExpression rhs = binaryExpression.getRightExpression();
-      return binaryExpression.getOperator() == PyTokenTypes.EQEQ &&
-             binaryExpression.getLeftExpression().getText().equals(PyNames.NAME) &&
-             rhs != null && rhs.getText().contains("__main__");
+      if (binaryExpression.getRightExpression() instanceof PyStringLiteralExpression) {
+        final PyStringLiteralExpression rhs = (PyStringLiteralExpression) binaryExpression.getRightExpression();
+        return binaryExpression.getOperator() == PyTokenTypes.EQEQ &&
+               binaryExpression.getLeftExpression().getText().equals(PyNames.NAME) &&
+               rhs.getStringValue().equals("__main__");
+      }
     }
     return false;
   }
@@ -635,6 +639,9 @@ public class PyUtil {
     if (virtualFile instanceof VirtualFileWindow) {
       virtualFile = ((VirtualFileWindow)virtualFile).getDelegate();
     }
+    if (virtualFile instanceof BackedVirtualFile) {
+      virtualFile = ((BackedVirtualFile)virtualFile).getOriginFile();
+    }
 
     // Most of the cases should be handled by this one, PyLanguageLevelPusher pushes folders only
     final VirtualFile folder = virtualFile.getParent();
@@ -662,6 +669,11 @@ public class PyUtil {
       }
     }
     return guessLanguageLevelWithCaching(project);
+  }
+
+  @NotNull
+  public static LanguageLevel getLanguageLevelForModule(@NotNull Module module) {
+    return FilePropertyPusher.EP_NAME.findExtensionOrFail(PythonLanguageLevelPusher.class).getImmediateValue(module);
   }
 
   public static void invalidateLanguageLevelCache(@NotNull Project project) {
@@ -814,7 +826,11 @@ public class PyUtil {
     // Don't use ConcurrentHashMap#computeIfAbsent(), it blocks if the function tries to update the cache recursively for the same key
     // during computation. We can accept here that some values will be computed several times due to non-atomic updates.
     final Optional<P> wrappedParam = Optional.ofNullable(param);
-    Optional<T> value = cache.computeIfAbsent(wrappedParam, k -> Optional.ofNullable(f.fun(param)));
+    Optional<T> value = cache.get(wrappedParam);
+    if (value == null) {
+      value = Optional.ofNullable(f.fun(param));
+      cache.put(wrappedParam, value);
+    }
     return value.orElse(null);
   }
 
@@ -1200,15 +1216,6 @@ public class PyUtil {
       }
     }
     return null;
-  }
-
-  /**
-   * @deprecated This method will be removed in 2018.3.
-   */
-  @Nullable
-  @Deprecated
-  public static List<String> getStringListFromTargetExpression(PyTargetExpression attr) {
-    return strListValue(attr.findAssignedValue());
   }
 
   @Nullable
@@ -1699,38 +1706,8 @@ public class PyUtil {
     }
   }
 
-  /**
-   * Sometimes you do not know real FQN of some class, but you know class name and its package.
-   * I.e. {@code django.apps.conf.AppConfig} is not documented, but you know
-   * {@code AppConfig} and {@code django} package.
-   *
-   * @param symbol          element to check (class or function)
-   * @param expectedPackage package like "django"
-   * @param expectedName    expected name (i.e. AppConfig)
-   * @return true if element in package
-   * @deprecated use {@link com.jetbrains.python.nameResolver.FQNamesProvider#isNameMatches(PyQualifiedNameOwner)}
-   * Remove in 2018
-   */
-  @Deprecated
-  public static boolean isSymbolInPackage(@NotNull final PyQualifiedNameOwner symbol,
-                                          @NotNull final String expectedPackage,
-                                          @NotNull final String expectedName) {
-    final String qualifiedNameString = symbol.getQualifiedName();
-    if (qualifiedNameString == null) {
-      return false;
-    }
-    final QualifiedName qualifiedName = QualifiedName.fromDottedString(qualifiedNameString);
-    final String aPackage = qualifiedName.getFirstComponent();
-    if (!(expectedPackage.equals(aPackage))) {
-      return false;
-    }
-    final String symbolName = qualifiedName.getLastComponent();
-    return expectedName.equals(symbolName);
-  }
-
   public static boolean isObjectClass(@NotNull PyClass cls) {
-    final String name = cls.getQualifiedName();
-    return PyNames.OBJECT.equals(name) || PyNames.TYPES_INSTANCE_TYPE.equals(name);
+    return PyNames.OBJECT.equals(cls.getQualifiedName());
   }
 
   public static boolean isInScratchFile(@NotNull PsiElement element) {
@@ -1891,7 +1868,7 @@ public class PyUtil {
     }
 
     final PyElementGenerator generator = PyElementGenerator.getInstance(function.getProject());
-    final PyDecoratorList newDecorators = generator.createDecoratorList(decoTexts.toArray(ArrayUtil.EMPTY_STRING_ARRAY));
+    final PyDecoratorList newDecorators = generator.createDecoratorList(ArrayUtil.toStringArray(decoTexts));
 
     if (currentDecorators != null) {
       currentDecorators.replace(newDecorators);

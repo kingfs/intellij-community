@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.testFramework;
 
 import com.intellij.compiler.CompilerManagerImpl;
@@ -35,7 +35,7 @@ import com.intellij.testFramework.fixtures.IdeaProjectTestFixture;
 import com.intellij.testFramework.fixtures.TempDirTestFixture;
 import com.intellij.testFramework.fixtures.impl.TempDirTestFixtureImpl;
 import com.intellij.util.Consumer;
-import com.intellij.util.ExceptionUtilRt;
+import com.intellij.util.ExceptionUtil;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.concurrency.Semaphore;
 import com.intellij.util.io.FileTreePrinterKt;
@@ -150,9 +150,7 @@ public class CompilerTester {
   }
 
   public void setFileName(final PsiFile file, final String name) {
-    WriteCommandAction.writeCommandAction(getProject()).run(() -> {
-      file.setName(name);
-    });
+    WriteCommandAction.writeCommandAction(getProject()).run(() -> file.setName(name));
   }
 
   public List<CompilerMessage> make() {
@@ -215,9 +213,9 @@ public class CompilerTester {
           String fakeMacroName = "__remove_me__";
           IComponentStore applicationStore = CompilerTestUtil.getApplicationStore();
           pathMacroManager.setMacro(fakeMacroName, fakeMacroName);
-          applicationStore.saveApplicationComponent((PersistentStateComponent<?>)pathMacroManager);
+          applicationStore.saveComponent((PersistentStateComponent<?>)pathMacroManager);
           pathMacroManager.removeMacro(fakeMacroName);
-          applicationStore.saveApplicationComponent((PersistentStateComponent<?>)pathMacroManager);
+          applicationStore.saveComponent((PersistentStateComponent<?>)pathMacroManager);
           if (!Files.exists(macroFilePath)) {
             throw new AssertionError(message);
           }
@@ -323,16 +321,17 @@ public class CompilerTester {
     }
 
     private static boolean isSpamMessage(String text) {
-      return text.contains("Compilation completed successfully") ||
+      return text.contains(CompilerBundle.message("status.compilation.completed.successfully")) ||
              text.contains("used to compile") ||
              text.contains("illegal reflective") ||
+             text.contains("Picked up") ||
              text.contains("consider reporting this to the maintainers") ||
              text.startsWith("Using Groovy-Eclipse");
     }
 
     void throwException() {
       if (myError != null) {
-        ExceptionUtilRt.rethrow(myError);
+        ExceptionUtil.rethrow(myError);
       }
     }
 

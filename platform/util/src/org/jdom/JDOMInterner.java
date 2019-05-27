@@ -2,17 +2,23 @@
 package org.jdom;
 
 import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.Condition;
+import com.intellij.openapi.util.Conditions;
+import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.Interner;
 import com.intellij.util.containers.OpenTHashSet;
 import com.intellij.util.containers.StringInterner;
 import gnu.trove.TObjectHashingStrategy;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.Collections;
 import java.util.List;
 
+import static com.intellij.openapi.util.JDOMUtil.getAttributes;
+
 public class JDOMInterner {
-  private final StringInterner myStrings = new StringInterner();
-  private final OpenTHashSet<Element> myElements = new OpenTHashSet<Element>(new TObjectHashingStrategy<Element>() {
+  private static final Condition<Object> IS_ELEMENT = Conditions.instanceOf(Element.class);
+  private final Interner<String> myStrings = new StringInterner();
+  private final OpenTHashSet<Element> myElements = new OpenTHashSet<>(new TObjectHashingStrategy<Element>() {
     @Override
     public int computeHashCode(Element e) {
       int result = e.getName().hashCode() * 31;
@@ -48,7 +54,7 @@ public class JDOMInterner {
         }
         else if (c1 instanceof Element) {
           if (!(c2 instanceof Element)) return false;
-          if (!equals((Element)c1,(Element)c2)) return false;
+          if (!equals((Element)c1, (Element)c2)) return false;
         }
         else {
           throw new RuntimeException(c1.toString());
@@ -68,12 +74,6 @@ public class JDOMInterner {
       result = result * 31 + computeAttributeHashCode(attribute.getName(), attribute.getValue());
     }
     return result;
-  }
-
-  @NotNull
-  private static List<Attribute> getAttributes(@NotNull Element e) {
-    // avoid AttributeList creation if no attributes
-    return e.hasAttributes() ? e.getAttributes() : Collections.<Attribute>emptyList();
   }
 
   private static boolean attributesEqual(Element o1, Element o2) {
@@ -98,7 +98,7 @@ public class JDOMInterner {
     return name.hashCode() * 31 + (value == null ? 0 : value.hashCode());
   }
 
-  private final OpenTHashSet<Text/*ImmutableText or ImmutableCDATA*/> myTexts = new OpenTHashSet<Text>(new TObjectHashingStrategy<Text>() {
+  private final OpenTHashSet<Text/*ImmutableText or ImmutableCDATA*/> myTexts = new OpenTHashSet<>(new TObjectHashingStrategy<Text>() {
     @Override
     public int computeHashCode(Text object) {
       return computeTextHashCode(object);
@@ -117,6 +117,9 @@ public class JDOMInterner {
   @NotNull
   public synchronized Element internElement(@NotNull final Element element) {
     if (element instanceof ImmutableElement) return element;
+    if (ContainerUtil.exists(element.getContent(), IS_ELEMENT)) {
+      return new ImmutableElement(element, this);
+    }
     Element interned = myElements.get(element);
     if (interned == null) {
       interned = new ImmutableElement(element, this);

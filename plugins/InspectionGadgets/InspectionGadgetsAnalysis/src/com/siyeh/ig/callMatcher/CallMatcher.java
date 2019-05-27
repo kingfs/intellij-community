@@ -1,6 +1,7 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.siyeh.ig.callMatcher;
 
+import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.util.InheritanceUtil;
 import com.intellij.psi.util.PsiUtil;
@@ -13,6 +14,7 @@ import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -29,14 +31,14 @@ public interface CallMatcher extends Predicate<PsiMethodCallExpression> {
    */
   Stream<String> names();
 
-  @Contract("null -> false")
+  @Contract(value = "null -> false", pure = true)
   boolean methodReferenceMatches(PsiMethodReferenceExpression methodRef);
 
   @Override
-  @Contract("null -> false")
+  @Contract(value = "null -> false", pure = true)
   boolean test(@Nullable PsiMethodCallExpression call);
 
-  @Contract("null -> false")
+  @Contract(value = "null -> false", pure = true)
   boolean methodMatches(@Nullable PsiMethod method);
 
   /**
@@ -134,6 +136,14 @@ public interface CallMatcher extends Predicate<PsiMethodCallExpression> {
     return new Simple(className, ContainerUtil.newTroveSet(methodNames), null, CallType.STATIC);
   }
 
+  static Simple enumValues() {
+    return Simple.ENUM_VALUES;
+  }
+
+  static Simple enumValueOf() {
+    return Simple.ENUM_VALUE_OF;
+  }
+
   /**
    * Matches given expression if its a call or a method reference returning a corresponding PsiReferenceExpression if match is successful.
    *
@@ -151,7 +161,52 @@ public interface CallMatcher extends Predicate<PsiMethodCallExpression> {
     return null;
   }
 
+  /**
+   * @return call matcher with additional check before actual call matching
+   */
+  default CallMatcher withContextFilter(@NotNull Predicate<? super PsiElement> filter) {
+    return new CallMatcher() {
+      @Override
+      public Stream<String> names() {
+        return CallMatcher.this.names();
+      }
+
+      @Override
+      public boolean methodReferenceMatches(PsiMethodReferenceExpression methodRef) {
+        if (methodRef == null || !filter.test(methodRef)) return false;
+        return CallMatcher.this.methodReferenceMatches(methodRef);
+      }
+
+      @Override
+      public boolean test(@Nullable PsiMethodCallExpression call) {
+        if (call == null || !filter.test(call)) return false;
+        return CallMatcher.this.test(call);
+      }
+
+      @Override
+      public boolean methodMatches(@Nullable PsiMethod method) {
+        if (method == null || !filter.test(method)) return false;
+        return CallMatcher.this.methodMatches(method);
+      }
+
+      @Override
+      public String toString() {
+        return CallMatcher.this.toString();
+      }
+    };
+  }
+
+  /**
+   * @return call matcher, that matches element for file with given language level or higher
+   */
+  default CallMatcher withLanguageLevelAtLeast(@NotNull LanguageLevel level) {
+    return withContextFilter(element -> PsiUtil.getLanguageLevel(element).isAtLeast(level));
+  }
+
   class Simple implements CallMatcher {
+    static final Simple ENUM_VALUES = new Simple("", Collections.singleton("values"), ArrayUtil.EMPTY_STRING_ARRAY, CallType.ENUM_STATIC);
+    static final Simple ENUM_VALUE_OF =
+      new Simple("", Collections.singleton("valueOf"), new String[]{CommonClassNames.JAVA_LANG_STRING}, CallType.ENUM_STATIC);
     private final @NotNull String myClassName;
     private final @NotNull Set<String> myNames;
     private final @Nullable String[] myParameters;
@@ -264,6 +319,12 @@ public interface CallMatcher extends Predicate<PsiMethodCallExpression> {
       @Override
       boolean matches(PsiClass aClass, String className, boolean isStatic) {
         return isStatic && className.equals(aClass.getQualifiedName());
+      }
+    },
+    ENUM_STATIC {
+      @Override
+      boolean matches(PsiClass aClass, String className, boolean isStatic) {
+        return isStatic && aClass.isEnum();
       }
     },
     INSTANCE {

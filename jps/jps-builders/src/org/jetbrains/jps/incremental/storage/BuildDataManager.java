@@ -29,7 +29,7 @@ import java.util.concurrent.ConcurrentMap;
  * @author Eugene Zhuravlev
  */
 public class BuildDataManager implements StorageOwner {
-  private static final int VERSION = 36 + (PersistentHashMapValueStorage.COMPRESSION_ENABLED ? 1:0);
+  private static final int VERSION = 39 + (PersistentHashMapValueStorage.COMPRESSION_ENABLED ? 1:0);
   private static final Logger LOG = Logger.getInstance("#org.jetbrains.jps.incremental.storage.BuildDataManager");
   private static final String SRC_TO_FORM_STORAGE = "src-form";
   private static final String SRC_TO_OUTPUT_STORAGE = "src-out";
@@ -267,7 +267,7 @@ public class BuildDataManager implements StorageOwner {
     }
   }
 
-  public void closeSourceToOutputStorages(Collection<BuildTargetChunk> chunks) throws IOException {
+  public void closeSourceToOutputStorages(Collection<? extends BuildTargetChunk> chunks) throws IOException {
     for (BuildTargetChunk chunk : chunks) {
       for (BuildTarget<?> target : chunk.getTargets()) {
         final AtomicNotNullLazyValue<SourceToOutputMappingImpl> mapping = mySourceToOutputs.remove(target);
@@ -305,7 +305,7 @@ public class BuildDataManager implements StorageOwner {
     }
   }
 
-  private static <K, V> V fetchValue(ConcurrentMap<K, AtomicNotNullLazyValue<V>> container, K key, final LazyValueFactory<K, V> valueFactory) throws IOException {
+  private static <K, V> V fetchValue(ConcurrentMap<K, AtomicNotNullLazyValue<V>> container, K key, final LazyValueFactory<? super K, V> valueFactory) throws IOException {
     AtomicNotNullLazyValue<V> lazy = container.get(key);
     if (lazy == null) {
       final AtomicNotNullLazyValue<V> newValue = valueFactory.create(key);
@@ -389,16 +389,10 @@ public class BuildDataManager implements StorageOwner {
   public void saveVersion() {
     final Boolean differs = myVersionDiffers;
     if (differs == null || differs) {
-      try {
-        FileUtil.createIfDoesntExist(myVersionFile);
-        final DataOutputStream os = new DataOutputStream(new FileOutputStream(myVersionFile));
-        try {
-          os.writeInt(VERSION);
-          myVersionDiffers = Boolean.FALSE;
-        }
-        finally {
-          os.close();
-        }
+      FileUtil.createIfDoesntExist(myVersionFile);
+      try (DataOutputStream os = new DataOutputStream(new FileOutputStream(myVersionFile))) {
+        os.writeInt(VERSION);
+        myVersionDiffers = Boolean.FALSE;
       }
       catch (IOException ignored) {
       }

@@ -18,16 +18,23 @@ package com.intellij.vcs.log.data;
 import com.intellij.vcs.log.VcsCommitMetadata;
 import com.intellij.vcs.log.VcsLogDateFilter;
 import com.intellij.vcs.log.VcsLogDetailsFilter;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Date;
+import java.util.Objects;
 
+@ApiStatus.Internal
 public class VcsLogDateFilterImpl implements VcsLogDateFilter, VcsLogDetailsFilter {
 
   @Nullable private final Date myAfter;
   @Nullable private final Date myBefore;
 
+  /**
+     * @deprecated use {@link com.intellij.vcs.log.visible.filters.VcsLogFilterObject#fromDates(Date, Date)}
+     */
+  @Deprecated
   public VcsLogDateFilterImpl(@Nullable Date after, @Nullable Date before) {
     myAfter = after;
     myBefore = before;
@@ -62,5 +69,19 @@ public class VcsLogDateFilterImpl implements VcsLogDateFilter, VcsLogDetailsFilt
   public String toString() {
     return (myAfter != null ? "after " + myAfter + (myBefore != null ? " " : "") : "") +
            (myBefore != null ? "before " + myBefore : "");
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) return true;
+    if (o == null || getClass() != o.getClass()) return false;
+    VcsLogDateFilterImpl filter = (VcsLogDateFilterImpl)o;
+    return Objects.equals(getAfter(), filter.getAfter()) &&
+           Objects.equals(getBefore(), filter.getBefore());
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(getAfter(), getBefore());
   }
 }

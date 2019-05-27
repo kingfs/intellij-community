@@ -1,11 +1,14 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.pullrequest.ui
 
+import com.intellij.ide.CopyProvider
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.util.Disposer
+import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.actionSystem.DataProvider
+import com.intellij.openapi.actionSystem.PlatformDataKeys
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.ui.ListUtil
 import com.intellij.ui.ScrollingUtil
-import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.util.text.DateFormatUtil
 import com.intellij.util.ui.*
@@ -15,18 +18,20 @@ import net.miginfocom.layout.LC
 import net.miginfocom.swing.MigLayout
 import org.jetbrains.plugins.github.api.data.GithubIssueState
 import org.jetbrains.plugins.github.api.data.GithubSearchedIssue
+import org.jetbrains.plugins.github.pullrequest.action.GithubPullRequestKeys
 import org.jetbrains.plugins.github.pullrequest.avatars.CachingGithubAvatarIconsProvider
 import org.jetbrains.plugins.github.util.GithubUIUtil
-import java.awt.Color
 import java.awt.Component
 import java.awt.FlowLayout
+import java.awt.datatransfer.StringSelection
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
 
-internal class GithubPullRequestsList(avatarIconsProviderFactory: CachingGithubAvatarIconsProvider.Factory,
+internal class GithubPullRequestsList(private val copyPasteManager: CopyPasteManager,
+                                      avatarIconsProviderFactory: CachingGithubAvatarIconsProvider.Factory,
                                       model: ListModel<GithubSearchedIssue>)
-  : JBList<GithubSearchedIssue>(model), Disposable {
+  : JBList<GithubSearchedIssue>(model), CopyProvider, DataProvider, Disposable {
 
   private val avatarIconSize = JBValue.UIInteger("Github.PullRequests.List.Assignee.Avatar.Size", 20)
   private val avatarIconsProvider = avatarIconsProviderFactory.create(avatarIconSize, this)
@@ -40,13 +45,28 @@ internal class GithubPullRequestsList(avatarIconsProviderFactory: CachingGithubA
     UIUtil.putClientProperty(this, UIUtil.NOT_IN_HIERARCHY_COMPONENTS, listOf(renderer))
 
     ScrollingUtil.installActions(this)
-    Disposer.register(this, avatarIconsProvider)
   }
 
   override fun getToolTipText(event: MouseEvent): String? {
     val childComponent = ListUtil.getDeepestRendererChildComponentAt(this, event.point)
     if (childComponent !is JComponent) return null
     return childComponent.toolTipText
+  }
+
+  override fun performCopy(dataContext: DataContext) {
+    if (selectedIndex < 0) return
+    val selection = model.getElementAt(selectedIndex)
+    copyPasteManager.setContents(StringSelection("#${selection.number} ${selection.title}"))
+  }
+
+  override fun isCopyEnabled(dataContext: DataContext) = !isSelectionEmpty
+
+  override fun isCopyVisible(dataContext: DataContext) = false
+
+  override fun getData(dataId: String): Any? = when {
+    PlatformDataKeys.COPY_PROVIDER.`is`(dataId) -> this
+    GithubPullRequestKeys.SELECTED_SEARCHED_ISSUE.`is`(dataId) -> selectedValue
+    else -> null
   }
 
   override fun dispose() {}
@@ -56,7 +76,9 @@ internal class GithubPullRequestsList(avatarIconsProviderFactory: CachingGithubA
     private val stateIcon = JLabel()
     private val title = JLabel()
     private val info = JLabel()
-    private val labels = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0))
+    private val labels = JPanel().apply {
+      layout = BoxLayout(this, BoxLayout.X_AXIS)
+    }
     private val assignees = JPanel().apply {
       layout = BoxLayout(this, BoxLayout.X_AXIS)
     }
@@ -64,18 +86,21 @@ internal class GithubPullRequestsList(avatarIconsProviderFactory: CachingGithubA
     init {
       border = JBUI.Borders.empty(5, 8)
 
-      layout = MigLayout(LC().debug()
-                           .gridGap("0", "0")
+      layout = MigLayout(LC().gridGap("0", "0")
                            .insets("0", "0", "0", "0")
                            .fillX())
 
+      val gapAfter = "${JBUI.scale(5)}px"
       add(stateIcon, CC()
-        .gapAfter("${JBUI.scale(5)}px"))
+        .gapAfter(gapAfter))
       add(title, CC()
-        .minWidth("0px"))
+        .minWidth("pref/2px")
+        .gapAfter(gapAfter))
       add(labels, CC()
         .growX()
-        .pushX())
+        .pushX()
+        .minWidth("0px")
+        .gapAfter(gapAfter))
       add(assignees, CC()
         .spanY(2)
         .wrap())
@@ -107,11 +132,9 @@ internal class GithubPullRequestsList(avatarIconsProviderFactory: CachingGithubA
       }
       labels.apply {
         removeAll()
-        for (label in value.labels) {
-          add(JBLabel(" ${label.name} ", UIUtil.ComponentStyle.MINI).apply {
-            foreground = Color.black
-            background = Color.decode("0x${label.color}")
-          }.andOpaque())
+        for (label in value.labels.orEmpty()) {
+          add(GithubUIUtil.createIssueLabelLabel(label))
+          add(Box.createRigidArea(JBDimension(4, 0)))
         }
       }
       assignees.apply {

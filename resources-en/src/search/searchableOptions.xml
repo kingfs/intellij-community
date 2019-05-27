@@ -25919,6 +25919,8 @@
     <option name="directory" hit="Service directory path:" />
     <option name="path" hit="Service directory path:" />
     <option name="service" hit="Service directory path:" />
+    <option name="jvm" hit="Gradle JVM:" />
+    <option name="gradle" hit="Gradle JVM:" />
   </configurable>
   <configurable id="reference.settingsdialog.project.gant" configurable_name="Gant">
     <option name="" hit="" />
@@ -27903,19 +27905,6 @@
     <option name="server" hit="Deployment server" />
     <option name="ssh" hit="SSH Terminal" />
     <option name="terminal" hit="SSH Terminal" />
-  </configurable>
-  <configurable id="asprofile.settings" configurable_name="ActionScript Profiler">
-    <option name="" hit="" />
-    <option name="actionscript" hit="ActionScript Profiler" />
-    <option name="profiler" hit="ActionScript Profiler" />
-    <option name="connection" hit="Connection" />
-    <option name="cfg" hit="Custom mm.cfg file location:" />
-    <option name="custom" hit="Custom mm.cfg file location:" />
-    <option name="file" hit="Custom mm.cfg file location:" />
-    <option name="location" hit="Custom mm.cfg file location:" />
-    <option name="mm" hit="Custom mm.cfg file location:" />
-    <option name="host" hit="Host:" />
-    <option name="port" hit="Port:" />
   </configurable>
   <configurable id="reference.settings.ide.settings.uml" configurable_name="Diagrams">
     <option name="" hit="" />

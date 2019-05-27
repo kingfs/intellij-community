@@ -42,13 +42,20 @@ class TestProjectViewPSIPane extends AbstractProjectViewPSIPane {
       public void selectIn(SelectInContext context, boolean requestFocus) {
 
       }
+
+      @Override
+      public String getMinorViewId() {
+        return getId();
+      }
     };
   }
 
   @NotNull
   @Override
   protected AbstractTreeUpdater createTreeUpdater(@NotNull AbstractTreeBuilder treeBuilder) {
-    return new AbstractTreeUpdater(treeBuilder);
+    return new AbstractTreeUpdater(treeBuilder) {
+      // unique class to simplify search through the logs
+    };
   }
 
   @Override

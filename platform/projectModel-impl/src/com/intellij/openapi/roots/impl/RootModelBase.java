@@ -10,6 +10,7 @@ import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.SmartList;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
@@ -18,13 +19,14 @@ import java.util.*;
 /**
  * @author nik
  */
+@ApiStatus.Internal
 public abstract class RootModelBase implements ModuleRootModel {
   @Override
   @NotNull
   public VirtualFile[] getContentRoots() {
-    final ArrayList<VirtualFile> result = new ArrayList<>();
-
-    for (ContentEntry contentEntry : getContent()) {
+    Collection<ContentEntry> content = getContent();
+    List<VirtualFile> result = new ArrayList<>(content.size());
+    for (ContentEntry contentEntry : content) {
       final VirtualFile file = contentEntry.getFile();
       if (file != null) {
         result.add(file);
@@ -36,10 +38,11 @@ public abstract class RootModelBase implements ModuleRootModel {
   @Override
   @NotNull
   public String[] getContentRootUrls() {
-    if (getContent().isEmpty()) return ArrayUtil.EMPTY_STRING_ARRAY;
-    final ArrayList<String> result = new ArrayList<>(getContent().size());
+    Collection<ContentEntry> content = getContent();
+    if (content.isEmpty()) return ArrayUtil.EMPTY_STRING_ARRAY;
+    List<String> result = new ArrayList<>(content.size());
 
-    for (ContentEntry contentEntry : getContent()) {
+    for (ContentEntry contentEntry : content) {
       result.add(contentEntry.getUrl());
     }
 
@@ -167,7 +170,7 @@ public abstract class RootModelBase implements ModuleRootModel {
   }
 
   @Override
-  public <R> R processOrder(RootPolicy<R> policy, R initialValue) {
+  public <R> R processOrder(@NotNull RootPolicy<R> policy, R initialValue) {
     R result = initialValue;
     for (OrderEntry orderEntry : getOrderEntries()) {
       result = orderEntry.accept(policy, result);

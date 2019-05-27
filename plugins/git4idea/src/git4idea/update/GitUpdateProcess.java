@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.update;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -92,7 +92,7 @@ public class GitUpdateProcess {
       repository.update();
     }
 
-    mySubmodulesInDetachedHead = ContainerUtil.newLinkedHashMap();
+    mySubmodulesInDetachedHead = new LinkedHashMap<>();
     for (GitRepository repository : myRepositories) {
       if (!repository.isOnBranch()) {
         GitSubmodule submodule = GitSubmoduleKt.asSubmodule(repository);
@@ -132,7 +132,7 @@ public class GitUpdateProcess {
       return GitUpdateResult.NOT_READY;
     }
 
-    if (!fetchAndNotify(trackedBranches.keySet())) {
+    if (!fetchAndNotify(myRepositories)) {
       return GitUpdateResult.NOT_READY;
     }
 
@@ -193,7 +193,7 @@ public class GitUpdateProcess {
     }
 
     // save local changes if needed (update via merge may perform without saving).
-    final Collection<VirtualFile> myRootsToSave = ContainerUtil.newArrayList();
+    final Collection<VirtualFile> myRootsToSave = new ArrayList<>();
     LOG.info("updateImpl: identifying if save is needed...");
     for (Map.Entry<GitRepository, GitUpdater> entry : updaters.entrySet()) {
       GitRepository repo = entry.getKey();
@@ -314,7 +314,7 @@ public class GitUpdateProcess {
 
   // fetch all roots. If an error happens, return false and notify about errors.
   private boolean fetchAndNotify(@NotNull Collection<GitRepository> repositories) {
-    return fetchSupport(myProject).fetch(repositories).showNotificationIfFailed("Update failed");
+    return fetchSupport(myProject).fetchDefaultRemote(repositories).showNotificationIfFailed("Update failed");
   }
 
   /**
@@ -326,8 +326,8 @@ public class GitUpdateProcess {
   private Map<GitRepository, GitBranchPair> checkTrackedBranchesConfiguration() {
     LOG.info("checking tracked branch configuration...");
 
-    Map<GitRepository, GitLocalBranch> currentBranches = ContainerUtil.newLinkedHashMap();
-    List<GitRepository> detachedHeads = ContainerUtil.newArrayList();
+    Map<GitRepository, GitLocalBranch> currentBranches = new LinkedHashMap<>();
+    List<GitRepository> detachedHeads = new ArrayList<>();
     for (GitRepository repository : myRepositories) {
       if (mySubmodulesInDetachedHead.containsKey(repository)) {
         LOG.debug("Repository " + repository + " is a submodule in detached HEAD state, not checking its tracked branch");
@@ -344,7 +344,7 @@ public class GitUpdateProcess {
       }
     }
 
-    if (currentBranches.isEmpty() || (isSyncControl() && (currentBranches.size() < myRepositories.size()))) {
+    if (!detachedHeads.isEmpty() && (currentBranches.isEmpty() || isSyncControl())) {
       notifyDetachedHeadError(detachedHeads.get(0));
       return null;
     }
@@ -354,8 +354,8 @@ public class GitUpdateProcess {
       }
     }
 
-    Map<GitRepository, GitBranchPair> trackedBranches = ContainerUtil.newLinkedHashMap();
-    List<GitRepository> noTrackedBranch = ContainerUtil.newArrayList();
+    Map<GitRepository, GitBranchPair> trackedBranches = new LinkedHashMap<>();
+    List<GitRepository> noTrackedBranch = new ArrayList<>();
     for (GitRepository repository: currentBranches.keySet()) {
       GitLocalBranch branch = currentBranches.get(repository);
       GitBranchTrackInfo trackInfo = GitBranchUtil.getTrackInfoForBranch(repository, branch);
@@ -370,7 +370,7 @@ public class GitUpdateProcess {
     }
 
     if (myCheckForTrackedBranchExistence &&
-        (trackedBranches.isEmpty() || (isSyncControl() && (trackedBranches.size() < myRepositories.size())))) {
+        !noTrackedBranch.isEmpty() && (trackedBranches.isEmpty() || isSyncControl())) {
       GitRepository repo = noTrackedBranch.get(0);
       notifyNoTrackedBranchError(repo, currentBranches.get(repo));
       return null;
@@ -470,7 +470,7 @@ public class GitUpdateProcess {
     params.setMergeDescription("You have unfinished rebase process. These conflicts must be resolved before update.");
     params.setErrorNotificationAdditionalDescription("Then you may <b>continue rebase</b>. <br/> You also may <b>abort rebase</b> to restore the original branch and stop rebasing.");
     params.setReverse(true);
-    return !new GitConflictResolver(myProject, myGit, rebasingRoots, params) {
+    return !new GitConflictResolver(myProject, rebasingRoots, params) {
       @Override protected boolean proceedIfNothingToMerge() {
         return rebaser.continueRebase(rebasingRoots);
       }

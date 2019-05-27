@@ -15,7 +15,8 @@ from _pydevd_bundle.pydevd_constants import dict_iter_items, dict_keys, IS_PY3K,
 from _pydevd_bundle.pydevd_extension_api import TypeResolveProvider, StrPresentationProvider
 from _pydevd_bundle.pydevd_vars import get_label, array_default_format, MAXIMUM_ARRAY_SIZE
 from pydev_console.protocol import DebugValue, GetArrayResponse, ArrayData, ArrayHeaders, ColHeader, RowHeader, \
-    UnsupportedArrayTypeException
+    UnsupportedArrayTypeException, ExceedingArrayDimensionsException
+from _pydevd_bundle.pydevd_utils import take_first_n_coll_elements
 
 try:
     import types
@@ -227,8 +228,17 @@ def is_builtin(x):
     return getattr(x, '__module__', None) == BUILTINS_MODULE_NAME
 
 
+def is_numpy(x):
+    if not getattr(x, '__module__', None) == 'numpy':
+        return False
+    type_name = x.__name__
+    return type_name == 'dtype' or type_name == 'bool_' or type_name == 'str_' or 'int' in type_name or 'uint' in type_name \
+           or 'float' in type_name or 'complex' in type_name
+
+
 def should_evaluate_full_value(val):
-    return LOAD_VALUES_POLICY == ValuesPolicy.SYNC or (is_builtin(type(val)) and not isinstance(val, (list, tuple, dict)))
+    return LOAD_VALUES_POLICY == ValuesPolicy.SYNC or ((is_builtin(type(val)) or is_numpy(type(val)))
+                                                       and not isinstance(val, (list, tuple, dict, set, frozenset)))
 
 
 def frame_vars_to_struct(frame_f_locals, hidden_ns=None):
@@ -300,10 +310,12 @@ def var_to_struct(val, name, do_trim=True, evaluate_full_value=True):
                     value = pydevd_resolver.frameResolver.get_frame_name(v)
 
                 elif v.__class__ in (list, tuple):
-                    if len(v) > 300:
-                        value = '<Too big to print. Len: %s>' % (len(v),)
+                    if len(v) > pydevd_resolver.MAX_ITEMS_TO_HANDLE:
+                        value = '%s: %s' % (str(v.__class__),  take_first_n_coll_elements(
+                            v, pydevd_resolver.MAX_ITEMS_TO_HANDLE))
+                        value = value.rstrip(')]}') + '...'
                     else:
-                        value = str(v)
+                        value = '%s: %s' % (str(v.__class__, v))
                 else:
                     value = str(v)
             else:
@@ -352,7 +364,8 @@ def var_to_struct(val, name, do_trim=True, evaluate_full_value=True):
 
 def var_to_str(val, do_trim=True, evaluate_full_value=True):
     struct = var_to_struct(val, '', do_trim, evaluate_full_value)
-    return struct.value
+    value = struct.value
+    return value if value is not None else ''
 
 
 # from pydevd_vars.py
@@ -427,7 +440,7 @@ def array_to_meta_thrift_struct(array, name, format):
     l = len(array.shape)
     reslice = ""
     if l > 2:
-        raise Exception("%s has more than 2 dimensions." % slice)
+        raise ExceedingArrayDimensionsException
     elif l == 1:
         # special case with 1D arrays arr[i, :] - row, but arr[:, i] - column with equal shape and ndim
         # http://stackoverflow.com/questions/16837946/numpy-a-2-rows-1-column-file-loadtxt-returns-1row-2-columns
@@ -467,7 +480,8 @@ def array_to_meta_thrift_struct(array, name, format):
     array_chunk.cols = cols
     array_chunk.format = format
     array_chunk.type = type
-    array_chunk.bounds = bounds
+    array_chunk.max = "%s" % bounds[1]
+    array_chunk.min = "%s" % bounds[0]
     return array, array_chunk, rows, cols, format
 
 
@@ -492,7 +506,8 @@ def dataframe_to_thrift_struct(df, name, roffset, coffset, rows, cols, format):
     array_chunk.cols = num_cols
     array_chunk.format = ""
     array_chunk.type = ""
-    array_chunk.bounds = (0, 0)
+    array_chunk.max = "0"
+    array_chunk.min = "0"
 
     if (rows, cols) == (-1, -1):
         rows, cols = num_rows, num_cols
@@ -525,9 +540,11 @@ def dataframe_to_thrift_struct(df, name, roffset, coffset, rows, cols, format):
     def col_to_format(c):
         return format if dtypes[c] == 'f' and format else array_default_format(dtypes[c])
 
+    iat = df.iat if dim == 1 or len(df.columns.unique()) == len(df.columns) else df.iloc
+
     array_chunk.headers = header_data_to_thrift_struct(rows, cols, dtypes, col_bounds, col_to_format, df, dim)
     array_chunk.data = array_data_to_thrift_struct(rows, cols,
-                                                   lambda r: (("%" + col_to_format(c)) % (df.iat[r, c] if dim > 1 else df.iat[r])
+                                                   lambda r: (("%" + col_to_format(c)) % (iat[r, c] if dim > 1 else iat[r])
                                                               for c in range(cols)))
     return array_chunk
 

@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2016 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.source.tree;
 
 import com.intellij.codeInsight.AnnotationTargetUtil;
@@ -33,6 +19,7 @@ import com.intellij.util.containers.Stack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class JavaSharedImplUtil {
@@ -59,11 +46,13 @@ public class JavaSharedImplUtil {
   }
 
   // collects annotations bound to C-style arrays
-  private static List<PsiAnnotation[]> collectAnnotations(PsiElement anchor, PsiAnnotation stopAt) {
+  @Nullable
+  private static List<PsiAnnotation[]> collectAnnotations(@NotNull PsiElement anchor, @Nullable PsiAnnotation stopAt) {
     List<PsiAnnotation[]> annotations = ContainerUtil.newSmartList();
 
     List<PsiAnnotation> current = null;
-    boolean found = (stopAt == null), stop = false;
+    boolean found = stopAt == null;
+    boolean stop = false;
     for (PsiElement child = anchor.getNextSibling(); child != null; child = child.getNextSibling()) {
       if (child instanceof PsiComment || child instanceof PsiWhiteSpace) continue;
 
@@ -75,7 +64,7 @@ public class JavaSharedImplUtil {
       }
 
       if (PsiUtil.isJavaToken(child, JavaTokenType.LBRACKET)) {
-        annotations.add(ContainerUtil.toArray(current, PsiAnnotation.ARRAY_FACTORY));
+        annotations.add(current == null ? PsiAnnotation.EMPTY_ARRAY : ContainerUtil.toArray(current, PsiAnnotation.ARRAY_FACTORY));
         current = null;
         if (stop) return annotations;
       }
@@ -111,7 +100,7 @@ public class JavaSharedImplUtil {
           return type;
         }
         else if (type instanceof PsiDisjunctionType) {
-          List<PsiType> components = ContainerUtil.newArrayList(((PsiDisjunctionType)type).getDisjunctions());
+          List<PsiType> components = new ArrayList<>(((PsiDisjunctionType)type).getDisjunctions());
           components.set(0, components.get(0).annotate(provider));
           return ((PsiDisjunctionType)type).newDisjunctionType(components);
         }
@@ -174,7 +163,7 @@ public class JavaSharedImplUtil {
     }
   }
 
-  public static void setInitializer(PsiVariable variable, PsiExpression initializer) throws IncorrectOperationException {
+  public static void setInitializer(@NotNull PsiVariable variable, PsiExpression initializer) throws IncorrectOperationException {
     PsiExpression oldInitializer = variable.getInitializer();
     if (oldInitializer != null) {
       oldInitializer.delete();
@@ -202,7 +191,7 @@ public class JavaSharedImplUtil {
     private final TypeAnnotationProvider myOriginalProvider;
     private volatile PsiAnnotation[] myCache;
 
-    private FilteringTypeAnnotationProvider(PsiAnnotation[] candidates, TypeAnnotationProvider originalProvider) {
+    private FilteringTypeAnnotationProvider(@NotNull PsiAnnotation[] candidates, @NotNull TypeAnnotationProvider originalProvider) {
       myCandidates = candidates;
       myOriginalProvider = originalProvider;
     }

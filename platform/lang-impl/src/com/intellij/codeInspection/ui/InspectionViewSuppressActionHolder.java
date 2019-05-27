@@ -27,6 +27,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiLanguageInjectionHost;
 import com.intellij.util.containers.FactoryMap;
+import com.intellij.util.containers.HashSetInterner;
 import com.intellij.util.containers.Interner;
 import gnu.trove.THashMap;
 import org.jetbrains.annotations.NotNull;
@@ -34,6 +35,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -41,7 +43,7 @@ import java.util.stream.Stream;
 public class InspectionViewSuppressActionHolder {
   private final Map<String, Map<ContextDescriptor, SuppressIntentionAction[]>> mySuppressActions =
     FactoryMap.create(__ -> new THashMap<>());
-  private final Interner<Set<SuppressIntentionAction>> myActionSetInterner = new Interner<>();
+  private final Interner<Set<SuppressIntentionAction>> myActionSetInterner = new HashSetInterner<>();
 
   @NotNull
   public synchronized SuppressIntentionAction[] getSuppressActions(@NotNull InspectionToolWrapper wrapper, @NotNull PsiElement context) {
@@ -115,7 +117,7 @@ public class InspectionViewSuppressActionHolder {
       if (!myElementLanguage.equals(that.myElementLanguage)) return false;
       if (!myFileBaseLanguage.equals(that.myFileBaseLanguage)) return false;
       if (!myFileLanguages.equals(that.myFileLanguages)) return false;
-      if (myInjectionDescriptor != null ? !myInjectionDescriptor.equals(that.myInjectionDescriptor) : that.myInjectionDescriptor != null) {
+      if (!Objects.equals(myInjectionDescriptor, that.myInjectionDescriptor)) {
         return false;
       }
 

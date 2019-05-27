@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.history.impl;
 
 import com.intellij.diff.Block;
@@ -68,6 +68,7 @@ public class VcsSelectionHistoryDialog extends FrameWrapper implements DataProvi
   private static final Logger LOG = Logger.getInstance("#com.intellij.openapi.vcs.history.impl.VcsHistoryDialog");
 
   private static final VcsRevisionNumber LOCAL_REVISION_NUMBER = new VcsRevisionNumber() {
+    @NotNull
     @Override
     public String asString() {
       return "Local Changes";
@@ -446,7 +447,7 @@ public class VcsSelectionHistoryDialog extends FrameWrapper implements DataProvi
     }
     else if (VcsDataKeys.VCS_FILE_REVISIONS.is(dataId)) {
       List<VcsFileRevision> revisions = ContainerUtil.filter(myList.getSelectedObjects(), Conditions.notEqualTo(myLocalRevision));
-      return ArrayUtil.toObjectArray(revisions, VcsFileRevision.class);
+      return revisions.toArray(new VcsFileRevision[0]);
     }
     else if (VcsDataKeys.VCS.is(dataId)) {
       return myActiveVcs.getKeyInstanceMethod();
@@ -518,7 +519,7 @@ public class VcsSelectionHistoryDialog extends FrameWrapper implements DataProvi
   private abstract static class BlockLoader {
     @NotNull private final Object LOCK = new Object();
 
-    @NotNull private final List<VcsFileRevision> myRevisions;
+    @NotNull private final List<? extends VcsFileRevision> myRevisions;
     @NotNull private final Charset myCharset;
 
     @NotNull private final List<Block> myBlocks = new ArrayList<>();
@@ -526,7 +527,7 @@ public class VcsSelectionHistoryDialog extends FrameWrapper implements DataProvi
     private boolean myIsLoading = true;
     private VcsFileRevision myCurrentLoadingRevision;
 
-    BlockLoader(@NotNull List<VcsFileRevision> revisions,
+    BlockLoader(@NotNull List<? extends VcsFileRevision> revisions,
                        @NotNull VirtualFile file,
                        @NotNull Document document,
                        int selectionStart,
@@ -614,12 +615,12 @@ public class VcsSelectionHistoryDialog extends FrameWrapper implements DataProvi
 
   private static class BlockData {
     private final boolean myIsLoading;
-    @NotNull private final List<Block> myBlocks;
+    @NotNull private final List<? extends Block> myBlocks;
     @Nullable private final VcsException myException;
     @Nullable private final VcsFileRevision myCurrentLoadingRevision;
 
     BlockData(boolean isLoading,
-                     @NotNull List<Block> blocks,
+                     @NotNull List<? extends Block> blocks,
                      @Nullable VcsException exception,
                      @Nullable VcsFileRevision currentLoadingRevision) {
       myIsLoading = isLoading;

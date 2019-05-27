@@ -72,7 +72,13 @@ class CompareBranchesDiffPanel extends JPanel {
     myBranchName = branchName;
     myVcsSettings = helper.getDvcsCompareSettings();
 
-    myLabel = new JEditorPane();
+    myLabel = new JEditorPane() {
+      @Override
+      public void setText(String t) {
+        super.setText(t);
+        getPreferredSize();
+      }
+    };
     myLabel.setEditorKit(UIUtil.getHTMLEditorKit());
     myLabel.setEditable(false);
     myLabel.setBackground(null);
@@ -110,7 +116,7 @@ class CompareBranchesDiffPanel extends JPanel {
   }
 
   private class MyChangesBrowser extends SimpleChangesBrowser {
-    MyChangesBrowser(@NotNull Project project, @NotNull List<Change> changes) {
+    MyChangesBrowser(@NotNull Project project, @NotNull List<? extends Change> changes) {
       super(project, false, true);
       setChangesToDisplay(changes);
     }
@@ -174,9 +180,7 @@ class CompareBranchesDiffPanel extends JPanel {
             ((LocalCommitCompareInfo)myCompareInfo).copyChangesFromBranch(changes, swapSides);
           }
           catch (VcsException err) {
-            ApplicationManager.getApplication().invokeLater(() -> {
-              Messages.showErrorDialog(myProject, err.getMessage(), "Can't Copy Changes");
-            });
+            ApplicationManager.getApplication().invokeLater(() -> Messages.showErrorDialog(myProject, err.getMessage(), "Can't Copy Changes"));
           }
         }
 

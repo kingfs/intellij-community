@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.ui.filters;
 
 import com.intellij.openapi.actionSystem.AnAction;
@@ -35,12 +35,12 @@ public abstract class FilterAction extends AnAction implements Filter {
 
   @Override
   public final void actionPerformed(@NotNull AnActionEvent e) {
+    initFilter();
     myTable.addFilter(this);
   }
 
   @Override
   public final SimpleColoredComponent getRenderer() {
-    if (!hasFilter()) myTable.removeFilter(this);
     myLabel.clear();
     setLabel(myLabel);
     return myLabel;
@@ -50,7 +50,9 @@ public abstract class FilterAction extends AnAction implements Filter {
 
   public abstract boolean hasFilter();
 
+  public void initFilter() {}
+
   public abstract void clearFilter();
 
-  public abstract boolean isApplicable(List<PsiElement> nodes, boolean completePattern, boolean target);
+  public abstract boolean isApplicable(List<? extends PsiElement> nodes, boolean completePattern, boolean target);
 }

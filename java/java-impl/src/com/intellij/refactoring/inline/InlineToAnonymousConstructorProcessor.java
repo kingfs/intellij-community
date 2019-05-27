@@ -251,7 +251,7 @@ class InlineToAnonymousConstructorProcessor {
   private PsiVariable generateOuterClassLocal() {
     PsiClass outerClass = myClass.getContainingClass();
     assert outerClass != null;
-    return generateLocal(StringUtil.decapitalize(outerClass.getName()),
+    return generateLocal(StringUtil.decapitalize(StringUtil.notNullize(outerClass.getName())),
                          myElementFactory.createType(outerClass), myNewExpression.getQualifier());
   }
 
@@ -372,7 +372,7 @@ class InlineToAnonymousConstructorProcessor {
   }
 
   private PsiElement replaceParameterReferences(PsiElement argument,
-                                                @Nullable final List<PsiReferenceExpression> localVarRefs,
+                                                @Nullable final List<? super PsiReferenceExpression> localVarRefs,
                                                 final boolean replaceFieldsWithInitializers) throws IncorrectOperationException {
     if (argument instanceof PsiReferenceExpression) {
       PsiElement element = ((PsiReferenceExpression)argument).resolve();

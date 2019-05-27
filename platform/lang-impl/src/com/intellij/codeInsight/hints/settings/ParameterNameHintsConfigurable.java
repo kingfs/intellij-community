@@ -1,8 +1,11 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.hints.settings;
 
 import com.intellij.codeInsight.CodeInsightBundle;
-import com.intellij.codeInsight.hints.*;
+import com.intellij.codeInsight.hints.InlayParameterHintsExtension;
+import com.intellij.codeInsight.hints.InlayParameterHintsProvider;
+import com.intellij.codeInsight.hints.Option;
+import com.intellij.codeInsight.hints.ParameterHintsPassFactory;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.lang.Language;
 import com.intellij.openapi.editor.Document;
@@ -18,14 +21,14 @@ import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.ui.ComboBox;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.text.StringUtil;
+import com.intellij.ui.CollectionComboBoxModel;
 import com.intellij.ui.EditorTextField;
 import com.intellij.ui.IdeBorderFactory;
-import com.intellij.ui.ListCellRendererWrapper;
+import com.intellij.ui.SimpleListCellRenderer;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.labels.SwingActionLink;
 import com.intellij.util.containers.ContainerUtil;
-import org.jdesktop.swingx.combobox.ListComboBoxModel;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -38,7 +41,7 @@ import java.util.List;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static com.intellij.codeInsight.hints.HintUtilsKt.getBlackListInvalidLineNumbers;
+import static com.intellij.codeInsight.hints.HintUtilsKt.*;
 import static com.intellij.openapi.editor.colors.CodeInsightColors.ERRORS_ATTRIBUTES;
 
 public class ParameterNameHintsConfigurable extends DialogWrapper {
@@ -65,6 +68,7 @@ public class ParameterNameHintsConfigurable extends DialogWrapper {
     init();
 
     if (selectedLanguage != null) {
+      selectedLanguage = getLanguageForSettingKey(selectedLanguage);
       showLanguagePanel(selectedLanguage);
       myCurrentLanguageCombo.setSelectedItem(selectedLanguage);
       if (newPreselectedPattern != null) {
@@ -153,7 +157,7 @@ public class ParameterNameHintsConfigurable extends DialogWrapper {
     InlayParameterHintsProvider provider = InlayParameterHintsExtension.INSTANCE.forLanguage(language);
     Set<String> defaultBlackList = provider.getDefaultBlackList();
     Diff diff = Diff.Builder.build(defaultBlackList, updatedBlackList);
-    ParameterNameHintsSettings.getInstance().setBlackListDiff(language, diff);
+    ParameterNameHintsSettings.getInstance().setBlackListDiff(getLanguageForSettingKey(language), diff);
   }
 
   @Nullable
@@ -163,9 +167,9 @@ public class ParameterNameHintsConfigurable extends DialogWrapper {
   }
 
   private void createUIComponents() {
-    myOptions = ContainerUtil.newHashMap();
-    myEditors = ContainerUtil.newHashMap();
-    myIsValidPatterns = ContainerUtil.newHashMap();
+    myOptions = new HashMap<>();
+    myEditors = new HashMap<>();
+    myIsValidPatterns = new HashMap<>();
 
     List<Language> allLanguages = getBaseLanguagesWithProviders();
     Language lastEditedLanguage = lastEditedLanguage();
@@ -328,16 +332,9 @@ public class ParameterNameHintsConfigurable extends DialogWrapper {
   }
 
   private void initLanguageCombo(Language selected, List<Language> languages) {
-    ListComboBoxModel<Language> model = new ListComboBoxModel<>(languages);
-
-    myCurrentLanguageCombo = new ComboBox<>(model);
+    myCurrentLanguageCombo = new ComboBox<>(new CollectionComboBoxModel<>(languages));
     myCurrentLanguageCombo.setSelectedItem(selected);
-    myCurrentLanguageCombo.setRenderer(new ListCellRendererWrapper<Language>() {
-      @Override
-      public void customize(JList list, Language value, int index, boolean selected, boolean hasFocus) {
-        setText(value.getDisplayName());
-      }
-    });
+    myCurrentLanguageCombo.setRenderer(SimpleListCellRenderer.create("", Language::getDisplayName));
 
     myCurrentLanguageCombo.addItemListener(new ItemListener() {
       @Override
@@ -368,19 +365,9 @@ public class ParameterNameHintsConfigurable extends DialogWrapper {
     if (hintsProvider == null) {
       return "";
     }
-    Diff diff = ParameterNameHintsSettings.getInstance().getBlackListDiff(language);
+    Diff diff = ParameterNameHintsSettings.getInstance().getBlackListDiff(getLanguageForSettingKey(language));
     Set<String> blackList = diff.applyOn(hintsProvider.getDefaultBlackList());
     return StringUtil.join(blackList, "\n");
-  }
-
-  @NotNull
-  private static List<Language> getBaseLanguagesWithProviders() {
-    return HintUtilsKt
-      .getHintProviders()
-      .stream()
-      .map((langWithImplementation) -> langWithImplementation.getFirst())
-      .sorted(Comparator.comparing(l -> l.getDisplayName()))
-      .collect(Collectors.toList());
   }
 
   @NotNull

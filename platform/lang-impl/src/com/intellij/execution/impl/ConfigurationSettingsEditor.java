@@ -14,9 +14,9 @@ import com.intellij.execution.ui.AdjustingTabSettingsEditor;
 import com.intellij.openapi.options.*;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.Pair;
-import com.intellij.ui.ColoredListCellRenderer;
 import com.intellij.ui.ScrollingUtil;
-import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.SimpleListCellRenderer;
+import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.containers.Convertor;
 import com.intellij.util.ui.JBUI;
@@ -149,7 +149,7 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
   }
 
   private <T> SettingsEditor<RunnerAndConfigurationSettings> wrapEditor(SettingsEditor<T> editor,
-                                                                        Convertor<RunnerAndConfigurationSettings, T> convertor,
+                                                                        Convertor<? super RunnerAndConfigurationSettings, ? extends T> convertor,
                                                                         ProgramRunner runner) {
     SettingsEditor<RunnerAndConfigurationSettings> wrappedEditor = new SettingsEditorWrapper<>(editor, convertor);
 
@@ -222,6 +222,7 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
     private final DefaultListModel<Executor> myListModel = new DefaultListModel<>();
     private final JLabel myNoRunner = new JLabel(ExecutionBundle.message("run.configuration.norunner.selected.label"));
     private JPanel myRunnersPanel;
+    private JBScrollPane myScrollPane;
 
     RunnersEditorComponent() {
       myRunnerPanel.setLayout(myLayout);
@@ -234,13 +235,12 @@ public class ConfigurationSettingsEditor extends CompositeSettingsEditor<RunnerA
         }
       });
       updateRunnerComponent();
-      myRunnersList.setCellRenderer(new ColoredListCellRenderer<Executor>() {
-        @Override
-        protected void customizeCellRenderer(@NotNull JList<? extends Executor> list, Executor value, int index, boolean selected, boolean hasFocus) {
-          setIcon(value.getIcon());
-          append(value.getId(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
-        }
-      });
+      myRunnersList.setCellRenderer(SimpleListCellRenderer.create((label, value, index) -> {
+        label.setIcon(value.getIcon());
+        label.setText(value.getId());
+      }));
+      myScrollPane.setBorder(JBUI.Borders.empty());
+      myScrollPane.setViewportBorder(JBUI.Borders.empty());
     }
 
     private void updateRunnerComponent() {

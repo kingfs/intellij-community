@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.util.treeView;
 
 import com.intellij.ide.IdeBundle;
@@ -20,7 +20,6 @@ import com.intellij.util.*;
 import com.intellij.util.concurrency.LockToken;
 import com.intellij.util.concurrency.QueueProcessor;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.enumeration.EnumerationCopy;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.tree.TreeUtil;
 import com.intellij.util.ui.update.Activatable;
@@ -195,6 +194,11 @@ public class AbstractTreeUi {
 
   private UiActivityMonitor myActivityMonitor;
   @NonNls private UiActivity myActivityId;
+
+  @Override
+  public String toString() {
+    return "AbstractTreeUi: builder = " + myBuilder;
+  }
 
   protected void init(@NotNull AbstractTreeBuilder builder,
                       @NotNull JTree tree,
@@ -833,7 +837,7 @@ public class AbstractTreeUi {
   private Promise<Boolean> update(@NotNull final NodeDescriptor nodeDescriptor, boolean now) {
     Promise<Boolean> promise;
     if (now || isPassthroughMode()) {
-      promise = Promise.resolve(update(nodeDescriptor));
+      promise = Promises.resolvedPromise(update(nodeDescriptor));
     }
     else {
       final AsyncPromise<Boolean> result = new AsyncPromise<>();
@@ -1406,11 +1410,11 @@ public class AbstractTreeUi {
         }
       })
       .onError(new TreeConsumer<Throwable>("AbstractTreeUi.updateNodeChildrenNow: on reject processExistingNodes") {
-      @Override
-      public void perform() {
-        removeFromUpdatingChildren(node);
-        processNodeActionsIfReady(node);
-      }
+        @Override
+        public void perform() {
+          removeFromUpdatingChildren(node);
+          processNodeActionsIfReady(node);
+        }
     });
   }
 
@@ -2955,7 +2959,7 @@ public class AbstractTreeUi {
 
     Promise<Boolean> update;
     if (parentPreloadedChildren != null && parentPreloadedChildren.getDescriptor(oldElement) == childDescriptor) {
-      update = Promise.resolve(parentPreloadedChildren.isUpdated(oldElement));
+      update = Promises.resolvedPromise(parentPreloadedChildren.isUpdated(oldElement));
     }
     else {
       update = update(childDescriptor, false);
@@ -2973,7 +2977,7 @@ public class AbstractTreeUi {
         final Integer index = newElement.get() == null ? null : elementToIndexMap.getValue(getElementFromDescriptor(childDesc.get()));
         Promise<Boolean> promise;
         if (index == null) {
-          promise = Promise.resolve(false);
+          promise = Promises.resolvedPromise(false);
         }
         else {
           final Object elementFromMap = elementToIndexMap.getKey(index);
@@ -3001,11 +3005,11 @@ public class AbstractTreeUi {
               // todo why we don't process promise here?
             }
             else {
-              promise = Promise.resolve(changes.get());
+              promise = Promises.resolvedPromise(changes.get());
             }
           }
           else {
-            promise = Promise.resolve(changes.get());
+            promise = Promises.resolvedPromise(changes.get());
           }
 
           promise
@@ -3479,7 +3483,7 @@ public class AbstractTreeUi {
     return myTreeModel;
   }
 
-  private void insertNodesInto(@NotNull final List<TreeNode> toInsert, @NotNull final DefaultMutableTreeNode parentNode) {
+  private void insertNodesInto(@NotNull final List<? extends TreeNode> toInsert, @NotNull final DefaultMutableTreeNode parentNode) {
     sortChildren(parentNode, toInsert, false, true);
     final List<TreeNode> all = new ArrayList<>(toInsert.size() + parentNode.getChildCount());
     all.addAll(toInsert);
@@ -3544,7 +3548,7 @@ public class AbstractTreeUi {
     }
   }
 
-  private void sortChildren(@NotNull DefaultMutableTreeNode node, @NotNull List<TreeNode> children, boolean updateStamp, boolean forceSort) {
+  private void sortChildren(@NotNull DefaultMutableTreeNode node, @NotNull List<? extends TreeNode> children, boolean updateStamp, boolean forceSort) {
     NodeDescriptor descriptor = getDescriptorFrom(node);
     assert descriptor != null;
 
@@ -3554,7 +3558,7 @@ public class AbstractTreeUi {
         getBuilder().sortChildren(myNodeComparator, node, children);
       }
       catch (IllegalArgumentException exception) {
-        StringBuilder sb = new StringBuilder("cannot sort children");
+        StringBuilder sb = new StringBuilder("cannot sort children in ").append(toString());
         children.forEach(child -> sb.append('\n').append(child));
         throw new IllegalArgumentException(sb.toString(), exception);
       }
@@ -3822,7 +3826,7 @@ public class AbstractTreeUi {
   final Set<Object> getSelectedElements() {
     TreePath[] paths = myTree.getSelectionPaths();
 
-    Set<Object> result = ContainerUtil.newLinkedHashSet();
+    Set<Object> result = new LinkedHashSet<>();
     if (paths != null) {
       for (TreePath eachPath : paths) {
         if (eachPath.getLastPathComponent() instanceof DefaultMutableTreeNode) {
@@ -4724,9 +4728,10 @@ public class AbstractTreeUi {
   }
 
   private void removeChildren(@NotNull DefaultMutableTreeNode node) {
-    EnumerationCopy copy = new EnumerationCopy(node.children());
-    while (copy.hasMoreElements()) {
-      disposeNode((DefaultMutableTreeNode)copy.nextElement());
+    //noinspection unchecked
+    Enumeration<DefaultMutableTreeNode> children = node.children();
+    for (DefaultMutableTreeNode child : Collections.list(children)) {
+      disposeNode(child);
     }
     node.removeAllChildren();
     nodeStructureChanged(node);

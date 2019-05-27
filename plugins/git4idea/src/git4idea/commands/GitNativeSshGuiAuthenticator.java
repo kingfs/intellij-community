@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package git4idea.commands;
 
 import com.intellij.openapi.application.ApplicationManager;
@@ -16,29 +16,35 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.regex.Matcher;
 
+import static git4idea.commands.GitAuthenticationMode.FULL;
+
 class GitNativeSshGuiAuthenticator implements GitNativeSshAuthenticator {
   @NotNull private final Project myProject;
   @NotNull private final GitAuthenticationGate myAuthenticationGate;
-  private final boolean myIgnoreAuthenticationRequest;
+  @NotNull private final GitAuthenticationMode myAuthenticationMode;
   private final boolean myDoNotRememberPasswords;
 
   @Nullable private String myLastAskedKeyPath = null;
+  @Nullable private String myLastAskedUserName = null;
+  @Nullable private String myLastAskedConfirmationInput = null;
 
   GitNativeSshGuiAuthenticator(@NotNull Project project,
                                @NotNull GitAuthenticationGate authenticationGate,
-                               boolean isIgnoreAuthenticationRequest,
+                               @NotNull GitAuthenticationMode authenticationMode,
                                boolean doNotRememberPasswords) {
     myProject = project;
     myAuthenticationGate = authenticationGate;
-    myIgnoreAuthenticationRequest = isIgnoreAuthenticationRequest;
+    myAuthenticationMode = authenticationMode;
     myDoNotRememberPasswords = doNotRememberPasswords;
   }
 
   @Nullable
   @Override
   public String handleInput(@NotNull String description) {
+    if(myAuthenticationMode == GitAuthenticationMode.NONE) return null;
     return myAuthenticationGate.waitAndCompute(() -> {
       if (isKeyPassphrase(description)) return askKeyPassphraseInput(description);
+      if (isSshPassword(description)) return askSshPasswordInput(description);
       if (isConfirmation(description)) return askConfirmationInput(description);
 
       return askGenericInput(description);
@@ -66,7 +72,31 @@ class GitNativeSshGuiAuthenticator implements GitNativeSshAuthenticator {
       });
     }
     else {
-      return GitSSHGUIHandler.askPassphrase(myProject, keyPath, resetPassword, myIgnoreAuthenticationRequest, null);
+      return GitSSHGUIHandler.askPassphrase(myProject, keyPath, resetPassword, myAuthenticationMode, null);
+    }
+  }
+
+  private static boolean isSshPassword(@NotNull String description) {
+    return SSHUtil.PASSWORD_PROMPT.matcher(description).matches();
+  }
+
+  @Nullable
+  private String askSshPasswordInput(@NotNull String description) {
+    Matcher matcher = SSHUtil.PASSWORD_PROMPT.matcher(description);
+    if (!matcher.matches()) throw new IllegalStateException(description);
+    String username = matcher.group(1);
+
+    boolean resetPassword = username.equals(myLastAskedUserName);
+    myLastAskedUserName = username;
+
+    if (myDoNotRememberPasswords) {
+      return askUser(() -> {
+        String message = GitBundle.message("ssh.password.message", username);
+        return Messages.showPasswordDialog(myProject, message, GitBundle.getString("ssh.password.title"), null);
+      });
+    }
+    else {
+      return GitSSHGUIHandler.askPassword(myProject, username, resetPassword, myAuthenticationMode, null);
     }
   }
 
@@ -81,34 +111,39 @@ class GitNativeSshGuiAuthenticator implements GitNativeSshAuthenticator {
                                           SSHUtil.CONFIRM_CONNECTION_PROMPT + " (yes/no)?",
                                           SSHUtil.CONFIRM_CONNECTION_PROMPT + "?");
 
+      String knownAnswer = myAuthenticationGate.getSavedInput(message);
+      if (knownAnswer != null && myLastAskedConfirmationInput == null) {
+        myLastAskedConfirmationInput = knownAnswer;
+        return knownAnswer;
+      }
+
       int answer = Messages.showYesNoDialog(myProject, message, "SSH Confirmation", null);
+      String textAnswer;
       if (answer == Messages.YES) {
-        return "yes";
+        textAnswer = "yes";
       }
       else if (answer == Messages.NO) {
-        return "no";
+        textAnswer = "no";
       }
       else {
-        return null;
+        throw new AssertionError(answer);
       }
+      myAuthenticationGate.saveInput(message, textAnswer);
+      return textAnswer;
     });
   }
 
   @Nullable
   private String askGenericInput(@NotNull String description) {
-    return askUser(() -> {
-      return Messages.showPasswordDialog(myProject, description, GitBundle.message("ssh.keyboard.interactive.title"), null);
-    });
+    return askUser(() -> Messages.showPasswordDialog(myProject, description, GitBundle.message("ssh.keyboard.interactive.title"), null));
   }
 
   @Nullable
   private String askUser(@NotNull Computable<String> query) {
-    if (myIgnoreAuthenticationRequest) return null;
+    if (myAuthenticationMode != FULL) return null;
 
     Ref<String> answerRef = new Ref<>();
-    ApplicationManager.getApplication().invokeAndWait(() -> {
-      answerRef.set(query.compute());
-    }, ModalityState.any());
+    ApplicationManager.getApplication().invokeAndWait(() -> answerRef.set(query.compute()), ModalityState.any());
     return answerRef.get();
   }
 }

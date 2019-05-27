@@ -12,6 +12,7 @@ tests under TeamCity build.
 """
 
 import os
+import pprint
 import sys
 import re
 import traceback
@@ -23,6 +24,13 @@ from teamcity import is_running_under_teamcity
 from teamcity import diff_tools
 
 diff_tools.patch_unittest_diff()
+
+
+def unformat_pytest_explanation(s):
+    """
+    Undo _pytest.assertion.util.format_explanation
+    """
+    return s.replace("\\n", "\n")
 
 
 def fetch_diff_error_from_message(err_message, swap_diff):
@@ -45,6 +53,10 @@ def fetch_diff_error_from_message(err_message, swap_diff):
 
         if swap_diff:
             expected, actual = actual, expected
+
+        expected = unformat_pytest_explanation(expected)
+        actual = unformat_pytest_explanation(actual)
+
         return diff_tools.EqualsAssertionError(expected, actual, diff_error_message)
     else:
         return None
@@ -91,6 +103,7 @@ def pytest_configure(config):
         coverage_controller = _get_coverage_controller(config)
         skip_passed_output = bool(config.getini('skippassedoutput'))
 
+        config.option.verbose = 2  # don't truncate assert explanations
         config._teamcityReporting = EchoTeamCityMessages(
             output_capture_enabled,
             coverage_controller,
@@ -202,7 +215,11 @@ class EchoTeamCityMessages(object):
         # test name fetched from location passed as metainfo to PyCharm
         # it will be used to run specific test using "-k"
         # See IDEA-176950
-        self.ensure_test_start_reported(self.format_test_id(nodeid, location), location[2])
+        # We only need method/function name because only it could be used as -k
+        test_name = location[2]
+        if test_name:
+            test_name = str(test_name).split(".")[-1]
+        self.ensure_test_start_reported(self.format_test_id(nodeid, location), test_name)
 
     def ensure_test_start_reported(self, test_id, metainfo=None):
         if test_id not in self.test_start_reported_mark:
@@ -298,6 +315,10 @@ class EchoTeamCityMessages(object):
         self.report_test_output(report, test_id)
         self.teamcity.testIgnored(test_id, reason, flowId=test_id)
         self.report_test_finished(test_id, duration)
+
+    def pytest_assertrepr_compare(self, config, op, left, right):
+        if op in ('==', '!='):
+            return ['{0} {1} {2}'.format(pprint.pformat(left), op, pprint.pformat(right))]
 
     def pytest_runtest_logreport(self, report):
         """

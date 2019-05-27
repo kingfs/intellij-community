@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.diagnostic;
 
 import com.intellij.icons.AllIcons;
@@ -172,7 +172,7 @@ public class IdeMessagePanel extends JPanel implements MessagePoolListener, Icon
     if (state == MessagePool.State.NoErrors) {
       myNotificationPopupAlreadyShown = false;
       if (myBalloon != null) {
-        myBalloon.hide();
+        Disposer.dispose(myBalloon);
       }
     }
     else if (state == MessagePool.State.UnreadErrors && !myNotificationPopupAlreadyShown && isActive(myFrame)) {
@@ -188,6 +188,10 @@ public class IdeMessagePanel extends JPanel implements MessagePoolListener, Icon
     return frame instanceof Window && ((Window)frame).isActive();
   }
 
+  private static final Color TEXT_COLOR = JBColor.namedColor("Notification.errorForeground", NotificationsManagerImpl.DEFAULT_TEXT_COLOR);
+  private static final Color FILL_COLOR = JBColor.namedColor("Notification.errorBackground", new JBColor(0XF5E6E7, 0X593D41));
+  private static final Color BORDER_COLOR = JBColor.namedColor("Notification.errorBorderColor", new JBColor(0XE0A8A9, 0X73454B));
+
   private void showErrorNotification(@NotNull Project project) {
     String title = DiagnosticBundle.message("error.new.notification.title");
     String linkText = DiagnosticBundle.message("error.new.notification.link");
@@ -201,12 +205,13 @@ public class IdeMessagePanel extends JPanel implements MessagePoolListener, Icon
     });
 
     BalloonLayout layout = myFrame.getBalloonLayout();
-    assert layout != null;
+    assert layout != null : myFrame;
 
     BalloonLayoutData layoutData = BalloonLayoutData.createEmpty();
     layoutData.fadeoutTime = 5000;
-    layoutData.fillColor = JBColor.namedColor("Notification.Error.background", new JBColor(0XF5E6E7, 0X593D41));
-    layoutData.borderColor = JBColor.namedColor("Notification.Error.borderColor", new JBColor(0XE0A8A9, 0X73454B));
+    layoutData.textColor = TEXT_COLOR;
+    layoutData.fillColor = FILL_COLOR;
+    layoutData.borderColor = BORDER_COLOR;
 
     assert myBalloon == null;
     myBalloon = NotificationsManagerImpl.createBalloon(myFrame, notification, false, false, new Ref<>(layoutData), project);

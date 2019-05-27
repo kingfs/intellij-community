@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight;
 
 import com.intellij.openapi.util.Pair;
@@ -24,6 +24,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * @author mike
@@ -35,7 +36,7 @@ public class ExceptionUtil {
 
   @NotNull
   public static List<PsiClassType> getThrownExceptions(@NotNull PsiElement[] elements) {
-    List<PsiClassType> array = ContainerUtil.newArrayList();
+    List<PsiClassType> array = new ArrayList<>();
     for (PsiElement element : elements) {
       List<PsiClassType> exceptions = getThrownExceptions(element);
       addExceptions(array, exceptions);
@@ -54,7 +55,7 @@ public class ExceptionUtil {
 
   @NotNull
   private static List<PsiClassType> filterOutUncheckedExceptions(@NotNull List<? extends PsiClassType> exceptions) {
-    List<PsiClassType> array = ContainerUtil.newArrayList();
+    List<PsiClassType> array = new ArrayList<>();
     for (PsiClassType exception : exceptions) {
       if (!isUncheckedException(exception)) array.add(exception);
     }
@@ -144,7 +145,7 @@ public class ExceptionUtil {
 
   @NotNull
   private static List<PsiClassType> getTryExceptions(@NotNull PsiTryStatement tryStatement) {
-    List<PsiClassType> array = ContainerUtil.newArrayList();
+    List<PsiClassType> array = new ArrayList<>();
 
     PsiResourceList resourceList = tryStatement.getResourceList();
     if (resourceList != null) {
@@ -182,7 +183,7 @@ public class ExceptionUtil {
         int completionReasons = ControlFlowUtil.getCompletionReasons(flow, 0, flow.getSize());
         List<PsiClassType> thrownExceptions = getThrownExceptions(finallyBlock);
         if (!BitUtil.isSet(completionReasons, ControlFlowUtil.NORMAL_COMPLETION_REASON)) {
-          array = ContainerUtil.newArrayList(thrownExceptions);
+          array = new ArrayList<>(thrownExceptions);
         }
         else {
           addExceptions(array, thrownExceptions);
@@ -204,9 +205,12 @@ public class ExceptionUtil {
 
     GlobalSearchScope scope = place.getResolveScope();
 
-    List<PsiClassType> result = ContainerUtil.newArrayList();
+    List<PsiClassType> result = new ArrayList<>();
     for (PsiType type : referenceTypes) {
       type = PsiClassImplUtil.correctType(substitutor.substitute(type), scope);
+      if (type instanceof PsiCapturedWildcardType) {
+        type = ((PsiCapturedWildcardType)type).getUpperBound();
+      }
       if (type instanceof PsiClassType) {
         result.add((PsiClassType)type);
       }
@@ -321,7 +325,7 @@ public class ExceptionUtil {
     else if (element instanceof PsiResourceListElement) {
       final List<PsiClassType> unhandled = getUnhandledCloserExceptions((PsiResourceListElement)element, topElement);
       if (!unhandled.isEmpty()) {
-        unhandledExceptions = ContainerUtil.newArrayList(unhandled);
+        unhandledExceptions = new ArrayList<>(unhandled);
       }
     }
 
@@ -352,7 +356,7 @@ public class ExceptionUtil {
     final PsiElement resolve = resolveResult.getElement();
     if (resolve instanceof PsiMethod) {
       final PsiElement referenceNameElement = methodReferenceExpression.getReferenceNameElement();
-      return getUnhandledExceptions((PsiMethod)resolve, referenceNameElement, topElement, resolveResult.getSubstitutor());
+      return getUnhandledExceptions((PsiMethod)resolve, referenceNameElement, topElement, resolveResult::getSubstitutor);
     }
     return Collections.emptyList();
   }
@@ -370,7 +374,7 @@ public class ExceptionUtil {
 
   @NotNull
   public static List<PsiClassType> getUnhandledExceptions(final @NotNull PsiElement[] elements) {
-    final List<PsiClassType> array = ContainerUtil.newArrayList();
+    final List<PsiClassType> array = new ArrayList<>();
 
     final PsiElementVisitor visitor = new JavaRecursiveElementWalkingVisitor() {
       @Override
@@ -409,7 +413,7 @@ public class ExceptionUtil {
     if (element instanceof PsiEnumConstant) {
       final PsiMethod method = ((PsiEnumConstant)element).resolveMethod();
       if (method != null) {
-        return getUnhandledExceptions(method, element, null, PsiSubstitutor.EMPTY);
+        return getUnhandledExceptions(method, element, null, () -> PsiSubstitutor.EMPTY);
       }
       return Collections.emptyList();
     }
@@ -446,8 +450,7 @@ public class ExceptionUtil {
     if (MethodCandidateInfo.isOverloadCheck()) {
       return Collections.emptyList();
     }
-    final MethodCandidateInfo.CurrentCandidateProperties properties = MethodCandidateInfo.getCurrentMethod(methodCall.getArgumentList());
-    final JavaResolveResult result = properties != null ? properties.getInfo() : PsiDiamondType.getDiamondsAwareResolveResult(methodCall);
+    final JavaResolveResult result = PsiDiamondType.getDiamondsAwareResolveResult(methodCall);
     final PsiElement element = result.getElement();
     final PsiMethod method = element instanceof PsiMethod ? (PsiMethod)element : null;
     if (method == null) {
@@ -457,27 +460,28 @@ public class ExceptionUtil {
       return Collections.emptyList();
     }
 
-    if (properties != null) {
-      PsiUtilCore.ensureValid(method);
-    }
-
     final PsiClassType[] thrownExceptions = method.getThrowsList().getReferencedTypes();
     if (thrownExceptions.length == 0) {
       return Collections.emptyList();
     }
 
-    final PsiSubstitutor substitutor = result.getSubstitutor();
     if (!isArrayClone(method, methodCall) && methodCall instanceof PsiMethodCallExpression) {
       PsiFile containingFile = methodCall.getContainingFile();
       MethodResolverProcessor processor = new MethodResolverProcessor((PsiMethodCallExpression)methodCall, containingFile);
       try {
         PsiScopesUtil.setupAndRunProcessor(processor, methodCall, false);
+        // Resolve other signatures in case of multiple interface inheritance
+        // e.g. consider
+        // interface X {void a() throws A;} interface Y{void a() throws B;} class Z extends X, Y {}
+        // here normal resolve returns X.a(), but we should check throws clauses for both a() methods.
+        // (see JLS 15.12.2.5)
         final List<Pair<PsiMethod, PsiSubstitutor>> candidates = ContainerUtil.mapNotNull(
           processor.getResults(), info -> {
             PsiElement element1 = info.getElement();
             if (info instanceof MethodCandidateInfo &&
                 element1 != method && //don't check self
                 MethodSignatureUtil.areSignaturesEqual(method, (PsiMethod)element1) &&
+                !((PsiMethod)element1).hasModifierProperty(PsiModifier.PRIVATE) &&
                 !MethodSignatureUtil.isSuperMethod((PsiMethod)element1, method) &&
                 !(((MethodCandidateInfo)info).isToInferApplicability() && !((MethodCandidateInfo)info).isApplicable())) {
               return Pair.create((PsiMethod)element1, ((MethodCandidateInfo)info).getSubstitutor(false));
@@ -486,11 +490,11 @@ public class ExceptionUtil {
           });
         if (!candidates.isEmpty()) {
           GlobalSearchScope scope = methodCall.getResolveScope();
-          final List<PsiClassType> ex = collectSubstituted(substitutor, thrownExceptions, scope);
+          List<PsiClassType> ex = collectSubstituted(result.getSubstitutor(), thrownExceptions, scope);
           for (Pair<PsiMethod, PsiSubstitutor> pair : candidates) {
             final PsiClassType[] exceptions = pair.first.getThrowsList().getReferencedTypes();
             if (exceptions.length == 0) {
-              return getUnhandledExceptions(methodCall, topElement, PsiSubstitutor.EMPTY, PsiClassType.EMPTY_ARRAY);
+              return Collections.emptyList();
             }
             retainExceptions(ex, collectSubstituted(pair.second, exceptions, scope));
           }
@@ -502,7 +506,7 @@ public class ExceptionUtil {
       }
     }
 
-    return getUnhandledExceptions(method, methodCall, topElement, substitutor);
+    return getUnhandledExceptions(method, methodCall, topElement, result::getSubstitutor);
   }
 
   public static void retainExceptions(List<PsiClassType> ex, List<? extends PsiClassType> thrownEx) {
@@ -646,15 +650,19 @@ public class ExceptionUtil {
   }
 
   @NotNull
-  public static List<PsiClassType> getUnhandledExceptions(@NotNull PsiMethod method,
+  private static List<PsiClassType> getUnhandledExceptions(@NotNull PsiMethod method,
                                                           PsiElement element,
                                                           PsiElement topElement,
-                                                          @NotNull PsiSubstitutor substitutor) {
+                                                          @NotNull Supplier<? extends PsiSubstitutor> substitutor) {
     if (isArrayClone(method, element)) {
       return Collections.emptyList();
     }
     final PsiClassType[] referencedTypes = method.getThrowsList().getReferencedTypes();
-    return getUnhandledExceptions(element, topElement, substitutor, referencedTypes);
+    if (referencedTypes.length == 0) {
+      return Collections.emptyList();
+    }
+
+    return getUnhandledExceptions(element, topElement, substitutor.get(), referencedTypes);
   }
 
   private static List<PsiClassType> getUnhandledExceptions(PsiElement element,
@@ -662,7 +670,7 @@ public class ExceptionUtil {
                                                            PsiSubstitutor substitutor,
                                                            PsiClassType[] referencedTypes) {
     if (referencedTypes.length > 0) {
-      List<PsiClassType> result = ContainerUtil.newArrayList();
+      List<PsiClassType> result = new ArrayList<>();
 
       for (PsiClassType referencedType : referencedTypes) {
         final PsiType type = PsiClassImplUtil.correctType(GenericsUtil.eliminateWildcards(substitutor.substitute(referencedType), false), element.getResolveScope());

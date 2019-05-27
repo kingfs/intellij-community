@@ -18,6 +18,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.ActionCallback;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.registry.Registry;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.ScrollPaneFactory;
 import com.intellij.ui.TreeSpeedSearch;
@@ -210,7 +211,9 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
       AbstractTreeBuilder builder = getTreeBuilder();
       if (builder instanceof BaseProjectTreeBuilder) {
         beforeSelect().doWhenDone(() -> UIUtil.invokeLaterIfNeeded(() -> {
-          if (!builder.isDisposed()) ((BaseProjectTreeBuilder)builder).select(element, file, requestFocus);
+          if (!builder.isDisposed()) {
+            ((BaseProjectTreeBuilder)builder).selectAsync(element, file, requestFocus);
+          }
         }));
       }
       else if (myAsyncSupport != null) {
@@ -276,7 +279,7 @@ public abstract class AbstractProjectViewPSIPane extends AbstractProjectViewPane
       if (userObject instanceof PsiDirectoryNode) {
         String str = getElementText(element);
         if (str == null) return false;
-        str = str.toLowerCase();
+        str = StringUtil.toLowerCase(str);
         if (pattern.indexOf('.') >= 0) {
           return compare(str, pattern);
         }

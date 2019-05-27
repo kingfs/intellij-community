@@ -5,11 +5,11 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.BrowserUtil;
 import com.intellij.ide.plugins.*;
 import com.intellij.openapi.extensions.PluginId;
+import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.BrowserHyperlinkListener;
 import com.intellij.ui.ColorUtil;
-import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.border.CustomLineBorder;
 import com.intellij.ui.components.JBOptionButton;
@@ -42,7 +42,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
   private final TagBuilder myTagBuilder;
   private final LinkListener<String> mySearchListener;
   public final IdeaPluginDescriptor myPlugin;
-  private JLabel myNameComponent;
+  private final JLabel myNameComponent = new JLabel();
   private JLabel myIconLabel;
   private JButton myUpdateButton;
   private JButton myInstallButton;
@@ -70,7 +70,9 @@ public class DetailsPagePluginComponent extends OpaquePanel {
     myCenterPanel = createCenterPanel(update);
     header.add(myCenterPanel);
 
-    createTagPanel();
+    if (!update) {
+      createTagPanel();
+    }
     createMetricsPanel();
     createErrorPanel();
     createProgressPanel(!update);
@@ -105,7 +107,6 @@ public class DetailsPagePluginComponent extends OpaquePanel {
         Insets insets = target.getInsets();
         int left = insets.left;
         int right = myButtonsPanel.getX() - offset;
-        int parentWidth = right - left;
         int versionWidth = myVersion == null ? 0 : myVersion.getPreferredSize().width;
         int nameWidth = myNameComponent.getPreferredSize().width;
         int nameWithVersionWidth = nameWidth + versionWidth;
@@ -113,6 +114,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
           nameWithVersionWidth += offset;
         }
 
+        int parentWidth = right - left;
         if (nameWithVersionWidth <= parentWidth) {
           myNameComponent.setToolTipText(null);
           return;
@@ -132,20 +134,6 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       }
     });
 
-    boolean bundled = myPlugin.isBundled() && !myPlugin.allowBundledUpdate();
-
-    if (bundled) {
-      myNameComponent = new JLabel();
-    }
-    else {
-      LinkComponent linkComponent = new LinkComponent();
-      linkComponent.setPaintUnderline(false);
-      //noinspection unchecked
-      linkComponent.setListener((_0, _1) -> BrowserUtil.browse("https://plugins.jetbrains.com/plugin/index?xmlId=" +
-                                                               URLUtil.encodeURIComponent(myPlugin.getPluginId().getIdString())), null);
-      myNameComponent = linkComponent;
-    }
-
     myNameComponent.setOpaque(false);
     myNameComponent.setText(myPlugin.getName());
     Font font = myNameComponent.getFont();
@@ -153,13 +141,14 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       myNameComponent.setFont(font.deriveFont(Font.BOLD, 30));
     }
     if (!(myPlugin instanceof PluginNode) && !myPluginsModel.isEnabled(myPlugin)) {
-      myNameComponent.setForeground(PluginManagerConfigurableNew.DisabledColor);
+      myNameComponent.setForeground(ListPluginComponent.DisabledColor);
     }
 
     nameButtons.add(myNameComponent, BorderLayout.WEST);
     nameButtons.add(myButtonsPanel = createButtons(update), BorderLayout.EAST);
     centerPanel.add(nameButtons, VerticalLayout.FILL_HORIZONTAL);
 
+    boolean bundled = myPlugin.isBundled() && !myPlugin.allowBundledUpdate();
     String version = bundled ? "bundled" : myPlugin.getVersion();
 
     if (!StringUtil.isEmptyOrSpaces(version)) {
@@ -171,7 +160,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       versionComponent.setFont(UIUtil.getLabelFont());
       versionComponent.setBorder(null);
       versionComponent.setOpaque(false);
-      versionComponent.setForeground(new JBColor(Gray._130, Gray._120));
+      versionComponent.setForeground(CellPluginComponent.GRAY_COLOR);
       versionComponent.addFocusListener(new FocusAdapter() {
         @Override
         public void focusLost(FocusEvent e) {
@@ -198,44 +187,37 @@ public class DetailsPagePluginComponent extends OpaquePanel {
     InstalledPluginsState pluginsState = InstalledPluginsState.getInstance();
     PluginId id = myPlugin.getPluginId();
 
-    if ((myPlugin instanceof IdeaPluginDescriptorImpl && ((IdeaPluginDescriptorImpl)myPlugin).isDeleted()) ||
-        pluginsState.wasInstalled(id) ||
-        pluginsState.wasUpdated(id)) {
+    if (myPlugin instanceof IdeaPluginDescriptorImpl && ((IdeaPluginDescriptorImpl)myPlugin).isDeleted() ||
+        pluginsState.wasInstalled(id) || pluginsState.wasUpdated(id)) {
       buttons.add(myRestartButton = new RestartButton(myPluginsModel));
     }
+    else if (update) {
+      buttons.add(myUpdateButton = new UpdateButton());
+    }
+    else if (myPlugin instanceof PluginNode) {
+      buttons.add(myInstallButton = new InstallButton(true));
+      myInstallButton.setEnabled(PluginManager.getPlugin(myPlugin.getPluginId()) == null);
+    }
+    else if (myPlugin.isBundled()) {
+      myEnableDisableButton = new JButton(myPluginsModel.getEnabledTitle(myPlugin));
+      myEnableDisableButton.addActionListener(e -> changeEnableDisable());
+      ColorButton.setWidth72(myEnableDisableButton);
+      buttons.add(myEnableDisableButton);
+    }
     else {
-      boolean stateActions = true;
-      if (update) {
-        buttons.add(myUpdateButton = new UpdateButton());
-      }
-      else if (myPlugin instanceof PluginNode) {
-        buttons.add(myInstallButton = new InstallButton(true));
-        myInstallButton.setEnabled(PluginManager.getPlugin(myPlugin.getPluginId()) == null);
-        stateActions = false;
-      }
-      if (stateActions) {
-        if (myPlugin.isBundled()) {
-          myEnableDisableButton = new JButton(myPluginsModel.getEnabledTitle(myPlugin));
-          myEnableDisableButton.addActionListener(e -> changeEnableDisable());
-          ColorButton.setWidth72(myEnableDisableButton);
-          buttons.add(myEnableDisableButton);
+      AbstractAction enableDisableAction = new AbstractAction(myPluginsModel.getEnabledTitle(myPlugin)) {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          changeEnableDisable();
         }
-        else {
-          AbstractAction enableDisableAction = new AbstractAction(myPluginsModel.getEnabledTitle(myPlugin)) {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-              changeEnableDisable();
-            }
-          };
-          AbstractAction uninstallAction = new AbstractAction("Uninstall") {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-              doUninstall();
-            }
-          };
-          buttons.add(myEnableDisableUninstallButton = new MyOptionButton(enableDisableAction, uninstallAction));
+      };
+      AbstractAction uninstallAction = new AbstractAction("Uninstall") {
+        @Override
+        public void actionPerformed(ActionEvent e) {
+          doUninstall();
         }
-      }
+      };
+      buttons.add(myEnableDisableUninstallButton = new MyOptionButton(enableDisableAction, uninstallAction));
     }
 
     for (Component component : UIUtil.uiChildren(buttons)) {
@@ -265,8 +247,8 @@ public class DetailsPagePluginComponent extends OpaquePanel {
     boolean jb = PluginManagerConfigurableNew.isJBPlugin(myPlugin);
     boolean errors = myPluginsModel.hasErrors(myPlugin);
 
-    myIconLabel.setIcon(PluginLogoInfo.getIcon(true, jb, errors, false));
-    myIconLabel.setDisabledIcon(PluginLogoInfo.getIcon(true, jb, errors, true));
+    myIconLabel.setIcon(PluginLogo.getIcon(myPlugin, true, jb, errors, false));
+    myIconLabel.setDisabledIcon(PluginLogo.getIcon(myPlugin, true, jb, errors, true));
   }
 
   private void createTagPanel() {
@@ -291,8 +273,6 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       return;
     }
 
-    Color grayedFg = new JBColor(Gray._130, Gray._120);
-
     String downloads = PluginManagerConfigurableNew.getDownloads(myPlugin);
     String date = PluginManagerConfigurableNew.getLastUpdatedDate(myPlugin);
     String rating = PluginManagerConfigurableNew.getRating(myPlugin);
@@ -303,10 +283,10 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       myCenterPanel.add(metrics);
 
       if (date != null) {
-        createRatingLabel(metrics, date, AllIcons.Plugins.Updated, grayedFg);
+        createRatingLabel(metrics, date, AllIcons.Plugins.Updated);
       }
       if (downloads != null) {
-        createRatingLabel(metrics, downloads, AllIcons.Plugins.Downloads, grayedFg);
+        createRatingLabel(metrics, downloads, AllIcons.Plugins.Downloads);
       }
 
       if (rating != null) {
@@ -317,10 +297,10 @@ public class DetailsPagePluginComponent extends OpaquePanel {
     }
   }
 
-  private static void createRatingLabel(@NotNull JPanel panel, @NotNull String text, @NotNull Icon icon, @NotNull Color color) {
+  private static void createRatingLabel(@NotNull JPanel panel, @NotNull String text, @NotNull Icon icon) {
     JLabel label = new JLabel(text, icon, SwingConstants.CENTER);
     label.setOpaque(false);
-    label.setForeground(color);
+    label.setForeground(CellPluginComponent.GRAY_COLOR);
     panel.add(PluginManagerConfigurableNew.installTiny(label));
   }
 
@@ -356,12 +336,12 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       myCenterPanel.add(errorPanel);
 
       JLabel errorMessage = new JLabel();
-      errorMessage.setForeground(JBColor.red);
+      errorMessage.setForeground(DialogWrapper.ERROR_FOREGROUND_COLOR);
       errorMessage.setOpaque(false);
       errorPanel.add(errorMessage);
 
-      Ref<Boolean> enableAction = new Ref<>();
-      errorMessage.setText(PluginManagerConfigurableNew.getErrorMessage(myPluginsModel, myPlugin, enableAction));
+      Ref<String> enableAction = new Ref<>();
+      errorMessage.setText(myPluginsModel.getErrorMessage(myPlugin, enableAction));
 
       if (!enableAction.isNull()) {
         LinkLabel<Object> errorAction = new LinkLabel<>("Enable", null);
@@ -392,7 +372,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       return;
     }
 
-    button.addActionListener(e -> myPluginsModel.installOrUpdatePlugin(myPlugin, install));
+    button.addActionListener(e -> myPluginsModel.installOrUpdatePlugin(myPlugin, install ? null : myPlugin));
 
     if (MyPluginModel.isInstallingOrUpdate(myPlugin)) {
       showProgress(false);
@@ -405,7 +385,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
 
   private void showProgress(boolean repaint) {
     myIndicator = new OneLineProgressIndicator();
-    myIndicator.setCancelRunnable(() -> myPluginsModel.finishInstall(myPlugin, false));
+    myIndicator.setCancelRunnable(() -> myPluginsModel.finishInstall(myPlugin, false, false));
 
     myButtonsPanel.remove(myInstallButton == null ? myUpdateButton : myInstallButton);
     if (myEnableDisableButton != null) {
@@ -417,7 +397,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
     myButtonsPanel.doLayout();
     myCenterPanel.add(myIndicator.getComponent());
 
-    myPluginsModel.addProgress(myPlugin, myIndicator);
+    MyPluginModel.addProgress(myPlugin, myIndicator);
 
     if (repaint) {
       doLayout();
@@ -451,7 +431,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
 
   public void close() {
     if (myIndicator != null) {
-      myPluginsModel.removeProgress(myPlugin, myIndicator);
+      MyPluginModel.removeProgress(myPlugin, myIndicator);
       myIndicator = null;
     }
   }
@@ -477,7 +457,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
         HTMLEditorKit kit = UIUtil.getHTMLEditorKit();
         StyleSheet sheet = kit.getStyleSheet();
         sheet.addRule("ul {margin-left: 16px}"); // list-style-type: none;
-        sheet.addRule("a {color: " + ColorUtil.toHtmlColor(JBColor.link()) + "}");
+        sheet.addRule("a {color: " + ColorUtil.toHtmlColor(JBUI.CurrentTheme.Link.linkColor()) + "}");
         descriptionComponent.setEditable(false);
         descriptionComponent.setOpaque(false);
         descriptionComponent.setBorder(null);
@@ -493,16 +473,23 @@ public class DetailsPagePluginComponent extends OpaquePanel {
         bottomPanel.add(descriptionComponent, JBUI.scale(700), -1);
       }
 
+      boolean topBorder = false;
+
       if (!StringUtil.isEmptyOrSpaces(vendor) || !StringUtil.isEmptyOrSpaces(size)) {
         java.util.List<JLabel> labels = new ArrayList<>();
 
         if (!StringUtil.isEmptyOrSpaces(vendor)) {
           JPanel linePanel = createLabelsPanel(bottomPanel, labels, "Vendor:", vendor, myPlugin.getVendorUrl());
           linePanel.setBorder(JBUI.Borders.emptyTop(20));
+          topBorder = true;
         }
 
         if (!StringUtil.isEmptyOrSpaces(size)) {
-          createLabelsPanel(bottomPanel, labels, "Size:", PluginManagerColumnInfo.getFormattedSize(size), null);
+          JPanel linePanel = createLabelsPanel(bottomPanel, labels, "Size:", PluginManagerColumnInfo.getFormattedSize(size), null);
+          if (!topBorder) {
+            linePanel.setBorder(JBUI.Borders.emptyTop(20));
+            topBorder = true;
+          }
         }
 
         if (labels.size() > 1) {
@@ -513,6 +500,15 @@ public class DetailsPagePluginComponent extends OpaquePanel {
           for (JLabel label : labels) {
             label.setPreferredSize(new Dimension(width, label.getPreferredSize().height));
           }
+        }
+      }
+
+      if (!myPlugin.isBundled() || myPlugin.allowBundledUpdate()) {
+        JLabel link = createLink("Plugin homepage", "https://plugins.jetbrains.com/plugin/index?xmlId=" +
+                                                    URLUtil.encodeURIComponent(myPlugin.getPluginId().getIdString()));
+        bottomPanel.add(link);
+        if (!topBorder) {
+          link.setBorder(JBUI.Borders.emptyTop(20));
         }
       }
     }
@@ -535,13 +531,18 @@ public class DetailsPagePluginComponent extends OpaquePanel {
       linePanel.add(new JLabel(text));
     }
     else {
-      LinkLabel<Object> linkLabel = new LinkLabel<>(text, AllIcons.Ide.External_link_arrow, (_0, _1) -> BrowserUtil.browse(link));
-      linkLabel.setIconTextGap(0);
-      linkLabel.setHorizontalTextPosition(SwingConstants.LEFT);
-      linePanel.add(linkLabel);
+      linePanel.add(createLink(text, link));
     }
 
     return linePanel;
+  }
+
+  @NotNull
+  private static JLabel createLink(@NotNull String text, @NotNull String link) {
+    LinkLabel<Object> linkLabel = new LinkLabel<>(text, AllIcons.Ide.External_link_arrow, (_0, _1) -> BrowserUtil.browse(link));
+    linkLabel.setIconTextGap(0);
+    linkLabel.setHorizontalTextPosition(SwingConstants.LEFT);
+    return linkLabel;
   }
 
   @Nullable
@@ -569,7 +570,7 @@ public class DetailsPagePluginComponent extends OpaquePanel {
   private void updateEnabledState() {
     if (!(myPlugin instanceof PluginNode)) {
       boolean enabled = myPluginsModel.isEnabled(myPlugin);
-      myNameComponent.setForeground(enabled ? null : PluginManagerConfigurableNew.DisabledColor);
+      myNameComponent.setForeground(enabled ? null : ListPluginComponent.DisabledColor);
       myIconLabel.setEnabled(enabled);
     }
 
@@ -583,7 +584,9 @@ public class DetailsPagePluginComponent extends OpaquePanel {
   }
 
   private void doUninstall() {
-    myPluginsModel.doUninstall(this, myPlugin, this::changeInstallOrUpdateToRestart);
+    if (MyPluginModel.showUninstallDialog(myPlugin.getName(), 1)) {
+      myPluginsModel.doUninstall(this, myPlugin, this::changeInstallOrUpdateToRestart);
+    }
   }
 
   private void changeInstallOrUpdateToRestart() {

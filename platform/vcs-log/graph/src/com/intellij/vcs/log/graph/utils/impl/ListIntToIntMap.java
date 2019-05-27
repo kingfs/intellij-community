@@ -17,10 +17,11 @@
 package com.intellij.vcs.log.graph.utils.impl;
 
 import com.intellij.util.BooleanFunction;
-import com.intellij.util.ObjectUtils;
 import com.intellij.vcs.log.graph.utils.Flags;
 import com.intellij.vcs.log.graph.utils.UpdatableIntToIntMap;
 import org.jetbrains.annotations.NotNull;
+
+import java.util.Arrays;
 
 public class ListIntToIntMap extends AbstractIntToIntMap implements UpdatableIntToIntMap {
   public static final int DEFAULT_BLOCK_SIZE = 30;
@@ -41,7 +42,7 @@ public class ListIntToIntMap extends AbstractIntToIntMap implements UpdatableInt
    *                  getShortIndex access need: blockSize
    */
   @NotNull
-  public static UpdatableIntToIntMap newInstance(@NotNull final BooleanFunction<Integer> thisIsVisible, final int longSize, int blockSize) {
+  public static UpdatableIntToIntMap newInstance(@NotNull final BooleanFunction<? super Integer> thisIsVisible, final int longSize, int blockSize) {
     if (longSize < 0) throw new NegativeArraySizeException("size < 0: " + longSize);
 
     if (longSize == 0) return IDIntToIntMap.EMPTY;
@@ -52,14 +53,14 @@ public class ListIntToIntMap extends AbstractIntToIntMap implements UpdatableInt
     return listIntToIntMap;
   }
 
-  @NotNull final BooleanFunction<Integer> myThisIsVisible;
+  @NotNull final BooleanFunction<? super Integer> myThisIsVisible;
 
   private final int myLongSize;
 
   private final int myBlockSize;
   private final int[] mySubSumOfBlocks;
 
-  private ListIntToIntMap(@NotNull BooleanFunction<Integer> thisIsVisible, int longSize, int blockSize, int[] subSumOfBlocks) {
+  private ListIntToIntMap(@NotNull BooleanFunction<? super Integer> thisIsVisible, int longSize, int blockSize, int[] subSumOfBlocks) {
     myLongSize = longSize;
     myThisIsVisible = thisIsVisible;
     myBlockSize = blockSize;
@@ -83,8 +84,10 @@ public class ListIntToIntMap extends AbstractIntToIntMap implements UpdatableInt
   @Override
   public int getLongIndex(int shortIndex) {
     checkShortIndex(shortIndex);
-    int i = ObjectUtils.binarySearch(0, mySubSumOfBlocks.length, middle -> mySubSumOfBlocks[middle] <= shortIndex ? -1 : 1);
-    i = Math.min(mySubSumOfBlocks.length, -i-1);
+    int i = Arrays.binarySearch(mySubSumOfBlocks, shortIndex);
+    if (i < 0) {
+      i = -i - 1;
+    }
 
     int blockIndex = i;
     int prefVisibleCount = 0;

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin;
 
 import com.intellij.openapi.actionSystem.*;
@@ -26,9 +26,6 @@ public class StructuralReplaceAction extends AnAction {
 
   public static void triggerAction(Configuration config, SearchContext searchContext) {
     final Project project = searchContext.getProject();
-    if (project == null) {
-      return;
-    }
     PsiDocumentManager.getInstance(project).commitAllDocuments();
 
     if (Registry.is("ssr.use.new.search.dialog")) {
@@ -65,8 +62,6 @@ public class StructuralReplaceAction extends AnAction {
     } else {
       presentation.setEnabled(true);
     }
-
-    super.update(event);
   }
 }
 

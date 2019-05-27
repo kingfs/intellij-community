@@ -1,6 +1,8 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.tasks;
 
+import com.intellij.credentialStore.CredentialAttributes;
+import com.intellij.credentialStore.CredentialAttributesKt;
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.progress.EmptyProgressIndicator;
@@ -12,10 +14,8 @@ import com.intellij.openapi.util.PasswordUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.tasks.*;
 import com.intellij.tasks.impl.BaseRepository;
-import com.intellij.tasks.impl.BaseRepositoryImpl;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.xmlb.annotations.Tag;
-import com.intellij.util.xmlb.annotations.Transient;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.github.api.GithubApiRequestExecutor;
@@ -23,7 +23,7 @@ import org.jetbrains.plugins.github.api.GithubApiRequests;
 import org.jetbrains.plugins.github.api.GithubServerPath;
 import org.jetbrains.plugins.github.api.data.GithubIssue;
 import org.jetbrains.plugins.github.api.data.GithubIssueBase;
-import org.jetbrains.plugins.github.api.data.GithubIssueComment;
+import org.jetbrains.plugins.github.api.data.GithubIssueCommentWithHtml;
 import org.jetbrains.plugins.github.api.data.GithubIssueState;
 import org.jetbrains.plugins.github.api.util.GithubApiPagesLoader;
 import org.jetbrains.plugins.github.exceptions.GithubAuthenticationException;
@@ -43,14 +43,13 @@ import java.util.regex.Pattern;
  * @author Dennis.Ushakov
  */
 @Tag("GitHub")
-public class GithubRepository extends BaseRepositoryImpl {
+public class GithubRepository extends BaseRepository {
   private static final Logger LOG = Logger.getInstance(GithubRepository.class);
 
   private Pattern myPattern = Pattern.compile("($^)");
   @NotNull private String myRepoAuthor = "";
   @NotNull private String myRepoName = "";
   @NotNull private String myUser = "";
-  @NotNull private String myToken = "";
   private boolean myAssignedIssuesOnly = false;
 
   @SuppressWarnings({"UnusedDeclaration"})
@@ -61,7 +60,6 @@ public class GithubRepository extends BaseRepositoryImpl {
     super(other);
     setRepoName(other.myRepoName);
     setRepoAuthor(other.myRepoAuthor);
-    setToken(other.myToken);
     setAssignedIssuesOnly(other.myAssignedIssuesOnly);
   }
 
@@ -98,7 +96,7 @@ public class GithubRepository extends BaseRepositoryImpl {
     return super.isConfigured() &&
            !StringUtil.isEmptyOrSpaces(getRepoAuthor()) &&
            !StringUtil.isEmptyOrSpaces(getRepoName()) &&
-           !StringUtil.isEmptyOrSpaces(getToken());
+           !StringUtil.isEmptyOrSpaces(getPassword());
   }
 
   @Override
@@ -156,7 +154,7 @@ public class GithubRepository extends BaseRepositoryImpl {
     List<Task> tasks = new ArrayList<>();
 
     for (GithubIssueBase issue : issues) {
-      List<GithubIssueComment> comments = GithubApiPagesLoader
+      List<GithubIssueCommentWithHtml> comments = GithubApiPagesLoader
         .loadAll(executor, indicator, GithubApiRequests.Repos.Issues.Comments.pages(issue.getCommentsUrl()));
       tasks.add(createTask(issue, comments));
     }
@@ -165,7 +163,7 @@ public class GithubRepository extends BaseRepositoryImpl {
   }
 
   @NotNull
-  private Task createTask(@NotNull GithubIssueBase issue, @NotNull List<GithubIssueComment> comments) {
+  private Task createTask(@NotNull GithubIssueBase issue, @NotNull List<GithubIssueCommentWithHtml> comments) {
     return new Task() {
       @NotNull private final String myRepoName = getRepoName();
       @NotNull private final Comment[] myComments =
@@ -267,7 +265,7 @@ public class GithubRepository extends BaseRepositoryImpl {
     GithubIssue issue = executor.execute(indicator,
                                          GithubApiRequests.Repos.Issues.get(getServer(), getRepoAuthor(), getRepoName(), numericId));
     if (issue == null) return null;
-    List<GithubIssueComment> comments = GithubApiPagesLoader
+    List<GithubIssueCommentWithHtml> comments = GithubApiPagesLoader
       .loadAll(executor, indicator, GithubApiRequests.Repos.Issues.Comments.pages(issue.getCommentsUrl()));
     return createTask(issue, comments);
   }
@@ -329,14 +327,12 @@ public class GithubRepository extends BaseRepositoryImpl {
     myUser = user;
   }
 
-  @Transient
-  @NotNull
-  public String getToken() {
-    return myToken;
-  }
-
-  public void setToken(@NotNull String token) {
-    myToken = token;
+  /**
+   * Stores access token
+   */
+  @Override
+  public void setPassword(String password) {
+    super.setPassword(password);
     setUser("");
   }
 
@@ -348,23 +344,33 @@ public class GithubRepository extends BaseRepositoryImpl {
     myAssignedIssuesOnly = value;
   }
 
+  @Deprecated
   @Tag("token")
   public String getEncodedToken() {
-    return PasswordUtil.encodePassword(getToken());
+    return null;
   }
 
+  @Deprecated
+  @SuppressWarnings("unused")
   public void setEncodedToken(String password) {
     try {
-      setToken(PasswordUtil.decodePassword(password));
+      setPassword(PasswordUtil.decodePassword(password));
     }
     catch (NumberFormatException e) {
       LOG.warn("Can't decode token", e);
     }
   }
 
+  @Override
+  @NotNull
+  protected CredentialAttributes getAttributes() {
+    String serviceName = CredentialAttributesKt.generateServiceName("Tasks", getRepositoryType().getName() + " " + getPresentableName());
+    return new CredentialAttributes(serviceName, "GitHub OAuth token");
+  }
+
   @NotNull
   private GithubApiRequestExecutor getExecutor() {
-    return GithubApiRequestExecutor.Factory.getInstance().create(getToken(), myUseProxy);
+    return GithubApiRequestExecutor.Factory.getInstance().create(getPassword(), myUseProxy);
   }
 
   @NotNull
@@ -387,7 +393,6 @@ public class GithubRepository extends BaseRepositoryImpl {
     GithubRepository that = (GithubRepository)o;
     if (!Comparing.equal(getRepoAuthor(), that.getRepoAuthor())) return false;
     if (!Comparing.equal(getRepoName(), that.getRepoName())) return false;
-    if (!Comparing.equal(getToken(), that.getToken())) return false;
     if (!Comparing.equal(isAssignedIssuesOnly(), that.isAssignedIssuesOnly())) return false;
 
     return true;

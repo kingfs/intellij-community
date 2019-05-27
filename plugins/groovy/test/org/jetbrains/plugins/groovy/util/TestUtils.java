@@ -45,31 +45,19 @@ public abstract class TestUtils {
   public static final String BEGIN_MARKER = "<begin>";
   public static final String END_MARKER = "<end>";
   public static final String GROOVY_JAR = "groovy-all.jar";
-  public static final String GROOVY_JAR_17 = "groovy-all-1.7.jar";
   public static final String GROOVY_JAR_18 = "groovy-1.8.0-beta-2.jar";
   public static final String GROOVY_JAR_21 = "groovy-all-2.1.3.jar";
   public static final String GROOVY_JAR_22 = "groovy-all-2.2.0-beta-1.jar";
   public static final String GROOVY_JAR_23 = "groovy-all-2.3.0.jar";
   public static final String GROOVY_JAR_30 = "groovy-3.0.0-alpha-2.jar";
 
+  @NotNull
   public static String getMockJdkHome() {
     return getAbsoluteTestDataPath() + "/mockJDK";
   }
 
   public static String getMockGroovyLibraryHome() {
     return getAbsoluteTestDataPath() + "/mockGroovyLib";
-  }
-
-  public static String getMockGroovy1_6LibraryName() {
-    return getAbsoluteTestDataPath() + "/mockGroovyLib1.6/lib/groovy-all-1.6.jar";
-  }
-
-  public static String getMockGroovy1_7LibraryHome() {
-    return getAbsoluteTestDataPath() + "/mockGroovyLib1.7";
-  }
-
-  public static String getMockGroovy1_7LibraryName() {
-    return getMockGroovy1_7LibraryHome()+"/groovy-all-1.7.3.jar";
   }
 
   public static String getMockGroovy1_8LibraryHome() {

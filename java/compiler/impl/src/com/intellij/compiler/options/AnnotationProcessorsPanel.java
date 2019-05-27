@@ -85,9 +85,7 @@ public class AnnotationProcessorsPanel extends JPanel {
               final ProcessorConfigProfile nodeProfile = ((ProfileNode)node.getParent()).myProfile;
               final List<ProcessorConfigProfile> profiles = new ArrayList<>();
               profiles.add(myDefaultProfile);
-              for (ProcessorConfigProfile profile : myModuleProfiles) {
-                profiles.add(profile);
-              }
+              profiles.addAll(myModuleProfiles);
               profiles.remove(nodeProfile);
               final JBPopup popup = JBPopupFactory.getInstance()
                 .createPopupChooserBuilder(profiles)
@@ -255,7 +253,7 @@ public class AnnotationProcessorsPanel extends JPanel {
     }
 
     @Override
-    public void removeNodes(Collection<TreePath> paths) {
+    public void removeNodes(Collection<? extends TreePath> paths) {
       final List<ProcessorConfigProfile> toRemove = new SmartList<>();
       for (TreePath path : paths) {
         Object node = path.getLastPathComponent();

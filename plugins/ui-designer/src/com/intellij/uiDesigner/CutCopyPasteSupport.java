@@ -132,7 +132,7 @@ public final class CutCopyPasteSupport implements CopyProvider, CutProvider, Pas
   private static boolean loadComponentsToPaste(final GuiEditor editor, final String serializedComponents,
                                                final TIntArrayList xs,
                                                final TIntArrayList ys,
-                                               final ArrayList<RadComponent> componentsToPaste) {
+                                               final ArrayList<? super RadComponent> componentsToPaste) {
     final PsiPropertiesProvider provider = new PsiPropertiesProvider(editor.getModule());
 
     try {
@@ -162,7 +162,7 @@ public final class CutCopyPasteSupport implements CopyProvider, CutProvider, Pas
         xs.add(x);
         ys.add(y);
 
-        final Element componentElement = (Element)e.getChildren().get(0);
+        final Element componentElement = e.getChildren().get(0);
         final LwComponent lwComponent = LwContainer.createComponentFromTag(componentElement);
 
         container.addComponent(lwComponent);

@@ -146,16 +146,8 @@ public class CommittedChangesPanel extends JPanel implements TypeSafeDataProvide
       @Override
       public void run(@NotNull final ProgressIndicator indicator) {
         try {
-          final AsynchConsumer<List<CommittedChangeList>> appender = new AsynchConsumer<List<CommittedChangeList>>() {
-            @Override
-            public void finished() {
-            }
-
-            @Override
-            public void consume(final List<CommittedChangeList> list) {
-              runOrInvokeLaterAboveProgress(() -> myBrowser.append(list), ModalityState.stateForComponent(myBrowser), myProject);
-            }
-          };
+          Consumer<List<CommittedChangeList>> appender = list ->
+            runOrInvokeLaterAboveProgress(() -> myBrowser.append(list), ModalityState.stateForComponent(myBrowser), myProject);
           final BufferedListConsumer<CommittedChangeList> bufferedListConsumer = new BufferedListConsumer<>(30, appender, -1);
 
           myProvider.loadCommittedChanges(mySettings, myLocation, myMaxCount, new AsynchConsumer<CommittedChangeList>() {
@@ -247,7 +239,7 @@ public class CommittedChangesPanel extends JPanel implements TypeSafeDataProvide
     WordMatchFilterHelper(final String filterString) {
       myParts = filterString.split(" ");
       for(int i = 0; i < myParts.length; ++ i) {
-        myParts [i] = myParts [i].toLowerCase();
+        myParts [i] = StringUtil.toLowerCase(myParts [i]);
       }
     }
 
@@ -260,8 +252,8 @@ public class CommittedChangesPanel extends JPanel implements TypeSafeDataProvide
       for(String word: filterWords) {
         final String comment = changeList.getComment();
         final String committer = changeList.getCommitterName();
-        if ((comment != null && comment.toLowerCase().contains(word)) ||
-            (committer != null && committer.toLowerCase().contains(word)) ||
+        if ((comment != null && StringUtil.toLowerCase(comment).contains(word)) ||
+            (committer != null && StringUtil.toLowerCase(committer).contains(word)) ||
             Long.toString(changeList.getNumber()).contains(word)) {
           return true;
         }

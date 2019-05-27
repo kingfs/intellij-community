@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util;
 
 import com.intellij.execution.configurations.PathEnvironmentVariableUtil;
@@ -8,6 +8,7 @@ import com.intellij.ide.actions.CreateDesktopEntryAction;
 import com.intellij.jna.JnaLoader;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.updateSettings.impl.UpdateInstaller;
 import com.intellij.openapi.util.AtomicNotNullLazyValue;
 import com.intellij.openapi.util.NotNullLazyValue;
 import com.intellij.openapi.util.SystemInfo;
@@ -107,8 +108,8 @@ public class Restarter {
   }
 
   private static void restartOnWindows(boolean elevate, String... beforeRestart) throws IOException {
-    Kernel32 kernel32 = Native.loadLibrary("kernel32", Kernel32.class);
-    Shell32 shell32 = Native.loadLibrary("shell32", Shell32.class);
+    Kernel32 kernel32 = Native.load("kernel32", Kernel32.class);
+    Shell32 shell32 = Native.load("shell32", Shell32.class);
 
     int pid = WinProcessManager.getCurrentProcessId();
     IntByReference argc = new IntByReference();
@@ -220,7 +221,9 @@ public class Restarter {
   }
 
   private static void runRestarter(File restarterFile, List<String> restarterArgs) throws IOException {
-    restarterArgs.add(0, createTempExecutable(restarterFile).getPath());
+    boolean isUpdate = restarterArgs.contains(UpdateInstaller.UPDATER_MAIN_CLASS);
+    File restarter = isUpdate ? createTempExecutable(restarterFile) : restarterFile;
+    restarterArgs.add(0, restarter.getPath());
     Runtime.getRuntime().exec(ArrayUtil.toStringArray(restarterArgs));
   }
 

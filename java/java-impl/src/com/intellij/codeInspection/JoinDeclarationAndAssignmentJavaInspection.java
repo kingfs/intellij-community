@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection;
 
 import com.intellij.codeInsight.FileModificationService;
@@ -7,6 +7,7 @@ import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.profile.codeInspection.InspectionProjectProfileManager;
 import com.intellij.psi.*;
+import com.intellij.psi.util.PsiExpressionTrimRenderer;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ObjectUtils;
@@ -18,13 +19,13 @@ import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.StringJoiner;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import static com.intellij.codeInspection.ProblemHighlightType.GENERIC_ERROR_OR_WARNING;
 import static com.intellij.codeInspection.ProblemHighlightType.INFORMATION;
-import static com.intellij.psi.util.PsiTreeUtil.*;
+import static com.intellij.psi.util.PsiTreeUtil.getNextSiblingOfType;
+import static com.intellij.psi.util.PsiTreeUtil.skipWhitespacesAndCommentsForward;
 import static com.siyeh.ig.psiutils.VariableAccessUtils.variableIsUsed;
 
 /**
@@ -150,8 +151,8 @@ public class JoinDeclarationAndAssignmentJavaInspection extends AbstractBaseJava
   @Nullable
   private static <T> T findOccurrence(@Nullable PsiElement start,
                                       @NotNull PsiLocalVariable variable,
-                                      @NotNull Function<PsiElement, PsiElement> advance,
-                                      @NotNull BiFunction<PsiElement, PsiLocalVariable, T> search) {
+                                      @NotNull Function<? super PsiElement, ? extends PsiElement> advance,
+                                      @NotNull BiFunction<? super PsiElement, ? super PsiLocalVariable, ? extends T> search) {
     PsiElement candidate = advance.apply(start);
     T result = search.apply(candidate, variable);
     if (result != null) {
@@ -219,7 +220,9 @@ public class JoinDeclarationAndAssignmentJavaInspection extends AbstractBaseJava
         PsiAssignmentExpression assignmentExpression = context.myAssignment;
         PsiExpression initializer = variable.getInitializer();
         if (initializer != null && assignmentExpression.getOperationTokenType() == JavaTokenType.EQ) {
-          RemoveInitializerFix.sideEffectAwareRemove(project, initializer, initializer, variable);
+          String textAfter = PsiExpressionTrimRenderer.render(initializer) + ";<br>" +
+                             variable.getTypeElement().getText() + ' ' + variable.getName();
+          if (!RemoveInitializerFix.sideEffectAwareRemove(project, initializer, initializer, variable, textAfter)) return;
         }
 
         if (!FileModificationService.getInstance().prepareFileForWrite(assignmentExpression.getContainingFile())) return;
@@ -230,27 +233,18 @@ public class JoinDeclarationAndAssignmentJavaInspection extends AbstractBaseJava
     public void applyFixImpl(@NotNull Context context) {
       PsiExpression initializer = DeclarationJoinLinesHandler.getInitializerExpression(context.myVariable, context.myAssignment);
       PsiElement elementToReplace = context.myAssignment.getParent();
-      if (initializer != null && elementToReplace != null) {
-        CommentTracker declTracker = new CommentTracker();
-        declTracker.markUnchanged(initializer);
-        String declText = context.getDeclarationText(initializer);
-        PsiElement declaration = declTracker.replaceAndRestoreComments(elementToReplace, declText);
+      if (elementToReplace != null) {
+        PsiLocalVariable varCopy = DeclarationJoinLinesHandler.copyVarWithInitializer(context.myVariable, initializer);
+        if (varCopy != null) {
+          String text = varCopy.getText();
 
-        CommentTracker varTracker = new CommentTracker();
-        varTracker.delete(context.myVariable);
-        PsiElement anchor = findCommentAnchor(declaration);
-        varTracker.insertCommentsBefore(anchor);
+          CommentTracker tracker = new CommentTracker();
+          tracker.markUnchanged(initializer);
+          tracker.markUnchanged(context.myVariable);
+          tracker.delete(context.myVariable);
+          tracker.replaceAndRestoreComments(elementToReplace, text);
+        }
       }
-    }
-
-    @NotNull
-    public static PsiElement findCommentAnchor(@NotNull PsiElement anchor) {
-      for (PsiElement element = skipWhitespacesBackward(anchor);
-           element instanceof PsiComment;
-           element = skipWhitespacesBackward(element)) {
-        anchor = element;
-      }
-      return anchor;
     }
   }
 
@@ -266,19 +260,6 @@ public class JoinDeclarationAndAssignmentJavaInspection extends AbstractBaseJava
       myName = name;
       myIsUpdate = !JavaTokenType.EQ.equals(myAssignment.getOperationTokenType()) ||
                    findNextAssignment(myAssignment.getParent(), myVariable) != null;
-    }
-
-    @NotNull
-    private String getDeclarationText(@NotNull PsiExpression initializer) {
-      StringJoiner joiner = new StringJoiner(" ");
-      if (myVariable.hasModifierProperty(PsiModifier.FINAL)) {
-        joiner.add(PsiKeyword.FINAL + ' ');
-      }
-      for (PsiAnnotation annotation : myVariable.getAnnotations()) {
-        joiner.add(annotation.getText() + ' ');
-      }
-      joiner.add(myVariable.getTypeElement().getText() + ' ' + myName + '=' + initializer.getText() + ';');
-      return joiner.toString();
     }
   }
 }

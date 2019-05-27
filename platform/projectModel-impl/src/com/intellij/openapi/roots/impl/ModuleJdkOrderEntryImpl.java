@@ -35,10 +35,10 @@ import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer
 /**
  * @author dsl
  */
-public class ModuleJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implements WritableOrderEntry,
-                                                                                  ClonableOrderEntry,
-                                                                                  ModuleJdkOrderEntry,
-                                                                                  ProjectJdkTable.Listener {
+class ModuleJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implements WritableOrderEntry,
+                                                                           ClonableOrderEntry,
+                                                                           ModuleJdkOrderEntry,
+                                                                           ProjectJdkTable.Listener {
   @NonNls public static final String ENTRY_TYPE = JpsModuleRootModelSerializer.JDK_TYPE;
   @NonNls private static final String JDK_NAME_ATTR = JpsModuleRootModelSerializer.JDK_NAME_ATTRIBUTE;
   @NonNls private static final String JDK_TYPE_ATTR = JpsModuleRootModelSerializer.JDK_TYPE_ATTRIBUTE;
@@ -64,7 +64,7 @@ public class ModuleJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implement
 
     final String jdkName = jdkNameAttribute.getValue();
     final String jdkType = element.getAttributeValue(JDK_TYPE_ATTR);
-    final Sdk jdkByName = findJdk(jdkName, jdkType);
+    final Sdk jdkByName = jdkType == null ? null : findJdk(jdkName, jdkType);
     if (jdkByName == null) {
       init(null, jdkName, jdkType);
     }
@@ -74,7 +74,7 @@ public class ModuleJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implement
   }
 
   @Nullable
-  private static Sdk findJdk(final String sdkName, final String sdkType) {
+  private static Sdk findJdk(@NotNull String sdkName, @NotNull String sdkType) {
     for (SdkFinder sdkFinder : SdkFinder.EP_NAME.getExtensions()) {
       final Sdk sdk = sdkFinder.findSdk(sdkName, sdkType);
       if (sdk != null) {

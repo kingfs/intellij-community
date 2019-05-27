@@ -25,9 +25,11 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.pointers.VirtualFilePointerManager;
 import com.intellij.util.ThrowableRunnable;
 import gnu.trove.THashMap;
+import kotlin.NotImplementedError;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 import org.jetbrains.jps.model.module.JpsModuleSourceRootType;
 
 import java.util.*;
@@ -119,6 +121,12 @@ public class ModuleRootManagerImpl extends ModuleRootManagerEx implements Dispos
     return model;
   }
 
+  @Override
+  @TestOnly
+  public long getModificationCountForTests() {
+    throw new NotImplementedError("Make sense only for persistent root manager");
+  }
+
   void makeRootsChange(@NotNull Runnable runnable) {
     ProjectRootManagerEx projectRootManagerEx = (ProjectRootManagerEx)ProjectRootManager.getInstance(myModule.getProject());
     // IMPORTANT: should be the first listener!
@@ -154,6 +162,7 @@ public class ModuleRootManagerImpl extends ModuleRootManagerEx implements Dispos
   void commitModel(RootModelImpl rootModel) {
     ApplicationManager.getApplication().assertWriteAccessAllowed();
     LOG.assertTrue(rootModel.myModuleRootManager == this);
+    LOG.assertTrue(!myIsDisposed);
 
     boolean changed = rootModel.isChanged();
 
@@ -205,7 +214,7 @@ public class ModuleRootManagerImpl extends ModuleRootManagerEx implements Dispos
   }
 
   @Override
-  public boolean isDependsOn(Module module) {
+  public boolean isDependsOn(@NotNull Module module) {
     return myRootModel.findModuleOrderEntry(module) != null;
   }
 
@@ -221,7 +230,7 @@ public class ModuleRootManagerImpl extends ModuleRootManagerEx implements Dispos
   }
 
   @Override
-  public <R> R processOrder(RootPolicy<R> policy, R initialValue) {
+  public <R> R processOrder(@NotNull RootPolicy<R> policy, R initialValue) {
     LOG.assertTrue(!myIsDisposed);
     return myRootModel.processOrder(policy, initialValue);
   }
@@ -314,6 +323,7 @@ public class ModuleRootManagerImpl extends ModuleRootManagerEx implements Dispos
     return myRootModel.getSourceRoots(rootTypes);
   }
 
+  @Override
   public void dropCaches() {
     myOrderRootsCache.clearCache();
   }

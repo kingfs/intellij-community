@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.credentialStore
 
 import com.intellij.ide.passwordSafe.impl.getDefaultKeePassDbFile
@@ -37,16 +37,16 @@ class PasswordSafeSettings : PersistentStateComponentWithModificationTracker<Pas
       state.keepassDb = v
     }
 
-  @Suppress("DEPRECATION")
   var providerType: ProviderType
-    get() = if (SystemInfo.isWindows && state.provider === ProviderType.KEYCHAIN) ProviderType.KEEPASS else state.provider!!
+    get() = if (SystemInfo.isWindows && state.provider === ProviderType.KEYCHAIN) ProviderType.KEEPASS else state.provider
     set(value) {
       var newValue = value
+      @Suppress("DEPRECATION")
       if (newValue === ProviderType.DO_NOT_STORE) {
         newValue = ProviderType.MEMORY_ONLY
       }
 
-      val oldValue = state.provider!!
+      val oldValue = state.provider
       if (newValue !== oldValue) {
         state.provider = newValue
         ApplicationManager.getApplication()?.messageBus?.syncPublisher(TOPIC)?.typeChanged(oldValue, newValue)
@@ -57,7 +57,7 @@ class PasswordSafeSettings : PersistentStateComponentWithModificationTracker<Pas
 
   override fun loadState(state: PasswordSafeOptions) {
     this.state = state
-    providerType = state.provider ?: defaultProviderType
+    providerType = state.provider
     state.keepassDb = state.keepassDb.nullize(nullizeSpaces = true)
   }
 
@@ -71,6 +71,9 @@ class PasswordSafeSettings : PersistentStateComponentWithModificationTracker<Pas
     // do not use it directly
     var keepassDb by string()
     var isRememberPasswordByDefault by property(true)
+
+    // do not use it directly
+    var pgpKeyId by string()
   }
 }
 

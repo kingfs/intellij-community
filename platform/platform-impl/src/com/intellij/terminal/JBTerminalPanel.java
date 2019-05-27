@@ -17,6 +17,7 @@ import com.intellij.openapi.editor.impl.FontInfo;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.ide.CopyPasteManager;
 import com.intellij.openapi.project.DumbAwareAction;
+import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.util.JBHiDPIScaledImage;
 import com.intellij.util.ui.UIUtil;
@@ -24,6 +25,7 @@ import com.jediterm.terminal.TextStyle;
 import com.jediterm.terminal.model.StyleState;
 import com.jediterm.terminal.model.TerminalTextBuffer;
 import com.jediterm.terminal.ui.TerminalPanel;
+import org.apache.log4j.Logger;
 import org.intellij.lang.annotations.JdkConstants;
 import org.jetbrains.annotations.NotNull;
 
@@ -32,13 +34,14 @@ import java.awt.*;
 import java.awt.datatransfer.StringSelection;
 import java.awt.event.FocusEvent;
 import java.awt.event.FocusListener;
+import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.awt.image.ImageObserver;
 import java.util.List;
 
-public class JBTerminalPanel extends TerminalPanel implements FocusListener, TerminalSettingsListener, Disposable,
-                                                              IdeEventQueue.EventDispatcher {
+public class JBTerminalPanel extends TerminalPanel implements FocusListener, TerminalSettingsListener, Disposable {
+  private static final Logger LOG = Logger.getLogger(JBTerminalPanel.class);
   private static final String[] ACTIONS_TO_SKIP = new String[]{
     "ActivateTerminalToolWindow",
     "ActivateMessagesToolWindow",
@@ -72,10 +75,18 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
 
     "ShowSettings",
     "RecentFiles",
-    "Switcher"
+    "Switcher",
+
+    "ResizeToolWindowLeft",
+    "ResizeToolWindowRight",
+    "ResizeToolWindowUp",
+    "ResizeToolWindowDown",
+    "MaximizeToolWindow"
   };
 
+  private final TerminalEventDispatcher myEventDispatcher = new TerminalEventDispatcher();
   private final JBTerminalSystemSettingsProviderBase mySettingsProvider;
+  private final TerminalEscapeKeyListener myEscapeKeyListener;
 
   private List<AnAction> myActionsToSkip;
 
@@ -91,6 +102,7 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     addFocusListener(this);
 
     mySettingsProvider.addListener(this);
+    myEscapeKeyListener = new TerminalEscapeKeyListener(this);
   }
 
   private static void registerKeymapActions(final TerminalPanel terminalPanel) {
@@ -125,16 +137,6 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     }
   }
 
-  @Override
-  public boolean dispatch(@NotNull AWTEvent e) {
-    if (e instanceof KeyEvent && !skipKeyEvent((KeyEvent)e)) {
-      IdeEventQueue.getInstance().flushDelayedKeyEvents();
-      dispatchEvent(e);
-      return true;
-    }
-    return false;
-  }
-
   private boolean skipKeyEvent(KeyEvent e) {
     if (myActionsToSkip == null) {
       return false;
@@ -143,7 +145,7 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     return kc == KeyEvent.VK_ESCAPE || skipAction(e, myActionsToSkip);
   }
 
-  private static boolean skipAction(KeyEvent e, List<AnAction> actionsToSkip) {
+  private static boolean skipAction(KeyEvent e, List<? extends AnAction> actionsToSkip) {
     if (actionsToSkip != null) {
       final KeyboardShortcut eventShortcut = new KeyboardShortcut(KeyStroke.getKeyStrokeForEvent(e), null);
       for (AnAction action : actionsToSkip) {
@@ -157,6 +159,19 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
     return false;
   }
 
+  @Override
+  public void handleKeyEvent(@NotNull KeyEvent e) {
+    if (SystemInfo.isMac && SystemInfo.isJavaVersionAtLeast(11, 0, 0)) {
+      // Workaround for https://youtrack.jetbrains.com/issue/JBR-1098
+      // sun.lwawt.macosx.CPlatformResponder.mapNsCharsToCompatibleWithJava converts 0x0003 (NSEnterCharacter) to 0x000a
+      if (e.getKeyChar() == KeyEvent.VK_ENTER && e.getKeyCode() == KeyEvent.VK_C && e.getModifiersEx() == InputEvent.CTRL_DOWN_MASK) {
+        LOG.debug("Fixing Ctrl+C");
+        e.setKeyChar((char)3);
+      }
+    }
+    myEscapeKeyListener.handleKeyEvent(e);
+    super.handleKeyEvent(e);
+  }
 
   @Override
   protected void setupAntialiasing(Graphics graphics) {
@@ -229,13 +244,14 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
   private void installKeyDispatcher() {
     if (mySettingsProvider.overrideIdeShortcuts()) {
       myActionsToSkip = setupActionsToSkip();
-      IdeEventQueue.getInstance().addDispatcher(this, this);
+      myEventDispatcher.register();
     }
     else {
       myActionsToSkip = null;
     }
   }
 
+  @NotNull
   private static List<AnAction> setupActionsToSkip() {
     List<AnAction> res = Lists.newArrayList();
     ActionManager actionManager = ActionManager.getInstance();
@@ -252,7 +268,7 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
   public void focusLost(FocusEvent event) {
     if (myActionsToSkip != null) {
       myActionsToSkip = null;
-      IdeEventQueue.getInstance().removeDispatcher(this);
+      myEventDispatcher.unregister();
     }
 
     refreshAfterExecution();
@@ -265,7 +281,7 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
   }
 
   public FontInfo fontForChar(final char c, @JdkConstants.FontStyle int style) {
-    return ComplementaryFontsRegistry.getFontAbleToDisplay(c, style, mySettingsProvider.getColorScheme().getConsoleFontPreferences());
+    return ComplementaryFontsRegistry.getFontAbleToDisplay(c, style, mySettingsProvider.getColorScheme().getConsoleFontPreferences(), null);
   }
 
   @Override
@@ -285,5 +301,33 @@ public class JBTerminalPanel extends TerminalPanel implements FocusListener, Ter
       LocalFileSystem.getInstance().refresh(true);
     }
   }
-}
 
+  /**
+   * Adds "Override IDE shortcuts" terminal feature allowing terminal to process all the key events.
+   * Without own IdeEventQueue.EventDispatcher, terminal won't receive key events corresponding to IDE action shortcuts.
+   */
+  private class TerminalEventDispatcher implements IdeEventQueue.EventDispatcher {
+    @Override
+    public boolean dispatch(@NotNull AWTEvent e) {
+      if (e instanceof KeyEvent && !skipKeyEvent((KeyEvent)e)) {
+        IdeEventQueue.getInstance().flushDelayedKeyEvents();
+        // Workaround for https://youtrack.jetbrains.com/issue/IDEA-214782, revert once it's fixed.
+        if (SystemInfo.isJavaVersionAtLeast(8, 0, 212)) {
+          // JBTerminalPanel is focused, because TerminalEventDispatcher added in focusGained and removed in focusLost
+          processKeyEvent((KeyEvent)e);
+        }
+        dispatchEvent(e);
+        return true;
+      }
+      return false;
+    }
+
+    void register() {
+      IdeEventQueue.getInstance().addDispatcher(this, JBTerminalPanel.this);
+    }
+
+    void unregister() {
+      IdeEventQueue.getInstance().removeDispatcher(this);
+    }
+  }
+}

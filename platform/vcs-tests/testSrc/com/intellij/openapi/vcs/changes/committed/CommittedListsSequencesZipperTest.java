@@ -114,7 +114,7 @@ public class CommittedListsSequencesZipperTest {
 
     @Override
     @NotNull
-    public Pair<List<RepositoryLocationGroup>, List<RepositoryLocation>> groupLocations(@NotNull List<RepositoryLocation> in) {
+    public Pair<List<RepositoryLocationGroup>, List<RepositoryLocation>> groupLocations(@NotNull List<? extends RepositoryLocation> in) {
       RepositoryLocationGroup group = new RepositoryLocationGroup("");
 
       for (RepositoryLocation location : in) {
@@ -126,7 +126,7 @@ public class CommittedListsSequencesZipperTest {
 
     @Override
     @NotNull
-    public CommittedChangeList zip(@Nullable RepositoryLocationGroup group, @NotNull List<CommittedChangeList> lists) {
+    public CommittedChangeList zip(@Nullable RepositoryLocationGroup group, @NotNull List<? extends CommittedChangeList> lists) {
       return create(lists.get(0).getNumber(), String.valueOf(lists.size()));
     }
 

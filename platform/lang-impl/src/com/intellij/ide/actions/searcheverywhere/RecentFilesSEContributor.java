@@ -4,7 +4,6 @@ package com.intellij.ide.actions.searcheverywhere;
 import com.google.common.collect.Lists;
 import com.intellij.openapi.fileEditor.FileEditorManager;
 import com.intellij.openapi.fileEditor.impl.EditorHistoryManager;
-import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.util.ProgressIndicatorUtils;
 import com.intellij.openapi.project.Project;
@@ -14,13 +13,13 @@ import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.codeStyle.MinusculeMatcher;
 import com.intellij.psi.codeStyle.NameUtil;
+import com.intellij.util.Processor;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -43,23 +42,19 @@ public class RecentFilesSEContributor extends FileSearchEverywhereContributor {
   }
 
   @Override
-  public String includeNonProjectItemsText() {
-    return null;
-  }
-
-  @Override
   public int getSortWeight() {
     return 70;
   }
 
   @Override
   public int getElementPriority(@NotNull Object element, @NotNull String searchPattern) {
-    return super.getElementPriority(element, searchPattern) + 1;
+    return super.getElementPriority(element, searchPattern) + 5;
   }
 
   @Override
-  public void fetchElements(@NotNull String pattern, boolean everywhere, @Nullable SearchEverywhereContributorFilter<FileType> filter,
-                            @NotNull ProgressIndicator progressIndicator, @NotNull Function<Object, Boolean> consumer) {
+  public void fetchElements(@NotNull String pattern,
+                            @NotNull ProgressIndicator progressIndicator,
+                            @NotNull Processor<? super Object> consumer) {
     if (myProject == null) {
       return; //nothing to search
     }
@@ -84,12 +79,22 @@ public class RecentFilesSEContributor extends FileSearchEverywhereContributor {
                      .filter(file -> file != null)
                      .collect(Collectors.toList())
         );
-      }, progressIndicator);
 
-    for (Object element : res) {
-      if (!consumer.apply(element)) {
-        return;
-      }
-    }
+        for (Object element : res) {
+          if (!consumer.process(element)) {
+            return;
+          }
+        }
+      }, progressIndicator);
+  }
+
+  @Override
+  public boolean isEmptyPatternSupported() {
+    return true;
+  }
+
+  @Override
+  public boolean isShownInSeparateTab() {
+    return false;
   }
 }

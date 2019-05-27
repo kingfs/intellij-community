@@ -2,6 +2,7 @@
 package com.intellij.execution.dashboard.actions;
 
 import com.intellij.execution.*;
+import com.intellij.execution.configurations.RunConfiguration;
 import com.intellij.execution.configurations.RuntimeConfigurationError;
 import com.intellij.execution.configurations.RuntimeConfigurationException;
 import com.intellij.execution.dashboard.RunDashboardManager;
@@ -11,20 +12,26 @@ import com.intellij.execution.runners.ProgramRunner;
 import com.intellij.execution.ui.RunContentDescriptor;
 import com.intellij.execution.ui.RunContentManagerImpl;
 import com.intellij.ide.DataManager;
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.project.IndexNotReadyException;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.content.Content;
+import com.intellij.util.containers.JBIterable;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.util.List;
+
+import static com.intellij.execution.dashboard.actions.RunDashboardActionUtils.getLeafTargets;
 
 /**
  * @author konstantin.aleev
  */
-public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashboardRunConfigurationNode> {
+public abstract class ExecutorAction extends AnAction {
+  protected ExecutorAction() {
+  }
+
   protected ExecutorAction(String text, String description, Icon icon) {
     super(text, description, icon);
   }
@@ -36,14 +43,14 @@ public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashb
       update(e, false);
       return;
     }
-    List<RunDashboardRunConfigurationNode> targetNodes = getTargetNodes(e);
+    JBIterable<RunDashboardRunConfigurationNode> targetNodes = getLeafTargets(e);
     if (RunDashboardManager.getInstance(project).isShowConfigurations()) {
-      boolean running = targetNodes.stream().anyMatch(node -> {
+      boolean running = targetNodes.filter(node -> {
         Content content = node.getContent();
         return content != null && !RunContentManagerImpl.isTerminated(content);
-      });
+      }).isNotEmpty();
       update(e, running);
-      e.getPresentation().setEnabled(targetNodes.stream().anyMatch(this::canRun));
+      e.getPresentation().setEnabled(targetNodes.filter(this::canRun).isNotEmpty());
     }
     else {
       Content content = RunDashboardManager.getInstance(project).getDashboardContentManager().getSelectedContent();
@@ -52,16 +59,17 @@ public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashb
     }
   }
 
-  private boolean canRun(RunDashboardRunConfigurationNode node) {
+  private boolean canRun(@NotNull RunDashboardRunConfigurationNode node) {
     final String executorId = getExecutor().getId();
     final RunnerAndConfigurationSettings configurationSettings = node.getConfigurationSettings();
     final ProgramRunner runner = ProgramRunnerUtil.getRunner(executorId, configurationSettings);
     final ExecutionTarget target = ExecutionTargetManager.getActiveTarget(node.getProject());
 
+    RunConfiguration configuration = configurationSettings.getConfiguration();
     return isValid(node) &&
            runner != null &&
-           runner.canRun(executorId, configurationSettings.getConfiguration()) &&
-           ExecutionTargetManager.canRun(configurationSettings, target) &&
+           runner.canRun(executorId, configuration) &&
+           ExecutionTargetManager.canRun(configuration, target) &&
            !isStarting(node.getProject(), configurationSettings, executorId, runner.getRunnerId());
   }
 
@@ -86,9 +94,9 @@ public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashb
     return false;
   }
 
-  private boolean isValid(RunDashboardRunConfigurationNode node) {
+  private static boolean isValid(RunDashboardRunConfigurationNode node) {
     try {
-      node.getConfigurationSettings().checkSettings(getExecutor());
+      node.getConfigurationSettings().checkSettings(null);
       return true;
     }
     catch (IndexNotReadyException ex) {
@@ -105,8 +113,11 @@ public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashb
   @Override
   public void actionPerformed(@NotNull AnActionEvent e) {
     Project project = e.getProject();
-    if (project == null || RunDashboardManager.getInstance(project).isShowConfigurations()) {
-      super.actionPerformed(e);
+    if (project == null) return;
+    if (RunDashboardManager.getInstance(project).isShowConfigurations()) {
+      for (RunDashboardRunConfigurationNode node : getLeafTargets(e)) {
+        doActionPerformed(node);
+      }
     }
     else {
       Content content = RunDashboardManager.getInstance(project).getDashboardContentManager().getSelectedContent();
@@ -129,8 +140,7 @@ public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashb
     }
   }
 
-  @Override
-  protected void doActionPerformed(RunDashboardRunConfigurationNode node) {
+  private void doActionPerformed(RunDashboardRunConfigurationNode node) {
     if (!canRun(node)) return;
 
     RunContentDescriptor descriptor = node.getDescriptor();
@@ -139,11 +149,6 @@ public abstract class ExecutorAction extends RunDashboardTreeLeafAction<RunDashb
                                                                       ExecutionTargetManager.getActiveTarget(node.getProject()),
                                                                       node.getConfigurationSettings(),
                                                                       descriptor == null ? null : descriptor.getProcessHandler());
-  }
-
-  @Override
-  protected Class<RunDashboardRunConfigurationNode> getTargetNodeClass() {
-    return RunDashboardRunConfigurationNode.class;
   }
 
   protected abstract Executor getExecutor();

@@ -13,6 +13,7 @@
 // limitations under the License.
 package com.intellij.ui;
 
+import com.intellij.ui.components.panels.NonOpaquePanel;
 import com.intellij.ui.components.panels.OpaquePanel;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.AccessibleContextUtil;
@@ -63,7 +64,7 @@ public abstract class GroupedElementsRenderer {
     setSelected(myComponent, isSelected);
     setSelected(myTextLabel, isSelected);
 
-    myRendererComponent.setPrefereedWidth(preferredForcedWidth);
+    myRendererComponent.setPreferredWidth(preferredForcedWidth);
 
     return myRendererComponent;
   }
@@ -101,7 +102,15 @@ public abstract class GroupedElementsRenderer {
     @Override
     protected void layout() {
       myRendererComponent.add(mySeparatorComponent, BorderLayout.NORTH);
-      myRendererComponent.add(myComponent, BorderLayout.CENTER);
+
+      JComponent centerComponent = new NonOpaquePanel(myComponent) {
+        @Override
+        public Dimension getPreferredSize() {
+          return UIUtil.updateListRowHeight(super.getPreferredSize());
+        }
+      };
+
+      myRendererComponent.add(centerComponent, BorderLayout.CENTER);
     }
 
     @Override
@@ -145,12 +154,12 @@ public abstract class GroupedElementsRenderer {
 
     @Override
     protected Color getBackground() {
-      return UIUtil.getTreeTextBackground();
+      return UIUtil.getTreeBackground();
     }
 
     @Override
     protected Color getForeground() {
-      return UIUtil.getTreeTextForeground();
+      return UIUtil.getTreeForeground();
     }
   }
 
@@ -162,7 +171,7 @@ public abstract class GroupedElementsRenderer {
       super(new BorderLayout(), GroupedElementsRenderer.this.getBackground());
     }
 
-    public void setPrefereedWidth(final int minWidth) {
+    public void setPreferredWidth(final int minWidth) {
       myPrefWidth = minWidth;
     }
 

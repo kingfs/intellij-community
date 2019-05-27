@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi;
 
 import com.intellij.lang.ASTNode;
@@ -21,6 +21,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 
 import static com.intellij.openapi.util.Conditions.compose;
+import static com.intellij.openapi.util.Conditions.instanceOf;
 
 /**
  * @author gregsh
@@ -80,25 +81,34 @@ public class SyntaxTraverser<T> extends FilteredTraverserBase<T, SyntaxTraverser
   @NotNull
   public static SyntaxTraverser<LighterASTNode> lightTraverser(@NotNull PsiBuilder builder) {
     LighterASTApi api = new LighterASTApi(builder);
-    return new SyntaxTraverser<>(api, Meta.<LighterASTNode>empty().withRoots(JBIterable.of(api.getStructure().getRoot())));
+    Meta<LighterASTNode> meta = Meta.create(api)
+      .forceExpand(compose(api::typeOf, instanceOf(IFileElementType.class)))
+      .withRoots(JBIterable.of(api.getStructure().getRoot()));
+    return new SyntaxTraverser<>(api, meta);
   }
 
   public final Api<T> api;
 
   protected SyntaxTraverser(@NotNull Api<T> api, @Nullable Meta<T> meta) {
-    super(meta, api);
+    super(meta == null ? Meta.create(api).forceExpand(compose(api::typeOf, instanceOf(IFileElementType.class))) : meta);
     this.api = api;
   }
 
   @NotNull
   @Override
-  protected SyntaxTraverser<T> newInstance(Meta<T> meta) {
+  protected SyntaxTraverser<T> newInstance(@NotNull Meta<T> meta) {
     return new SyntaxTraverser<>(api, meta);
   }
 
-  @Override
-  protected boolean isAlwaysLeaf(@NotNull T node) {
-    return super.isAlwaysLeaf(node) && !(api.typeOf(node) instanceof IFileElementType);
+  @NotNull
+  public final <S> SyntaxTraverser<S> map(@NotNull Function<? super T, ? extends S> function,
+                                    @NotNull Function<? super S, ? extends T> reverse) {
+    return super.mapImpl(function, reverse);
+  }
+
+  @NotNull
+  public final <S> SyntaxTraverser<S> map(@NotNull Function<? super T, ? extends S> function) {
+    return super.mapImpl(function);
   }
 
   @Nullable
@@ -113,7 +123,8 @@ public class SyntaxTraverser<T> extends FilteredTraverserBase<T, SyntaxTraverser
   }
 
   private UserDataHolder getUserDataHolder() {
-    return api instanceof LighterASTApi ? ((LighterASTApi)api).userDataHolder : (UserDataHolder)api.parents(getRoot()).last();
+    return api instanceof LighterASTApi ? ((LighterASTApi)api).userDataHolder :
+           (UserDataHolder)api.parents(getRoot()).last();
   }
 
   @NotNull
@@ -404,7 +415,7 @@ public class SyntaxTraverser<T> extends FilteredTraverserBase<T, SyntaxTraverser
           int count = structure.getChildren(node, ref);
           if (count == 0) return ContainerUtil.emptyIterator();
           T[] array = ref.get();
-          LinkedList<T> list = ContainerUtil.newLinkedList();
+          LinkedList<T> list = new LinkedList<>();
           for (int i = 0; i < count; i++) {
             T child = array[i];
             IElementType childType = typeOf(child);

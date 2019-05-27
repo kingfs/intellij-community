@@ -17,6 +17,7 @@ package com.intellij.java.codeInspection;
 
 import com.intellij.codeInsight.daemon.impl.DefaultHighlightVisitorBasedInspection;
 import com.intellij.codeInspection.InspectionManager;
+import com.intellij.codeInspection.PossibleHeapPollutionVarargsInspection;
 import com.intellij.codeInspection.RedundantSuppressInspection;
 import com.intellij.codeInspection.deadCode.UnusedDeclarationInspection;
 import com.intellij.codeInspection.emptyMethod.EmptyMethodInspection;
@@ -25,9 +26,11 @@ import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.codeInspection.ex.LocalInspectionToolWrapper;
 import com.intellij.codeInspection.i18n.I18nInspection;
 import com.intellij.codeInspection.javaDoc.JavaDocReferenceInspection;
+import com.intellij.codeInspection.uncheckedWarnings.UncheckedWarningLocalInspection;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.impl.source.tree.injected.MyTestInjector;
 import com.intellij.testFramework.InspectionTestCase;
+import com.intellij.testFramework.LightProjectDescriptor;
 import com.siyeh.ig.dataflow.UnnecessaryLocalVariableInspection;
 import com.siyeh.ig.inheritance.RefusedBequestInspection;
 import com.siyeh.ig.migration.RawUseOfParameterizedTypeInspection;
@@ -42,6 +45,8 @@ public class RedundantSuppressTest extends InspectionTestCase {
     super.setUp();
     myInspectionToolWrappers = new InspectionToolWrapper[]{
       new LocalInspectionToolWrapper(new JavaDocReferenceInspection()),
+      new LocalInspectionToolWrapper(new PossibleHeapPollutionVarargsInspection()),
+      new LocalInspectionToolWrapper(new UncheckedWarningLocalInspection()),
       new LocalInspectionToolWrapper(new I18nInspection()),
       new LocalInspectionToolWrapper(new RawUseOfParameterizedTypeInspection()),
       new LocalInspectionToolWrapper(new UnnecessaryLocalVariableInspection()),
@@ -59,6 +64,12 @@ public class RedundantSuppressTest extends InspectionTestCase {
     });
   }
 
+  @NotNull
+  @Override
+  protected LightProjectDescriptor getProjectDescriptor() {
+    return JAVA_9;
+  }
+
   @Override
   protected void tearDown() throws Exception {
     myWrapper = null;
@@ -67,7 +78,7 @@ public class RedundantSuppressTest extends InspectionTestCase {
   }
 
   public void testModuleInfo() {
-    doTest("redundantSuppress/" + getTestName(true), myWrapper,"java 1.5",false);
+    doTest("redundantSuppress/" + getTestName(true), myWrapper, false);
   }
 
   public void testDefaultFile() {
@@ -79,7 +90,7 @@ public class RedundantSuppressTest extends InspectionTestCase {
   }
 
   public void testAnnotator() {
-    doTest("redundantSuppress/" + getTestName(true), myWrapper,"java 1.5",false);
+    doTest("redundantSuppress/" + getTestName(true), myWrapper, false);
   }
 
   public void testIgnoreUnused() {
@@ -87,6 +98,8 @@ public class RedundantSuppressTest extends InspectionTestCase {
   }
 
   public void testIgnoreWithAnnotation() { doTest(); }
+
+  public void testSameSuppressIds() { doTest(); }
 
   public void testSuppressAll() {
     try {
@@ -100,12 +113,12 @@ public class RedundantSuppressTest extends InspectionTestCase {
 
   public void testInjections() {
     MyTestInjector testInjector = new MyTestInjector(getPsiManager());
-    testInjector.injectAll(getTestRootDisposable());
-    
+    testInjector.injectAll(myFixture.getTestRootDisposable());
+
     doTest();
   }
 
   private void doTest() {
-    doTest("redundantSuppress/" + getTestName(true), myWrapper,"java 1.5",true);
+    doTest("redundantSuppress/" + getTestName(true), myWrapper, true);
   }
 }

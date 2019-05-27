@@ -4,8 +4,10 @@ package com.intellij.vcs.log.statistics;
 import com.intellij.internal.statistic.beans.UsageDescriptor;
 import com.intellij.internal.statistic.service.fus.collectors.ProjectUsagesCollector;
 import com.intellij.internal.statistic.service.fus.collectors.UsageDescriptorKeyValidator;
+import com.intellij.internal.statistic.utils.PluginInfoDetectorKt;
 import com.intellij.internal.statistic.utils.StatisticsUtilKt;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vcs.VcsKey;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.containers.ContainerUtil;
@@ -23,7 +25,6 @@ import java.util.Set;
 
 import static java.util.Arrays.asList;
 
-@SuppressWarnings("StringToUpperCaseOrToLowerCaseWithoutLocale")
 public class VcsLogRepoSizeCollector extends ProjectUsagesCollector {
 
   @NotNull
@@ -37,7 +38,7 @@ public class VcsLogRepoSizeCollector extends ProjectUsagesCollector {
         PermanentGraph<Integer> permanentGraph = dataPack.getPermanentGraph();
         MultiMap<VcsKey, VirtualFile> groupedRoots = groupRootsByVcs(dataPack.getLogProviders());
 
-        Set<UsageDescriptor> usages = ContainerUtil.newHashSet();
+        Set<UsageDescriptor> usages = ContainerUtil.newHashSet(new UsageDescriptor("dataInitialized"));
         usages.add(StatisticsUtilKt.getCountingUsage("commit.count", permanentGraph.getAllCommits().size(),
                                                      asList(0, 1, 100, 1000, 10 * 1000, 100 * 1000, 500 * 1000, 1000 * 1000)));
         usages.add(StatisticsUtilKt.getCountingUsage("branches.count", dataPack.getRefsModel().getBranches().size(),
@@ -45,8 +46,8 @@ public class VcsLogRepoSizeCollector extends ProjectUsagesCollector {
         usages.add(StatisticsUtilKt.getCountingUsage("users.count", logData.getAllUsers().size(),
                                                      asList(0, 1, 10, 50, 100, 500, 1000, 5 * 1000, 10 * 1000, 20 * 1000, 50 * 1000)));
 
-        for (VcsKey vcs: groupedRoots.keySet()) {
-          String vcsKey = UsageDescriptorKeyValidator.ensureProperKey(vcs.getName().toLowerCase());
+        for (VcsKey vcs : groupedRoots.keySet()) {
+          String vcsKey = getVcsKeySafe(vcs);
           usages.add(StatisticsUtilKt.getCountingUsage(vcsKey + ".root.count", groupedRoots.get(vcs).size(),
                                                        asList(0, 1, 2, 5, 8, 15, 30, 50, 100, 300, 500)));
         }
@@ -57,9 +58,17 @@ public class VcsLogRepoSizeCollector extends ProjectUsagesCollector {
   }
 
   @NotNull
+  private static String getVcsKeySafe(@NotNull VcsKey vcs) {
+    if (PluginInfoDetectorKt.getPluginInfo(vcs.getClass()).isDevelopedByJetBrains()) {
+      return UsageDescriptorKeyValidator.ensureProperKey(StringUtil.toLowerCase(vcs.getName()));
+    }
+    return "third.party";
+  }
+
+  @NotNull
   private static MultiMap<VcsKey, VirtualFile> groupRootsByVcs(@NotNull Map<VirtualFile, VcsLogProvider> providers) {
     MultiMap<VcsKey, VirtualFile> result = MultiMap.create();
-    for (Map.Entry<VirtualFile, VcsLogProvider> entry: providers.entrySet()) {
+    for (Map.Entry<VirtualFile, VcsLogProvider> entry : providers.entrySet()) {
       VirtualFile root = entry.getKey();
       VcsKey vcs = entry.getValue().getSupportedVcs();
       result.putValue(vcs, root);
@@ -70,6 +79,6 @@ public class VcsLogRepoSizeCollector extends ProjectUsagesCollector {
   @NotNull
   @Override
   public String getGroupId() {
-    return "statistics.vcs.log.data";
+    return "vcs.log.data";
   }
 }

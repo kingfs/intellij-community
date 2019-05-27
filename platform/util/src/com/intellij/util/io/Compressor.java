@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.io;
 
 import com.intellij.openapi.util.Condition;
@@ -6,6 +6,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -19,17 +20,25 @@ import java.util.zip.ZipOutputStream;
 
 public abstract class Compressor implements Closeable {
   public static class Tar extends Compressor {
-    public Tar(@NotNull File file) throws IOException {
-      myStream = new TarArchiveOutputStream(new GzipCompressorOutputStream(new FileOutputStream(file)));
-      myStream.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
-    }
+    public enum Compression { GZIP, BZIP2, NONE }
 
-    public Tar(@NotNull TarArchiveOutputStream stream) {
-      myStream = stream;
+    public Tar(@NotNull File file, @NotNull Compression compression) throws IOException {
+      this(new FileOutputStream(file), compression);
     }
 
     //<editor-fold desc="Implementation">
     private final TarArchiveOutputStream myStream;
+
+    private Tar(OutputStream stream, Compression compression) throws IOException {
+      myStream = new TarArchiveOutputStream(compressedStream(stream, compression));
+      myStream.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
+    }
+
+    private static OutputStream compressedStream(OutputStream stream, Compression compression) throws IOException {
+      if (compression == Compression.GZIP) return new GzipCompressorOutputStream(stream);
+      if (compression == Compression.BZIP2) return new BZip2CompressorOutputStream(stream);
+      return stream;
+    }
 
     @Override
     protected void writeDirectoryEntry(String name, long timestamp) throws IOException {
@@ -58,15 +67,24 @@ public abstract class Compressor implements Closeable {
 
   public static class Zip extends Compressor {
     public Zip(@NotNull File file) throws FileNotFoundException {
-      myStream = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(file)));
+      this(new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(file))));
     }
 
-    public Zip(@NotNull ZipOutputStream stream) {
-      myStream = stream;
+    public Zip(@NotNull OutputStream stream) {
+      this(new ZipOutputStream(stream));
+    }
+
+    public Zip withLevel(int compressionLevel) {
+      myStream.setLevel(compressionLevel);
+      return this;
     }
 
     //<editor-fold desc="Implementation">
     private final ZipOutputStream myStream;
+
+    protected Zip(ZipOutputStream stream) {
+      myStream = stream;
+    }
 
     @Override
     protected void writeDirectoryEntry(String name, long timestamp) throws IOException {
@@ -120,14 +138,13 @@ public abstract class Compressor implements Closeable {
   }
 
   public final void addFile(@NotNull String entryName, @NotNull File file) throws IOException {
-    entryName = entryName(entryName);
-    if (accepts(entryName)) {
-      InputStream source = new FileInputStream(file);
-      try {
+    addFile(entryName(entryName), file, true);
+  }
+
+  private void addFile(String entryName, File file, boolean checkParents) throws IOException {
+    if (accepts(entryName, checkParents)) {
+      try (InputStream source = new FileInputStream(file)) {
         writeFileEntry(entryName, source, file.length(), file.lastModified());
-      }
-      finally {
-        source.close();
       }
     }
   }
@@ -138,7 +155,7 @@ public abstract class Compressor implements Closeable {
 
   public final void addFile(@NotNull String entryName, @NotNull byte[] content, long timestamp) throws IOException {
     entryName = entryName(entryName);
-    if (accepts(entryName)) {
+    if (accepts(entryName, true)) {
       writeFileEntry(entryName, new ByteArrayInputStream(content), content.length, timestamp(timestamp));
     }
   }
@@ -149,7 +166,7 @@ public abstract class Compressor implements Closeable {
 
   public final void addFile(@NotNull String entryName, @NotNull InputStream content, long timestamp) throws IOException {
     entryName = entryName(entryName);
-    if (accepts(entryName)) {
+    if (accepts(entryName, true)) {
       writeFileEntry(entryName, content, -1, timestamp(timestamp));
     }
   }
@@ -160,7 +177,7 @@ public abstract class Compressor implements Closeable {
 
   public final void addDirectory(@NotNull String entryName, long timestamp) throws IOException {
     entryName = entryName(entryName);
-    if (accepts(entryName)) {
+    if (accepts(entryName, true)) {
       writeDirectoryEntry(entryName, timestamp(timestamp));
     }
   }
@@ -170,7 +187,10 @@ public abstract class Compressor implements Closeable {
   }
 
   public final void addDirectory(@NotNull String prefix, @NotNull File directory) throws IOException {
-    addRecursively(entryName(prefix), directory);
+    prefix = entryName(prefix);
+    if (accepts(prefix, true)) {
+      addRecursively(prefix, directory);
+    }
   }
 
   //<editor-fold desc="Internal interface">
@@ -186,23 +206,38 @@ public abstract class Compressor implements Closeable {
     return timestamp == -1 ? System.currentTimeMillis() : timestamp;
   }
 
-  private boolean accepts(String entryName) {
-    return myFilter == null || myFilter.value(entryName);
+  private boolean accepts(String entryName, boolean checkParents) {
+    if (myFilter == null) return true;
+    if (checkParents) {
+      int p = -1;
+      while ((p = entryName.indexOf('/', p + 1)) > 0) {
+        if (!myFilter.value(entryName.substring(0, p))) {
+          return false;
+        }
+      }
+    }
+    return myFilter.value(entryName);
   }
 
   private void addRecursively(String prefix, File directory) throws IOException {
+    if (!prefix.isEmpty()) {
+      if (!accepts(prefix, false)) {
+        return;
+      }
+      else {
+        writeDirectoryEntry(prefix, directory.lastModified());
+      }
+    }
+
     File[] children = directory.listFiles();
     if (children != null) {
-      if (!prefix.isEmpty()) {
-        addDirectory(prefix, directory.lastModified());
-      }
       for (File child: children) {
         String name = prefix.isEmpty() ? child.getName() : prefix + '/' + child.getName();
         if (child.isDirectory()) {
           addRecursively(name, child);
         }
         else {
-          addFile(name, child);
+          addFile(name, child, false);
         }
       }
     }

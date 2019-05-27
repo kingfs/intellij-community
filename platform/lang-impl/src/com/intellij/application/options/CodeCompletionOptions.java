@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.application.options;
 
 import com.intellij.application.options.editor.EditorOptionsProvider;
@@ -11,9 +11,8 @@ import com.intellij.openapi.options.ex.ConfigurableWrapper;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class CodeCompletionOptions extends CompositeConfigurable<UnnamedConfigurable> implements EditorOptionsProvider {
   private static final ExtensionPointName<CodeCompletionConfigurableEP> EP_NAME = ExtensionPointName.create("com.intellij.codeCompletionConfigurable");
@@ -28,12 +27,13 @@ public class CodeCompletionOptions extends CompositeConfigurable<UnnamedConfigur
   @Override
   public JComponent createComponent() {
     List<UnnamedConfigurable> configurables = getConfigurables();
-    List<JComponent> components = configurables.isEmpty()
-                                  ? Collections.emptyList()
-                                  : configurables.stream()
-                                                 .map(UnnamedConfigurable::createComponent)
-                                                 .collect(Collectors.toList());
-    myPanel = new CodeCompletionPanel(components);
+    List<JComponent> addonComponents = new ArrayList<>(configurables.size());
+    List<JComponent> sectionComponents = new ArrayList<>(configurables.size());
+    for (UnnamedConfigurable configurable : configurables) {
+      if (configurable instanceof CodeCompletionOptionsCustomSection) sectionComponents.add(configurable.createComponent());
+      else addonComponents.add(configurable.createComponent());
+    }
+    myPanel = new CodeCompletionPanel(addonComponents, sectionComponents);
     return myPanel.myPanel;
   }
 

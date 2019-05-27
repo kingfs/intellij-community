@@ -1,29 +1,15 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.plugins;
 
-import com.intellij.openapi.components.OldComponentConfig;
-import com.intellij.util.SmartList;
 import com.intellij.util.xmlb.annotations.Attribute;
 import com.intellij.util.xmlb.annotations.Property;
 import com.intellij.util.xmlb.annotations.Tag;
 import com.intellij.util.xmlb.annotations.XCollection;
-import org.jetbrains.annotations.NonNls;
-
-import java.util.List;
 
 public class OptimizedPluginBean {
-  @XCollection(propertyElementName = APPLICATION_COMPONENTS)
-  public OldComponentConfig[] applicationComponents;
-
-  @XCollection(propertyElementName = PROJECT_COMPONENTS)
-  public OldComponentConfig[] projectComponents;
-
-  @XCollection(propertyElementName = MODULE_COMPONENTS)
-  public OldComponentConfig[] moduleComponents;
-
-  @NonNls public static final String APPLICATION_COMPONENTS = "application-components";
-  @NonNls public static final String PROJECT_COMPONENTS = "project-components";
-  @NonNls public static final String MODULE_COMPONENTS = "module-components";
+  public static final String APPLICATION_COMPONENTS = "application-components";
+  public static final String PROJECT_COMPONENTS = "project-components";
+  public static final String MODULE_COMPONENTS = "module-components";
 
   @Tag("name")
   public String name;
@@ -56,10 +42,6 @@ public class OptimizedPluginBean {
   @XCollection
   public PluginDependency[] dependencies;
 
-  @Property(surroundWithTag = false)
-  @XCollection
-  public PluginHelpSet[] helpSets;
-
   @Tag("category")
   public String category;
 
@@ -78,7 +60,6 @@ public class OptimizedPluginBean {
   @Attribute("allow-bundled-update")
   public boolean allowBundledUpdate;
 
-  @Property(surroundWithTag = false)
-  @XCollection(elementName = "module")
-  public List<String> modules = new SmartList<>();
+  @Attribute("implementation-detail")
+  public boolean implementationDetail;
 }

@@ -1,12 +1,14 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.components;
 
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.extensions.AreaInstance;
 import com.intellij.openapi.extensions.ExtensionPointName;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.UserDataHolder;
 import com.intellij.util.messages.MessageBus;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.picocontainer.PicoContainer;
 
 /**
@@ -54,7 +56,7 @@ public interface ComponentManager extends UserDataHolder, Disposable {
   /**
    * Gets all components whose implementation class is derived from {@code baseClass}.
    *
-   * @deprecated use <a href="http://www.jetbrains.org/intellij/sdk/docs/basics/plugin_structure/plugin_extensions_and_extension_points.html">extension points</a> instead
+   * @deprecated use <a href="https://www.jetbrains.org/intellij/sdk/docs/basics/plugin_structure/plugin_extensions_and_extension_points.html">extension points</a> instead
    */
   @Deprecated
   @NotNull
@@ -69,9 +71,18 @@ public interface ComponentManager extends UserDataHolder, Disposable {
   @NotNull
   MessageBus getMessageBus();
 
+  /**
+   * Result is valid only in scope of a read action.
+   * (see https://www.jetbrains.org/intellij/sdk/docs/basics/architectural_overview/general_threading_rules.html#readwrite-lock)
+   * Checking outside of a read action is meaningless, because application/project/module can be disposed at any moment.
+   */
   boolean isDisposed();
 
+  /**
+   * @deprecated Use {@link ExtensionPointName#getExtensionList(AreaInstance)}
+   */
   @NotNull
+  @Deprecated
   <T> T[] getExtensions(@NotNull ExtensionPointName<T> extensionPointName);
 
   /**
@@ -80,4 +91,7 @@ public interface ComponentManager extends UserDataHolder, Disposable {
    */
   @NotNull
   Condition<?> getDisposed();
+
+  default void initializeComponent(@NotNull Object component, @Nullable ServiceDescriptor serviceDescriptor) {
+  }
 }

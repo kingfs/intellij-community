@@ -26,7 +26,6 @@ import static org.junit.Assert.assertTrue;
 
 /**
  * @author Vladislav.Soroka
- * @since 10/16/13
  */
 public class BaseProjectImportErrorHandlerTest {
   private BaseProjectImportErrorHandler myErrorHandler;
@@ -54,7 +53,7 @@ public class BaseProjectImportErrorHandlerTest {
 
     Throwable error = new Throwable(locationError);
 
-    RuntimeException realCause = myErrorHandler.getUserFriendlyError(error, myProjectPath, null);
+    RuntimeException realCause = myErrorHandler.getUserFriendlyError(null, error, myProjectPath, null);
     assertTrue(realCause instanceof LocationAwareExternalSystemException);
     LocationAwareExternalSystemException locationAwareExternalSystemException = (LocationAwareExternalSystemException)realCause;
     assertEquals("~/project/build.gradle", locationAwareExternalSystemException.getFilePath());
@@ -67,7 +66,7 @@ public class BaseProjectImportErrorHandlerTest {
     String causeMsg = "com.mypackage.MyImaginaryClass";
     ClassNotFoundException rootCause = new ClassNotFoundException(causeMsg);
     Throwable error = new Throwable(rootCause);
-    RuntimeException realCause = myErrorHandler.getUserFriendlyError(error, myProjectPath, null);
+    RuntimeException realCause = myErrorHandler.getUserFriendlyError(null, error, myProjectPath, null);
     assertTrue(realCause.getMessage().contains("Unable to load class 'com.mypackage.MyImaginaryClass'."));
   }
 }

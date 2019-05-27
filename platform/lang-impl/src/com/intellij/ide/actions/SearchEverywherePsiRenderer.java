@@ -18,42 +18,35 @@ package com.intellij.ide.actions;
 import com.intellij.ide.util.PlatformModuleRendererFactory;
 import com.intellij.ide.util.PsiElementListCellRenderer;
 import com.intellij.ide.util.gotoByName.GotoFileCellRenderer;
-import com.intellij.navigation.ItemPresentation;
-import com.intellij.navigation.NavigationItem;
-import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Iconable;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.openapi.vfs.VfsUtil;
-import com.intellij.openapi.vfs.VfsUtilCore;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.newvfs.VfsPresentationUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiFileSystemItem;
 import com.intellij.psi.PsiNamedElement;
 import com.intellij.psi.presentation.java.SymbolPresentationUtil;
 import com.intellij.psi.util.PsiUtilCore;
 import com.intellij.ui.ColoredListCellRenderer;
-import com.intellij.ui.JBColor;
-import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.util.ObjectUtils;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
 import java.util.LinkedList;
+import java.util.Optional;
 
 /**
 * @author Konstantin Bulenkov
 */
 public class SearchEverywherePsiRenderer extends PsiElementListCellRenderer<PsiElement> {
 
-  private final JList myList;
-
-  public SearchEverywherePsiRenderer(JList list) {
-    myList = list;
+  public SearchEverywherePsiRenderer() {
     setFocusBorderEnabled(false);
     setLayout(new BorderLayout() {
       @Override
@@ -83,46 +76,53 @@ public class SearchEverywherePsiRenderer extends PsiElementListCellRenderer<PsiE
     return StringUtil.notNullize(name, "<unnamed>");
   }
 
+  @Nullable
   @Override
   protected String getContainerText(PsiElement element, String name) {
-    return getSymbolContainerText(name, element);
+    return getContainerTextForLeftComponent(element, name, -1, null);
   }
 
-  private String getSymbolContainerText(String name, PsiElement element) {
+  @Nullable
+  @Override
+  protected String getContainerTextForLeftComponent(PsiElement element, String name, int maxWidth, FontMetrics fm) {
     String text = SymbolPresentationUtil.getSymbolContainerText(element);
 
-    if (myList.getWidth() == 0) return text;
     if (text == null) return null;
 
     if (text.startsWith("(") && text.endsWith(")")) {
       text = text.substring(1, text.length() - 1);
     }
-    if (text.contains("/") || text.contains(File.separator)) {
+
+    if ((text.contains("/") || text.contains(File.separator)) && element instanceof PsiFileSystemItem) {
       Project project = element.getProject();
-      String projectPath = project.getBasePath();
-      File file = new File(text);
-      if (file.exists()) {
-        File root = projectPath == null ? null : new File(FileUtil.toSystemDependentName(projectPath));
-        if (root != null && FileUtil.isAncestor(root, file, true)) {
-          text = ObjectUtils.notNull(FileUtil.getRelativePath(root, file), text);
+      String basePath = Optional.ofNullable(project.getBasePath())
+        .map(FileUtil::toSystemDependentName)
+        .orElse(null);
+      VirtualFile file = ((PsiFileSystemItem)element).getVirtualFile();
+      if (file != null) {
+        text = FileUtil.toSystemDependentName(text);
+        String filePath = FileUtil.toSystemDependentName(file.getPath());
+        if (basePath != null && FileUtil.isAncestor(basePath, filePath, true)) {
+          text = ObjectUtils.notNull(FileUtil.getRelativePath(basePath, text, File.separatorChar), text);
         }
         else {
-          VirtualFile vFile = VfsUtil.findFileByIoFile(file, false);
-          VirtualFile vRoot = vFile == null ? null : GotoFileCellRenderer.getAnyRoot(vFile, project);
-          root = vRoot == null ? null : VfsUtilCore.virtualToIoFile(vRoot);
-          text = root != null ? ObjectUtils.notNull(FileUtil.getRelativePath(root.getParentFile(), file), text) :
-                 FileUtil.getLocationRelativeToUserHome(text);
+          String rootPath = Optional.ofNullable(GotoFileCellRenderer.getAnyRoot(file, project))
+            .map(root -> FileUtil.toSystemDependentName(root.getPath()))
+            .filter(root -> basePath != null && FileUtil.isAncestor(basePath, root, true))
+            .orElse(null);
+          text = rootPath != null
+                 ? ObjectUtils.notNull(FileUtil.getRelativePath(rootPath, text, File.separatorChar), text)
+                 : FileUtil.getLocationRelativeToUserHome(text);
         }
       }
     }
 
     boolean in = text.startsWith("in ");
     if (in) text = text.substring(3);
-    FontMetrics fm = myList.getFontMetrics(myList.getFont());
-    int maxWidth = myList.getWidth() - fm.stringWidth(name) - 16 - myRightComponentWidth - 20;
     String left = in ? "(in " : "(";
     String right = ")";
     String adjustedText = left + text + right;
+    if (maxWidth < 0) return adjustedText;
 
     int fullWidth = fm.stringWidth(adjustedText);
     if (fullWidth < maxWidth) return adjustedText;
@@ -152,28 +152,8 @@ public class SearchEverywherePsiRenderer extends PsiElementListCellRenderer<PsiE
                                                        int index,
                                                        boolean selected,
                                                        boolean hasFocus) {
-    if (!(value instanceof NavigationItem)) return false;
-
-    NavigationItem item = (NavigationItem)value;
-
-    TextAttributes attributes = getNavigationItemAttributes(item);
-
-    SimpleTextAttributes nameAttributes = attributes != null ? SimpleTextAttributes.fromTextAttributes(attributes) : null;
-
-    Color color = list.getForeground();
-    if (nameAttributes == null) nameAttributes = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, color);
-
-    String name = item.getName();
-    renderer.append(name + " ", nameAttributes);
-    ItemPresentation itemPresentation = item.getPresentation();
-    assert itemPresentation != null;
-    renderer.setIcon(itemPresentation.getIcon(true));
-
-    String locationString = itemPresentation.getLocationString();
-    if (!StringUtil.isEmpty(locationString)) {
-      renderer.append(locationString, new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.GRAY));
-    }
-    return true;
+    return GotoFileCellRenderer.doCustomizeNonPsiElementLeftRenderer(
+      renderer, list, value, getNavigationItemAttributes(value));
   }
 
   @Override

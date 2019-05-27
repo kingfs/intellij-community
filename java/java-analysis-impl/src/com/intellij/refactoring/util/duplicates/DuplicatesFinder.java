@@ -19,6 +19,7 @@ import com.intellij.codeInsight.AnnotationUtil;
 import com.intellij.codeInsight.PsiEquivalenceUtil;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.util.Comparing;
 import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.TextRange;
@@ -49,9 +50,9 @@ public class DuplicatesFinder {
   private final List<PsiElement> myPatternAsList;
   private boolean myMultipleExitPoints;
   @Nullable private final ReturnValue myReturnValue;
-  @Nullable private final Set<TextRange> myTextRanges;
+  @Nullable private final Set<? extends TextRange> myTextRanges;
   private final MatchType myMatchType;
-  private final Set<PsiVariable> myEffectivelyLocal;
+  private final Set<? extends PsiVariable> myEffectivelyLocal;
   private ComplexityHolder myPatternComplexityHolder;
   private ComplexityHolder myCandidateComplexityHolder;
 
@@ -60,8 +61,8 @@ public class DuplicatesFinder {
                           @Nullable ReturnValue returnValue,
                           @NotNull List<? extends PsiVariable> outputParameters,
                           @NotNull MatchType matchType,
-                          @Nullable Set<PsiVariable> effectivelyLocal,
-                          @Nullable Set<TextRange> textRanges) {
+                          @Nullable Set<? extends PsiVariable> effectivelyLocal,
+                          @Nullable Set<? extends TextRange> textRanges) {
     myReturnValue = returnValue;
     LOG.assertTrue(pattern.length > 0);
     myPattern = pattern;
@@ -195,6 +196,7 @@ public class DuplicatesFinder {
   private void findPatternOccurrences(List<? super Match> array, PsiElement scope) {
     PsiElement[] children = scope.getChildren();
     for (PsiElement child : children) {
+      ProgressManager.checkCanceled();
       final Match match = isDuplicateFragment(child, false);
       if (match != null && (myTextRanges == null || myTextRanges.contains(match.getTextRange()))) {
         array.add(match);
@@ -249,6 +251,7 @@ public class DuplicatesFinder {
 
   protected boolean isSelf(@NotNull PsiElement candidate) {
     for (PsiElement pattern : myPattern) {
+      ProgressManager.checkCanceled();
       if (PsiTreeUtil.isAncestor(pattern, candidate, false)) {
         return true;
       }
@@ -516,11 +519,17 @@ public class DuplicatesFinder {
       return (resolveResult2 instanceof PsiLocalVariable || resolveResult2 instanceof PsiParameter) &&
              match.putDeclarationCorrespondence(resolveResult1, resolveResult2);
     }
-    final PsiElement qualifier2 = candidate.getQualifier();
+    PsiElement qualifier2 = candidate.getQualifier();
+    while (qualifier2 instanceof PsiParenthesizedExpression) {
+      qualifier2 = ((PsiParenthesizedExpression)qualifier2).getExpression();
+    }
     if (!equivalentResolve(resolveResult1, resolveResult2, qualifier2)) {
       return matchExtractableVariable(pattern, candidate, match);
     }
     PsiElement qualifier1 = pattern.getQualifier();
+    while (qualifier1 instanceof PsiParenthesizedExpression) {
+      qualifier1 = ((PsiParenthesizedExpression)qualifier1).getExpression();
+    }
     if (qualifier1 instanceof PsiReferenceExpression && qualifier2 instanceof PsiReferenceExpression &&
         !match.areCorrespond(((PsiReferenceExpression)qualifier1).resolve(), ((PsiReferenceExpression)qualifier2).resolve())) {
       return false;

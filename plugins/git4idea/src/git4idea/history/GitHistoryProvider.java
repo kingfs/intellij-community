@@ -18,12 +18,11 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.Processor;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.vcs.history.VcsHistoryProviderEx;
-import com.intellij.vcsUtil.VcsUtil;
+import com.intellij.vcs.log.Hash;
+import git4idea.GitContentRevision;
 import git4idea.GitRevisionNumber;
 import git4idea.GitUtil;
-import git4idea.GitVcs;
 import git4idea.changes.GitChangeUtils;
-import git4idea.history.browser.SHAHash;
 import git4idea.log.GitShowCommitInLogAction;
 import git4idea.repo.GitRepository;
 import git4idea.repo.GitRepositoryManager;
@@ -75,16 +74,6 @@ public class GitHistoryProvider implements VcsHistoryProviderEx,
   }
 
   @Override
-  public FilePath getUsedFilePath(VcsAbstractHistorySession session) {
-    return null;
-  }
-
-  @Override
-  public Boolean getAddinionallyCachedData(VcsAbstractHistorySession session) {
-    return null;
-  }
-
-  @Override
   public VcsAbstractHistorySession createFromCachedData(Boolean aBoolean,
                                                         @NotNull List<VcsFileRevision> revisions,
                                                         @NotNull FilePath filePath,
@@ -99,7 +88,7 @@ public class GitHistoryProvider implements VcsHistoryProviderEx,
     return createSession(filePath, revisions, revisions.isEmpty() ? null : getFirstItem(revisions).getRevisionNumber());
   }
 
-  private VcsAbstractHistorySession createSession(final FilePath filePath, final List<VcsFileRevision> revisions,
+  private VcsAbstractHistorySession createSession(final FilePath filePath, final List<? extends VcsFileRevision> revisions,
                                                   @Nullable final VcsRevisionNumber number) {
     return new VcsAbstractHistorySession(revisions, number) {
       @Override
@@ -138,22 +127,18 @@ public class GitHistoryProvider implements VcsHistoryProviderEx,
   }
 
   @Override
-  public boolean getBaseVersionContent(FilePath filePath, Processor<String> processor, String beforeVersionId) throws VcsException {
+  public boolean getBaseVersionContent(FilePath filePath, Processor<? super String> processor, String beforeVersionId) throws VcsException {
     if (StringUtil.isEmptyOrSpaces(beforeVersionId) || filePath.getVirtualFile() == null) return false;
     // apply if base revision id matches revision
-    final VirtualFile root = GitUtil.getGitRoot(filePath);
-    if (root == null) return false;
+    GitRepository repository = GitRepositoryManager.getInstance(myProject).getRepositoryForFile(filePath);
+    if (repository == null) return false;
 
-    final SHAHash shaHash = GitChangeUtils.commitExists(myProject, root, beforeVersionId, null, "HEAD");
-    if (shaHash == null) {
+    Hash hash = GitChangeUtils.commitExists(myProject, repository.getRoot(), beforeVersionId, null, "HEAD");
+    if (hash == null) {
       throw new VcsException("Can not apply patch to " + filePath.getPath() + ".\nCan not find revision '" + beforeVersionId + "'.");
     }
 
-    final ContentRevision content = GitVcs.getInstance(myProject).getDiffProvider()
-                                          .createFileContent(new GitRevisionNumber(shaHash.getValue()), filePath.getVirtualFile());
-    if (content == null) {
-      throw new VcsException("Can not load content of '" + filePath.getPath() + "' for revision '" + shaHash.getValue() + "'");
-    }
+    final ContentRevision content = GitContentRevision.createRevision(filePath, new GitRevisionNumber(hash.asString()), myProject);
     return !processor.process(content.getContent());
   }
 
@@ -174,22 +159,10 @@ public class GitHistoryProvider implements VcsHistoryProviderEx,
                               new String[]{"--max-count=" + vcsConfiguration.MAXIMUM_HISTORY_ROWS} :
                               ArrayUtil.EMPTY_STRING_ARRAY;
 
-    GitFileHistory.loadHistory(myProject, refreshPath(path), null, startingRevision,
+    GitFileHistory.loadHistory(myProject, path, null, startingRevision,
                                fileRevision -> partner.acceptRevision(fileRevision),
                                exception -> partner.reportException(exception),
                                additionalArgs);
-  }
-
-  /**
-   * Refreshes the IO File inside this FilePath to let it survive moves.
-   */
-  @NotNull
-  private static FilePath refreshPath(@NotNull FilePath path) {
-    VirtualFile virtualFile = path.getVirtualFile();
-    if (virtualFile == null) {
-      return path;
-    }
-    return VcsUtil.getFilePath(virtualFile);
   }
 
   @Override

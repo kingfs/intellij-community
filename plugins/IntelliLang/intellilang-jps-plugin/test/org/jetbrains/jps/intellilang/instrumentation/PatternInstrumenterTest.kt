@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.jps.intellilang.instrumentation
 
 import com.intellij.compiler.instrumentation.FailSafeClassReader
@@ -7,18 +7,24 @@ import com.intellij.compiler.instrumentation.InstrumenterClassWriter
 import com.intellij.openapi.application.PluginPathManager
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.project.IntelliJProjectConfiguration
+import com.intellij.testFramework.IdeaTestUtil
 import com.intellij.testFramework.PlatformTestUtil
+import com.intellij.testFramework.rules.TempDirectory
 import com.intellij.util.ExceptionUtil
 import org.assertj.core.api.Assertions.assertThat
 import org.intellij.lang.annotations.Pattern
-import org.jetbrains.org.objectweb.asm.ClassWriter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TestName
 import java.io.File
 import java.lang.reflect.*
 
 class PatternInstrumenterTest {
+  @Rule @JvmField val tempDir = TempDirectory()
+  @Rule @JvmField val testName = TestName()
+
   @Test
   fun simpleReturn() {
     val testClass = loadClass()
@@ -64,13 +70,13 @@ class PatternInstrumenterTest {
   }
 
   @Test fun enumConstructor() {
-    val testClass = loadClass("TestEnum")
+    val testClass = loadClass()
     assertEquals("V1", testClass.getField("V1").get(null).toString())
     assertEquals("V2", testClass.getField("V2").get(null).toString())
   }
 
   @Test fun groovyEnumConstructor() {
-    val testClass = loadClass("TestGrEnum")
+    val testClass = loadClass()
     assertEquals("G1", testClass.getField("G1").get(null).toString())
     assertEquals("G2", testClass.getField("G2").get(null).toString())
   }
@@ -87,6 +93,12 @@ class PatternInstrumenterTest {
     assertFails(method, "0", "-")
   }
 
+  @Test fun groovyInnerClass() {
+    val testClass = loadClass()
+    val method = testClass.getConstructor(String::class.java, String::class.java)
+    assertFails(method, "0", "-")
+  }
+
   @Test fun skipBridgeMethod() {
     val testClass = loadClass()
     try {
@@ -96,7 +108,7 @@ class PatternInstrumenterTest {
     catch (e: InvocationTargetException) {
       val trace = ExceptionUtil.getThrowableText(e.cause!!)
       assertEquals("Exception should happen in real, non-bridge method: $trace",
-                   2, StringUtil.getOccurrenceCount(trace, "at TestClass\$B.get("))
+                   2, StringUtil.getOccurrenceCount(trace, "at SkipBridgeMethod\$B.get("))
     }
   }
 
@@ -122,27 +134,34 @@ class PatternInstrumenterTest {
   }
 
   @Test fun assertedClass() {
-    val testClass = loadClass("TestAssert", InstrumentationType.ASSERT)
+    val testClass = loadClass(InstrumentationType.ASSERT)
     val method = testClass.getMethod("simpleReturn")
     assertFails(method)
   }
 
-  private fun loadClass(name: String = "TestClass", type: InstrumentationType = InstrumentationType.EXCEPTION): Class<*> {
-    val testDir = File(PluginPathManager.getPluginHomePath("IntelliLang") + "/intellilang-jps-plugin/testData/patternInstrumenter")
+  private fun loadClass(type: InstrumentationType = InstrumentationType.EXCEPTION): Class<*> {
+    val testDir = PluginPathManager.getPluginHomePath("IntelliLang") + "/intellilang-jps-plugin/testData/patternInstrumenter/"
+    val testName = testName.methodName.capitalize()
+    val testFile = IdeaTestUtil.findSourceFile(testDir + testName)
+    val classesDir = tempDir.newFolder("out")
+    val rootPaths = IntelliJProjectConfiguration.getProjectLibraryClassesRootPaths("jetbrains-annotations")
+    IdeaTestUtil.compileFile(testFile, classesDir, "-cp", rootPaths.joinToString(File.pathSeparator))
 
-    val roots = IntelliJProjectConfiguration.getProjectLibraryClassesRootPaths("jetbrains-annotations")
-    val paths = listOf(testDir.path) + roots + listOf(PlatformTestUtil.getRtJarPath())
-    val urls = paths.map { p -> File(p).toURI().toURL() }.toTypedArray()
-    val finder = InstrumentationClassFinder(urls)
+    val finder = InstrumentationClassFinder((listOf(classesDir.toURI().toURL()) +
+                                             rootPaths.map { p -> File(p).toURI().toURL() } +
+                                             listOf(PlatformTestUtil.getRtJarURL())).toTypedArray())
 
+    var modified = false
     val loader = MyClassLoader()
-    testDir.listFiles().filter { it.name.startsWith(name) && it.name.endsWith(".class") }.sorted().forEach {
+    classesDir.listFiles().sorted().forEach {
       val reader = FailSafeClassReader(it.readBytes())
-      val writer = InstrumenterClassWriter(reader, ClassWriter.COMPUTE_FRAMES, finder)
-      PatternValidatorBuilder.processClassFile(reader, writer, finder, Pattern::class.java.name, type)
+      val flags = InstrumenterClassWriter.getAsmClassWriterFlags(InstrumenterClassWriter.getClassFileVersion(reader))
+      val writer = InstrumenterClassWriter(reader, flags, finder)
+      modified = modified or PatternValidatorBuilder.processClassFile(reader, writer, finder, Pattern::class.java.name, type)
       loader.createClass(it.nameWithoutExtension, writer.toByteArray())
     }
-    return Class.forName(name, false, loader)
+    assertThat(modified).withFailMessage("Class file not instrumented!").isTrue()
+    return Class.forName(testName, false, loader)
   }
 
   private fun assertFails(member: Member, vararg args: Any) {

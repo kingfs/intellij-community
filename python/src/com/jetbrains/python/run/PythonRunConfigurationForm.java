@@ -25,6 +25,7 @@ import com.intellij.ui.UserActivityProviderComponent;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBComboBoxLabel;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import com.jetbrains.PySymbolFieldWithBrowseButton;
 import com.jetbrains.PySymbolFieldWithBrowseButtonKt;
@@ -71,9 +72,7 @@ public class PythonRunConfigurationForm implements PythonRunConfigurationParams,
 
   public PythonRunConfigurationForm(PythonRunConfiguration configuration) {
     myCommonOptionsForm = PyCommonOptionsFormFactory.getInstance().createForm(configuration.getCommonOptionsFormData());
-    myCommonOptionsForm.addInterpreterModeListener((isRemoteInterpreter) -> {
-      emulateTerminalEnabled(!isRemoteInterpreter);
-    });
+    myCommonOptionsForm.addInterpreterModeListener((isRemoteInterpreter) -> emulateTerminalEnabled(!isRemoteInterpreter));
     myCommonOptionsPlaceholder.add(myCommonOptionsForm.getMainPanel(), BorderLayout.CENTER);
 
     myProject = configuration.getProject();
@@ -155,8 +154,7 @@ public class PythonRunConfigurationForm implements PythonRunConfigurationParams,
   private void checkTargetComboConsistency(boolean mode) {
     String item = myTargetComboBox.getText();
     assert item != null;
-    //noinspection StringToUpperCaseOrToLowerCaseWithoutLocale
-    if (mode && !item.toLowerCase().contains("module")) {
+    if (mode && !StringUtil.toLowerCase(item).contains("module")) {
       throw new IllegalArgumentException("This option should refer to a module");
     }
   }
@@ -294,7 +292,7 @@ public class PythonRunConfigurationForm implements PythonRunConfigurationParams,
   }
 
   private class MyComboBox extends JBComboBoxLabel implements UserActivityProviderComponent {
-    private final List<ChangeListener> myListeners = Lists.newArrayList();
+    private final List<ChangeListener> myListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
     MyComboBox() {
       this.addMouseListener(new MouseAdapter() {

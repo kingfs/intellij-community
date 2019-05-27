@@ -1,30 +1,34 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.actions.searcheverywhere;
 
-import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.util.Alarm;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.Executor;
 import java.util.function.BiConsumer;
 
 /**
- * Implementation of {@link MultithreadSearcher.Listener} which decrease events rate and raise batch updates
+ * Implementation of {@link MultiThreadSearcher.Listener} which decrease events rate and raise batch updates
  * each {@code throttlingDelay} milliseconds.
  * <br>
- * Not thread-safe. So could be notified in single thread only
+ * Not thread-safe and should be notified only in EDT
  */
-class ThrottlingListenerWrapper implements MultithreadSearcher.Listener {
+class ThrottlingListenerWrapper implements MultiThreadSearcher.Listener {
 
   public final int myThrottlingDelay;
 
-  private final MultithreadSearcher.Listener myDelegateListener;
+  private final MultiThreadSearcher.Listener myDelegateListener;
   private final Executor myDelegateExecutor;
 
   private final Buffer myBuffer = new Buffer();
-  private final BiConsumer<List<SESearcher.ElementInfo>, List<SESearcher.ElementInfo>> myFlushConsumer;
+  private final BiConsumer<List<SearchEverywhereFoundElementInfo>, List<SearchEverywhereFoundElementInfo>> myFlushConsumer;
 
-  ThrottlingListenerWrapper(int throttlingDelay, MultithreadSearcher.Listener delegateListener, Executor delegateExecutor) {
+  private final Alarm flushAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
+  private boolean flushScheduled;
+
+  ThrottlingListenerWrapper(int throttlingDelay, MultiThreadSearcher.Listener delegateListener, Executor delegateExecutor) {
     myThrottlingDelay = throttlingDelay;
     myDelegateListener = delegateListener;
     myDelegateExecutor = delegateExecutor;
@@ -40,33 +44,53 @@ class ThrottlingListenerWrapper implements MultithreadSearcher.Listener {
   }
 
   public void clearBuffer() {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     myBuffer.clear();
+    cancelScheduledFlush();
   }
 
   @Override
-  public void elementsAdded(@NotNull List<SESearcher.ElementInfo> list) {
+  public void elementsAdded(@NotNull List<? extends SearchEverywhereFoundElementInfo> list) {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     myBuffer.addEvent(new Event(Event.ADD, list));
-    flushBufferIfNeeded();
+    scheduleFlushBuffer();
   }
 
   @Override
-  public void elementsRemoved(@NotNull List<SESearcher.ElementInfo> list) {
+  public void elementsRemoved(@NotNull List<? extends SearchEverywhereFoundElementInfo> list) {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     myBuffer.addEvent(new Event(Event.REMOVE, list));
-    flushBufferIfNeeded();
+    scheduleFlushBuffer();
   }
 
   @Override
   public void searchFinished(@NotNull Map<SearchEverywhereContributor<?>, Boolean> hasMoreContributors) {
+    ApplicationManager.getApplication().assertIsDispatchThread();
     myBuffer.flush(myFlushConsumer);
     myDelegateExecutor.execute(() -> myDelegateListener.searchFinished(hasMoreContributors));
+    cancelScheduledFlush();
   }
 
-  private void flushBufferIfNeeded() {
-    myBuffer.getOldestEventTime().ifPresent(time -> {
-      if (System.currentTimeMillis() - time > myThrottlingDelay) {
-        myBuffer.flush(myFlushConsumer);
-      }
-    });
+  private void scheduleFlushBuffer() {
+    ApplicationManager.getApplication().assertIsDispatchThread();
+
+    Runnable flushTask = () -> {
+      ApplicationManager.getApplication().assertIsDispatchThread();
+      if (!flushScheduled) return;
+      flushScheduled = false;
+      myBuffer.flush(myFlushConsumer);
+    };
+
+    if (!flushScheduled) {
+      flushAlarm.addRequest(flushTask, myThrottlingDelay);
+      flushScheduled = true;
+    }
+  }
+
+  private void cancelScheduledFlush() {
+    ApplicationManager.getApplication().assertIsDispatchThread();
+    flushAlarm.cancelAllRequests();
+    flushScheduled = false;
   }
 
   private static class Event {
@@ -74,30 +98,25 @@ class ThrottlingListenerWrapper implements MultithreadSearcher.Listener {
     static final int ADD = 1;
 
     final int type;
-    final List<SESearcher.ElementInfo> items;
+    final List<? extends SearchEverywhereFoundElementInfo> items;
 
-    Event(int type, List<SESearcher.ElementInfo> items) {
+    Event(int type, List<? extends SearchEverywhereFoundElementInfo> items) {
       this.type = type;
       this.items = items;
     }
   }
 
   private static class Buffer {
-    private final Queue<Pair<Event, Long>> myQueue = new ArrayDeque<>();
+    private final Queue<Event> myQueue = new ArrayDeque<>();
 
     public void addEvent(Event event) {
-      myQueue.add(Pair.create(event, System.currentTimeMillis()));
+      myQueue.add(event);
     }
 
-    public Optional<Long> getOldestEventTime() {
-      return Optional.ofNullable(myQueue.peek()).map(pair -> pair.second);
-    }
-
-    public void flush(BiConsumer<List<SESearcher.ElementInfo>, List<SESearcher.ElementInfo>> consumer) {
-      List<SESearcher.ElementInfo> added = new ArrayList<>();
-      List<SESearcher.ElementInfo> removed = new ArrayList<>();
-      myQueue.forEach(pair -> {
-        Event event = pair.first;
+    public void flush(BiConsumer<? super List<SearchEverywhereFoundElementInfo>, ? super List<SearchEverywhereFoundElementInfo>> consumer) {
+      List<SearchEverywhereFoundElementInfo> added = new ArrayList<>();
+      List<SearchEverywhereFoundElementInfo> removed = new ArrayList<>();
+      myQueue.forEach(event -> {
         if (event.type == Event.ADD) {
           added.addAll(event.items);
         } else {

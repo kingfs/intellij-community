@@ -30,11 +30,10 @@ import java.awt.*;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 public class EditorColorsSchemeImpl extends AbstractColorsScheme implements ExternalizableScheme {
-  private final Map<TextAttributesKey, TextAttributes> myAttributesTempMap = ContainerUtil.newConcurrentMap();
+  private final Map<String, TextAttributes> myAttributesTempMap = ContainerUtil.newConcurrentMap();
   
   public EditorColorsSchemeImpl(EditorColorsScheme parentScheme) {
     super(parentScheme);
@@ -49,10 +48,10 @@ public class EditorColorsSchemeImpl extends AbstractColorsScheme implements Exte
   @Override
   public void setAttributes(@NotNull TextAttributesKey key, @NotNull TextAttributes attributes) {
     if (TextAttributesKey.isTemp(key)) {
-      myAttributesTempMap.put(key, attributes);
+      myAttributesTempMap.put(key.getExternalName(), attributes);
     }
     else if (attributes == INHERITED_ATTRS_MARKER || !Comparing.equal(attributes, getDirectlyDefinedAttributes(key))) {
-      myAttributesMap.put(key, attributes);
+      myAttributesMap.put(key.getExternalName(), attributes);
       myAttributesTempMap.clear();
     }
   }
@@ -68,7 +67,7 @@ public class EditorColorsSchemeImpl extends AbstractColorsScheme implements Exte
   public TextAttributes getAttributes(@Nullable TextAttributesKey key) {
     if (key != null) {
       if (TextAttributesKey.isTemp(key)) {
-        return myAttributesTempMap.get(key);
+        return myAttributesTempMap.get(key.getExternalName());
       }
       
       TextAttributes attributes = getDirectlyDefinedAttributes(key);
@@ -134,13 +133,14 @@ public class EditorColorsSchemeImpl extends AbstractColorsScheme implements Exte
   }
 
   private boolean compareAttributes(@NotNull AbstractColorsScheme otherScheme,
-                                    @NotNull Collection<Function<TextAttributesKey, Boolean>> filters) {
-    for (TextAttributesKey key : myAttributesMap.keySet()) {
+                                    @NotNull Collection<Predicate<? super TextAttributesKey>> filters) {
+    for (String keyName : myAttributesMap.keySet()) {
+      TextAttributesKey key = TextAttributesKey.find(keyName);
       if (!isTextAttributeKeyIgnored(filters, key) && !getAttributes(key).equals(otherScheme.getAttributes(key))) {
         return false;
       }
     }
-    filters.add(key -> myAttributesMap.containsKey(key));
+    filters.add(key -> myAttributesMap.containsKey(key.getExternalName()));
     if (myParentScheme instanceof EditorColorsSchemeImpl &&
         !((EditorColorsSchemeImpl)myParentScheme).compareAttributes(otherScheme, filters)) {
       return false;
@@ -148,10 +148,10 @@ public class EditorColorsSchemeImpl extends AbstractColorsScheme implements Exte
     return true;
   }
 
-  private static boolean isTextAttributeKeyIgnored(@NotNull Collection<? extends Function<TextAttributesKey, Boolean>> filters,
+  private static boolean isTextAttributeKeyIgnored(@NotNull Collection<? extends Predicate<? super TextAttributesKey>> filters,
                                                    TextAttributesKey key) {
-    for (Function<TextAttributesKey, Boolean> filter : filters) {
-      if (filter.apply(key)) return true;
+    for (Predicate<? super TextAttributesKey> filter : filters) {
+      if (filter.test(key)) return true;
     }
     return false;
   }

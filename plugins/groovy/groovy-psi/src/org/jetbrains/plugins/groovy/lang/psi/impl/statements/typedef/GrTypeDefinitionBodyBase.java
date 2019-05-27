@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.groovy.lang.psi.impl.statements.typedef;
 
 import com.intellij.lang.ASTNode;
@@ -8,12 +8,12 @@ import com.intellij.psi.stubs.EmptyStub;
 import com.intellij.psi.stubs.IStubElementType;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
 import org.jetbrains.plugins.groovy.lang.lexer.TokenSets;
-import org.jetbrains.plugins.groovy.lang.parser.GroovyElementTypes;
+import org.jetbrains.plugins.groovy.lang.parser.GroovyEmptyStubElementTypes;
+import org.jetbrains.plugins.groovy.lang.parser.GroovyStubElementTypes;
 import org.jetbrains.plugins.groovy.lang.psi.GroovyElementVisitor;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.*;
 import org.jetbrains.plugins.groovy.lang.psi.api.statements.typedef.GrEnumDefinitionBody;
@@ -27,6 +27,7 @@ import org.jetbrains.plugins.groovy.lang.psi.api.toplevel.GrTopStatement;
 import org.jetbrains.plugins.groovy.lang.psi.impl.GrStubElementBase;
 import org.jetbrains.plugins.groovy.lang.psi.impl.PsiImplUtil;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -44,6 +45,7 @@ public abstract class GrTypeDefinitionBodyBase extends GrStubElementBase<EmptySt
   @Override
   public abstract void accept(@NotNull GroovyElementVisitor visitor);
 
+  @Override
   public String toString() {
     return "Type definition body";
   }
@@ -51,8 +53,8 @@ public abstract class GrTypeDefinitionBodyBase extends GrStubElementBase<EmptySt
   @NotNull
   @Override
   public GrField[] getFields() {
-    GrVariableDeclaration[] declarations = getStubOrPsiChildren(GroovyElementTypes.VARIABLE_DEFINITION, GrVariableDeclaration.ARRAY_FACTORY);
-    List<GrField> result = ContainerUtil.newArrayList();
+    GrVariableDeclaration[] declarations = getStubOrPsiChildren(GroovyStubElementTypes.VARIABLE_DECLARATION, GrVariableDeclaration.ARRAY_FACTORY);
+    List<GrField> result = new ArrayList<>();
     for (GrVariableDeclaration declaration : declarations) {
       GrVariable[] variables = declaration.getVariables();
       for (GrVariable variable : variables) {
@@ -148,7 +150,7 @@ public abstract class GrTypeDefinitionBodyBase extends GrStubElementBase<EmptySt
     }
 
     public GrClassBody(EmptyStub stub) {
-      super(stub, GroovyElementTypes.CLASS_BODY);
+      super(stub, GroovyEmptyStubElementTypes.CLASS_BODY);
     }
 
     @Override
@@ -164,13 +166,13 @@ public abstract class GrTypeDefinitionBodyBase extends GrStubElementBase<EmptySt
     }
 
     public GrEnumBody(EmptyStub stub) {
-      super(stub, GroovyElementTypes.ENUM_BODY);
+      super(stub, GroovyEmptyStubElementTypes.ENUM_BODY);
     }
 
     @Override
     @Nullable
     public GrEnumConstantList getEnumConstantList() {
-      return getStubOrPsiChild(GroovyElementTypes.ENUM_CONSTANTS);
+      return getStubOrPsiChild(GroovyEmptyStubElementTypes.ENUM_CONSTANTS);
     }
 
     @NotNull
@@ -203,7 +205,7 @@ public abstract class GrTypeDefinitionBodyBase extends GrStubElementBase<EmptySt
     ASTNode next;
     for (ASTNode child = first; child != afterLast; child = next) {
       next = child.getTreeNext();
-      if (child.getElementType() == GroovyElementTypes.CONSTRUCTOR_DEFINITION) {
+      if (child.getElementType() == GroovyStubElementTypes.CONSTRUCTOR) {
         ASTNode oldIdentifier = child.findChildByType(GroovyTokenTypes.mIDENT);
         ASTNode newIdentifier = ((GrTypeDefinition)getParent()).getNameIdentifierGroovy().getNode().copyElement();
         child.replaceChild(oldIdentifier, newIdentifier);

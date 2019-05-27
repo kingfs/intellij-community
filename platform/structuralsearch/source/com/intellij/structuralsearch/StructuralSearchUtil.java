@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch;
 
 import com.intellij.lang.Language;
@@ -7,14 +7,22 @@ import com.intellij.openapi.fileTypes.FileTypeManager;
 import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.fileTypes.StdFileTypes;
 import com.intellij.openapi.util.Key;
+import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
 import com.intellij.structuralsearch.plugin.ui.Configuration;
+import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.util.*;
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * @author Eugene.Kudelevsky
@@ -22,6 +30,7 @@ import java.util.*;
 public class StructuralSearchUtil {
   private static final String REG_EXP_META_CHARS = ".$|()[]{}^?*+\\";
   private static final Key<StructuralSearchProfile> STRUCTURAL_SEARCH_PROFILE_KEY = new Key<>("Structural Search Profile");
+  private static final Pattern ACCENTS = Pattern.compile("\\p{InCombiningDiacriticalMarks}+");
   private static LanguageFileType ourDefaultFileType = null;
 
   public static boolean ourUseUniversalMatchingAlgorithm = false;
@@ -74,7 +83,8 @@ public class StructuralSearchUtil {
            : StructuralSearchProfile.EP_NAME.getExtensions();
   }
 
-  public static FileType getDefaultFileType() {
+  @NotNull
+  public static LanguageFileType getDefaultFileType() {
     if (ourDefaultFileType == null) {
       for (StructuralSearchProfile profile : getProfiles()) {
         ourDefaultFileType = profile.getDefaultFileType(ourDefaultFileType);
@@ -83,7 +93,6 @@ public class StructuralSearchUtil {
         ourDefaultFileType = StdFileTypes.XML;
       }
     }
-    assert ourDefaultFileType instanceof LanguageFileType : "file type not valid for structural search: " + ourDefaultFileType.getName();
     return ourDefaultFileType;
   }
 
@@ -105,38 +114,27 @@ public class StructuralSearchUtil {
     return null;
   }
 
-  public static boolean isTypedVariable(@NotNull final String name) {
-    return name.length() > 1 && name.charAt(0)=='$' && name.charAt(name.length()-1)=='$';
+  public static boolean isTypedVariable(@NotNull String name) {
+    return name.length() > 1 && name.charAt(0) == '$' && name.charAt(name.length() - 1) == '$';
   }
 
   @Nullable
-  public static StructuralSearchProfile getProfileByFileType(FileType fileType) {
-    if (!(fileType instanceof LanguageFileType)) {
-      return null;
-    }
-    final LanguageFileType languageFileType = (LanguageFileType)fileType;
-    return getProfileByLanguage(languageFileType.getLanguage());
+  public static StructuralSearchProfile getProfileByFileType(LanguageFileType fileType) {
+    return getProfileByLanguage(fileType.getLanguage());
   }
 
   @NotNull
-  public static FileType[] getSuitableFileTypes() {
-    Set<FileType> allFileTypes = new HashSet<>();
-    Collections.addAll(allFileTypes, FileTypeManager.getInstance().getRegisteredFileTypes());
+  public static LanguageFileType[] getSuitableFileTypes() {
+    final FileType[] types = FileTypeManager.getInstance().getRegisteredFileTypes();
+    final Set<LanguageFileType> fileTypes = StreamEx.of(types).select(LanguageFileType.class).collect(Collectors.toSet());
     for (Language language : Language.getRegisteredLanguages()) {
-      FileType fileType = language.getAssociatedFileType();
+      final LanguageFileType fileType = language.getAssociatedFileType();
       if (fileType != null) {
-        allFileTypes.add(fileType);
+        fileTypes.add(fileType);
       }
     }
 
-    List<FileType> result = new ArrayList<>();
-    for (FileType fileType : allFileTypes) {
-      if (fileType instanceof LanguageFileType) {
-        result.add(fileType);
-      }
-    }
-
-    return result.toArray(FileType.EMPTY_ARRAY);
+    return fileTypes.toArray(new LanguageFileType[0]);
   }
 
   public static boolean containsRegExpMetaChar(String s) {
@@ -163,6 +161,16 @@ public class StructuralSearchUtil {
     return out;
   }
 
+  public static Pattern[] createPatterns(String[] prefixes) {
+    final Pattern[] patterns = new Pattern[prefixes.length];
+
+    for (int i = 0; i < prefixes.length; i++) {
+      final String s = shieldRegExpMetaChars(prefixes[i]);
+      patterns[i] = Pattern.compile("\\b(" + s + "\\w+)\\b");
+    }
+    return patterns;
+  }
+
   public static List<Configuration> getPredefinedTemplates() {
     if (ourPredefinedConfigurations == null) {
       final List<Configuration> result = new ArrayList<>();
@@ -178,5 +186,43 @@ public class StructuralSearchUtil {
   public static boolean isDocCommentOwner(PsiElement match) {
     final StructuralSearchProfile profile = getProfileByPsiElement(match);
     return profile != null && profile.isDocCommentOwner(match);
+  }
+
+  public static String getMeaningfulText(PsiElement matchedNode) {
+    final StructuralSearchProfile profile = getProfileByPsiElement(matchedNode);
+    return profile != null ? profile.getMeaningfulText(matchedNode) : matchedNode.getText();
+  }
+
+  public static String getAlternativeText(PsiElement matchedNode, String previousText) {
+    final StructuralSearchProfile profile = getProfileByPsiElement(matchedNode);
+    return profile != null ? profile.getAlternativeText(matchedNode, previousText) : null;
+  }
+
+  public static String normalizeWhiteSpace(@NotNull String text) {
+    text = text.trim();
+    final StringBuilder result = new StringBuilder();
+    boolean white = false;
+    for (int i = 0, length = text.length(); i < length; i++) {
+      final char c = text.charAt(i);
+      if (StringUtil.isWhiteSpace(c)) {
+        if (!white) {
+          result.append(' ');
+          white = true;
+        }
+      }
+      else {
+        white = false;
+        result.append(c);
+      }
+    }
+    return result.toString();
+  }
+
+  public static String stripAccents(@NotNull String input) {
+    return ACCENTS.matcher(Normalizer.normalize(input, Normalizer.Form.NFD)).replaceAll("");
+  }
+
+  public static String normalize(@NotNull String text) {
+    return stripAccents(normalizeWhiteSpace(text));
   }
 }

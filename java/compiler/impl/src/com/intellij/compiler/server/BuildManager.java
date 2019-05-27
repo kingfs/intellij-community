@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.compiler.server;
 
 import com.intellij.ProjectTopics;
@@ -20,7 +20,6 @@ import com.intellij.execution.runners.ExecutionEnvironment;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.PowerSaveMode;
 import com.intellij.ide.file.BatchFileChangeListener;
-import com.intellij.idea.StartupUtil;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.application.*;
@@ -59,7 +58,6 @@ import com.intellij.util.*;
 import com.intellij.util.concurrency.SequentialTaskExecutor;
 import com.intellij.util.containers.IntArrayList;
 import com.intellij.util.io.BaseOutputReader;
-import com.intellij.util.io.NettyKt;
 import com.intellij.util.io.PathKt;
 import com.intellij.util.io.storage.HeavyProcessLatch;
 import com.intellij.util.lang.JavaVersion;
@@ -70,8 +68,6 @@ import gnu.trove.THashSet;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInitializer;
-import io.netty.channel.EventLoopGroup;
-import io.netty.channel.oio.OioEventLoopGroup;
 import io.netty.handler.codec.protobuf.ProtobufDecoder;
 import io.netty.handler.codec.protobuf.ProtobufEncoder;
 import io.netty.handler.codec.protobuf.ProtobufVarint32FrameDecoder;
@@ -79,7 +75,8 @@ import io.netty.handler.codec.protobuf.ProtobufVarint32LengthFieldPrepender;
 import io.netty.util.internal.ThreadLocalRandom;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.io.BuiltInServer;
+import org.jetbrains.ide.BuiltInServerManager;
+import org.jetbrains.ide.BuiltInServerManagerImpl;
 import org.jetbrains.io.ChannelRegistrar;
 import org.jetbrains.jps.api.*;
 import org.jetbrains.jps.cmdline.BuildMain;
@@ -94,6 +91,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.SimpleDateFormat;
@@ -105,7 +103,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static com.intellij.openapi.util.Pair.pair;
-import static com.intellij.util.io.NettyKt.MultiThreadEventLoopGroup;
 import static org.jetbrains.jps.api.CmdlineRemoteProto.Message.ControllerMessage.ParametersMessage.TargetTypeBuildScope;
 
 /**
@@ -321,7 +318,7 @@ public class BuildManager implements Disposable {
     EditorFactory.getInstance().getEventMulticaster().addDocumentListener(new DocumentListener() {
       @Override
       public void documentChanged(@NotNull DocumentEvent e) {
-        if (Registry.is("compiler.document.save.enabled", true)) {
+        if (Registry.is("compiler.document.save.enabled", false)) {
           final Document document = e.getDocument();
           if (FileDocumentManager.getInstance().isDocumentUnsaved(document)) {
             final VirtualFile file = FileDocumentManager.getInstance().getFile(document);
@@ -335,8 +332,10 @@ public class BuildManager implements Disposable {
 
     ShutDownTracker.getInstance().registerShutdownTask(this::stopListening);
 
-    ScheduledFuture<?> future = JobScheduler.getScheduler().scheduleWithFixedDelay(() -> runCommand(myGCTask), 3, 180, TimeUnit.MINUTES);
-    Disposer.register(this, () -> future.cancel(false));
+    if (!IS_UNIT_TEST_MODE) {
+      ScheduledFuture<?> future = JobScheduler.getScheduler().scheduleWithFixedDelay(() -> runCommand(myGCTask), 3, 180, TimeUnit.MINUTES);
+      Disposer.register(this, () -> future.cancel(false));
+    }
   }
 
   @Nullable
@@ -536,7 +535,7 @@ public class BuildManager implements Disposable {
     final List<TargetTypeBuildScope> scopes = CmdlineProtoUtil.createAllModulesScopes(false);
     final AutoMakeMessageHandler handler = new AutoMakeMessageHandler(project);
     final TaskFuture future = scheduleBuild(
-      project, false, true, false, scopes, Collections.emptyList(), Collections.emptyMap(), handler
+      project, false, true, false, scopes, Collections.emptyList(), Collections.singletonMap(BuildParametersKeys.IS_AUTOMAKE, "true"), handler
     );
     if (future != null) {
       myAutomakeFutures.put(future, project);
@@ -610,7 +609,7 @@ public class BuildManager implements Disposable {
     return isValidProject(project)? project : null;
   }
 
-  private static boolean hasRunningProcess(Project project) {
+  private static boolean hasRunningProcess(@NotNull Project project) {
     for (ProcessHandler handler : ExecutionManager.getInstance(project).getRunningProcesses()) {
       if (!handler.isProcessTerminated() && !ALLOW_AUTOMAKE.get(handler, Boolean.FALSE)) { // active process
         return true;
@@ -619,7 +618,8 @@ public class BuildManager implements Disposable {
     return false;
   }
 
-  public Collection<TaskFuture> cancelAutoMakeTasks(Project project) {
+  @NotNull
+  public Collection<TaskFuture> cancelAutoMakeTasks(@NotNull Project project) {
     final Collection<TaskFuture> futures = new SmartList<>();
     synchronized (myAutomakeFutures) {
       for (Map.Entry<TaskFuture, Project> entry : myAutomakeFutures.entrySet()) {
@@ -644,6 +644,9 @@ public class BuildManager implements Disposable {
   }
 
   private void cancelPreloadedBuilds(final String projectPath) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug("Cancel preloaded build for " + projectPath + "\n" + getThreadTrace(Thread.currentThread(), 50));
+    }
     runCommand(() -> {
       Pair<RequestFuture<PreloadedProcessMessageHandler>, OSProcessHandler> pair = takePreloadedProcess(projectPath);
       if (pair != null) {
@@ -888,7 +891,7 @@ public class BuildManager implements Disposable {
     if (project.isDisposed()) {
       return true;
     }
-    for (BuildProcessParametersProvider provider : project.getExtensions(BuildProcessParametersProvider.EP_NAME)) {
+    for (BuildProcessParametersProvider provider : BuildProcessParametersProvider.EP_NAME.getExtensionList(project)) {
       if (!provider.isProcessPreloadingEnabled()) {
         return false;
       }
@@ -1061,8 +1064,6 @@ public class BuildManager implements Disposable {
     final CompilerWorkspaceConfiguration config = CompilerWorkspaceConfiguration.getInstance(project);
     final GeneralCommandLine cmdLine = new GeneralCommandLine();
     cmdLine.setExePath(vmExecutablePath);
-    //cmdLine.addParameter("-XX:MaxPermSize=150m");
-    //cmdLine.addParameter("-XX:ReservedCodeCacheSize=64m");
 
     boolean isProfilingMode = false;
     String userDefinedHeapSize = null;
@@ -1125,6 +1126,12 @@ public class BuildManager implements Disposable {
       cmdLine.addParameter("-D"+ GlobalOptions.GENERATE_CLASSPATH_INDEX_OPTION +"=" + shouldGenerateIndex);
     }
     cmdLine.addParameter("-D" + GlobalOptions.COMPILE_PARALLEL_OPTION + "=" + config.PARALLEL_COMPILATION);
+    if (config.PARALLEL_COMPILATION) {
+      final boolean allowParallelAutomake = Registry.is("compiler.automake.allow.parallel", true);
+      if (!allowParallelAutomake) {
+        cmdLine.addParameter("-D" + GlobalOptions.ALLOW_PARALLEL_AUTOMAKE_OPTION + "=false");
+      }
+    }
     cmdLine.addParameter("-D" + GlobalOptions.REBUILD_ON_DEPENDENCY_CHANGE_OPTION + "=" + config.REBUILD_ON_DEPENDENCY_CHANGE);
 
     if (Registry.is("compiler.build.report.statistics")) {
@@ -1163,10 +1170,6 @@ public class BuildManager implements Disposable {
       }
     }
 
-    if (!Registry.is("compiler.process.use.memory.temp.cache")) {
-      cmdLine.addParameter("-D"+ GlobalOptions.USE_MEMORY_TEMP_CACHE_OPTION + "=false");
-    }
-
     // javac's VM should use the same default locale that IDEA uses in order for javac to print messages in 'correct' language
     cmdLine.setCharset(mySystemCharset);
     cmdLine.addParameter("-D" + CharsetToolkit.FILE_ENCODING_PROPERTY + "=" + mySystemCharset.name());
@@ -1199,7 +1202,7 @@ public class BuildManager implements Disposable {
       cmdLine.addParameter("-Djava.io.tmpdir=" + FileUtil.toSystemIndependentName(projectSystemRoot.getPath()) + "/" + TEMP_DIR_NAME);
     }
 
-    for (BuildProcessParametersProvider provider : project.getExtensions(BuildProcessParametersProvider.EP_NAME)) {
+    for (BuildProcessParametersProvider provider : BuildProcessParametersProvider.EP_NAME.getExtensionList(project)) {
       final List<String> args = provider.getVMArguments();
       cmdLine.addParameters(args);
     }
@@ -1351,7 +1354,7 @@ public class BuildManager implements Disposable {
   @Nullable
   private static Pair<Date, File> readUsageFile(File usageFile) {
     try {
-      List<String> lines = FileUtil.loadLines(usageFile, CharsetToolkit.UTF8_CHARSET.name());
+      List<String> lines = FileUtil.loadLines(usageFile, StandardCharsets.UTF_8.name());
       if (!lines.isEmpty()) {
         final String dateString = lines.get(0);
         final Date date;
@@ -1374,12 +1377,9 @@ public class BuildManager implements Disposable {
   }
 
   private int startListening() {
-    BuiltInServer mainServer = StartupUtil.getServer();
-    boolean isOwnEventLoopGroup = mainServer == null || mainServer.getEventLoopGroup() instanceof OioEventLoopGroup;
-    EventLoopGroup group = isOwnEventLoopGroup
-                           ? MultiThreadEventLoopGroup(1, ConcurrencyUtil.newNamedThreadFactory("External compiler"))
-                           : mainServer.getEventLoopGroup();
-    final ServerBootstrap bootstrap = NettyKt.serverBootstrap(group);
+    BuiltInServerManager builtInServerManager = BuiltInServerManager.getInstance();
+    builtInServerManager.waitForStart();
+    ServerBootstrap bootstrap = ((BuiltInServerManagerImpl)builtInServerManager).createServerBootstrap();
     bootstrap.childHandler(new ChannelInitializer() {
       @Override
       protected void initChannel(@NotNull Channel channel) {
@@ -1392,7 +1392,7 @@ public class BuildManager implements Disposable {
       }
     });
     Channel serverChannel = bootstrap.bind(InetAddress.getLoopbackAddress(), 0).syncUninterruptibly().channel();
-    myChannelRegistrar.setServerChannel(serverChannel, isOwnEventLoopGroup);
+    myChannelRegistrar.setServerChannel(serverChannel, false);
     return ((InetSocketAddress)serverChannel.localAddress()).getPort();
   }
 
@@ -1954,6 +1954,7 @@ public class BuildManager implements Disposable {
     @Override
     public void cancel(RequestFuture<T> future) {
       myMessageDispatcher.cancelSession(future.getRequestID());
+      notifySessionTerminationIfNeeded(future.getRequestID(), null);
     }
   }
 }

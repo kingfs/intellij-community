@@ -1,9 +1,9 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.replace.impl;
 
 import com.intellij.codeInsight.template.Template;
 import com.intellij.codeInsight.template.TemplateManager;
-import com.intellij.openapi.fileTypes.FileType;
+import com.intellij.openapi.fileTypes.LanguageFileType;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.PsiElement;
@@ -19,12 +19,12 @@ import com.intellij.structuralsearch.plugin.replace.ReplaceOptions;
 import com.intellij.structuralsearch.plugin.replace.ReplacementInfo;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.SmartList;
+import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * @author maxim
@@ -86,7 +86,7 @@ public final class ReplacementBuilder {
       parameterizations.add(info);
     }
 
-    FileType fileType = options.getMatchOptions().getFileType();
+    final LanguageFileType fileType = options.getMatchOptions().getFileType();
     final StructuralSearchProfile profile = StructuralSearchUtil.getProfileByFileType(fileType);
     if (profile != null) {
       try {
@@ -122,7 +122,7 @@ public final class ReplacementBuilder {
     }
   }
 
-  String process(MatchResult match, ReplacementInfo replacementInfo, FileType type) {
+  String process(MatchResult match, ReplacementInfo replacementInfo, LanguageFileType type) {
     if (parameterizations.isEmpty()) {
       return replacement;
     }
@@ -155,7 +155,7 @@ public final class ReplacementBuilder {
     if (scriptSupport == null) {
       final String constraint = options.getVariableDefinition(info.getName()).getScriptCodeConstraint();
       final List<String> variableNames =
-        options.getVariableDefinitions().stream().map(o -> o.getName()).collect(Collectors.toList());
+        ContainerUtil.map(options.getVariableDefinitions(), o -> o.getName());
       scriptSupport = new ScriptSupport(myProject, StringUtil.unquoteString(constraint), info.getName(), variableNames);
       replacementVarsMap.put(info.getName(), scriptSupport);
     }

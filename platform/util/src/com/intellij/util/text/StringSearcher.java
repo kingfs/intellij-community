@@ -22,7 +22,6 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
-import java.util.Locale;
 
 public class StringSearcher {
   private final String myPattern;
@@ -57,10 +56,10 @@ public class StringSearcher {
     myPattern = pattern;
     myCaseSensitive = caseSensitive;
     myForwardDirection = forwardDirection;
-    char[] chars = myCaseSensitive ? myPattern.toCharArray() : myPattern.toLowerCase(Locale.US).toCharArray();
+    char[] chars = myCaseSensitive ? myPattern.toCharArray() : StringUtil.toLowerCase(myPattern).toCharArray();
     if (chars.length != myPattern.length()) {
       myLowercaseTransform = false;
-      chars = myPattern.toUpperCase(Locale.US).toCharArray();
+      chars = StringUtil.toUpperCase(myPattern).toCharArray();
     } else {
       myLowercaseTransform = true;
     }
@@ -171,19 +170,18 @@ public class StringSearcher {
     }
     else {
       int start = 1;
-      int end = _end + 1;
-      while (start <= end - myPatternLength + 1) {
+      while (start <= _end - myPatternLength + 1) {
         int i = myPatternLength - 1;
-        char lastChar = normalizedCharAt(text, textArray, end - (start + i));
+        char lastChar = normalizedCharAt(text, textArray, _end - (start + i));
 
         if (isSameChar(myPatternArray[myPatternLength - 1 - i], lastChar)) {
           i--;
           while (i >= 0) {
-            char c = textArray != null ? textArray[end - (start + i)] : text.charAt(end - (start + i));
+            char c = textArray != null ? textArray[_end - (start + i)] : text.charAt(_end - (start + i));
             if (!isSameChar(myPatternArray[myPatternLength - 1 - i], c)) break;
             i--;
           }
-          if (i < 0) return end - start - myPatternLength + 1;
+          if (i < 0) return _end - start - myPatternLength + 1;
         }
 
         int step = lastChar < 128 ? mySearchTable[lastChar] : 1;

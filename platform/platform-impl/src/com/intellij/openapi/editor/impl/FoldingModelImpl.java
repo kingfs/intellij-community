@@ -62,30 +62,16 @@ public class FoldingModelImpl extends InlayModel.SimpleAdapter
     myIsFoldingEnabled = true;
     myIsBatchFoldingProcessing = false;
     myDoNotCollapseCaret = false;
-    myRegionTree = new HardReferencingRangeMarkerTree<FoldRegionImpl>(editor.getDocument()) {
-      @NotNull
-      @Override
-      protected Node<FoldRegionImpl> createNewNode(@NotNull FoldRegionImpl key,
-                                                   int start,
-                                                   int end,
-                                                   boolean greedyToLeft,
-                                                   boolean greedyToRight,
-                                                   boolean stickingToRight,
-                                                   int layer) {
-        return new Node<FoldRegionImpl>(this, key, start, end, greedyToLeft, greedyToRight, stickingToRight) {
-          @Override
-          void onRemoved() {
-            for (Getter<FoldRegionImpl> getter : intervals) {
-              removeRegionFromGroup(getter.get());
-            }
-          }
-        };
-      }
-    };
+    myRegionTree = new MyMarkerTree(editor.getDocument());
     myFoldTree = new FoldRegionsTree(myRegionTree) {
       @Override
       protected boolean isFoldingEnabled() {
         return FoldingModelImpl.this.isFoldingEnabled();
+      }
+
+      @Override
+      protected boolean hasBlockInlays() {
+        return myEditor.getInlayModel().hasBlockElements();
       }
 
       @Override
@@ -113,24 +99,6 @@ public class FoldingModelImpl extends InlayModel.SimpleAdapter
   public boolean hasDocumentRegionChangedFor(@NotNull FoldRegion region) {
     assertReadAccess();
     return region instanceof FoldRegionImpl && ((FoldRegionImpl)region).hasDocumentRegionChanged();
-  }
-
-  @NotNull
-  FoldRegion getFirstRegion(@NotNull FoldingGroup group, @NotNull FoldRegion child) {
-    final List<FoldRegion> regions = getGroupedRegions(group);
-    if (regions.isEmpty()) {
-      final boolean inAll = Arrays.asList(getAllFoldRegions()).contains(child);
-      throw new AssertionError("Folding group without children; the known child is in all: " + inAll);
-    }
-
-    FoldRegion main = regions.get(0);
-    for (int i = 1; i < regions.size(); i++) {
-      FoldRegion region = regions.get(i);
-      if (main.getStartOffset() > region.getStartOffset()) {
-        main = region;
-      }
-    }
-    return main;
   }
 
   public int getEndOffset(@NotNull FoldingGroup group) {
@@ -363,12 +331,12 @@ public class FoldingModelImpl extends InlayModel.SimpleAdapter
     }
 
     List<Caret> carets = myEditor.getCaretModel().getAllCarets();
-    for (Caret caret : carets) {
-      LogicalPosition caretPosition = caret.getLogicalPosition();
-      int caretOffset = myEditor.logicalPositionToOffset(caretPosition);
+    if (myDoNotCollapseCaret) {
+      for (Caret caret : carets) {
+        LogicalPosition caretPosition = caret.getLogicalPosition();
+        int caretOffset = myEditor.logicalPositionToOffset(caretPosition);
 
-      if (FoldRegionsTree.containsStrict(region, caretOffset)) {
-        if (myDoNotCollapseCaret) return;
+        if (FoldRegionsTree.containsStrict(region, caretOffset)) return;
       }
     }
     for (Caret caret : carets) {
@@ -399,59 +367,60 @@ public class FoldingModelImpl extends InlayModel.SimpleAdapter
     myEditor.getGutterComponentEx().repaint();
     myEditor.invokeDelayedErrorStripeRepaint();
 
-    for (Caret caret : myEditor.getCaretModel().getAllCarets()) {
-      // There is a possible case that caret position is already visual position aware. But visual position depends on number of folded
-      // logical lines as well, hence, we can't be sure that target logical position defines correct visual position because fold
-      // regions have just changed. Hence, we use 'raw' logical position instead.
-      LogicalPosition caretPosition = caret.getLogicalPosition();
-      int caretOffset = myEditor.logicalPositionToOffset(caretPosition);
-      int selectionStart = caret.getSelectionStart();
-      int selectionEnd = caret.getSelectionEnd();
+    myEditor.getCaretModel().runBatchCaretOperation(() -> {
+      for (Caret caret : myEditor.getCaretModel().getAllCarets()) {
+        // There is a possible case that caret position is already visual position aware. But visual position depends on number of folded
+        // logical lines as well, hence, we can't be sure that target logical position defines correct visual position because fold
+        // regions have just changed. Hence, we use 'raw' logical position instead.
+        LogicalPosition caretPosition = caret.getLogicalPosition();
+        int caretOffset = myEditor.logicalPositionToOffset(caretPosition);
+        int selectionStart = caret.getSelectionStart();
+        int selectionEnd = caret.getSelectionEnd();
 
-      LogicalPosition positionToUse = null;
-      int offsetToUse = -1;
+        LogicalPosition positionToUse = null;
+        int offsetToUse = -1;
 
-      FoldRegion collapsed = myFoldTree.fetchOutermost(caretOffset);
-      SavedCaretPosition savedPosition = caret.getUserData(SAVED_CARET_POSITION);
-      boolean markedForUpdate = caret.getUserData(MARK_FOR_UPDATE) != null;
+        FoldRegion collapsed = myFoldTree.fetchOutermost(caretOffset);
+        SavedCaretPosition savedPosition = caret.getUserData(SAVED_CARET_POSITION);
+        boolean markedForUpdate = caret.getUserData(MARK_FOR_UPDATE) != null;
 
-      if (savedPosition != null && savedPosition.isUpToDate(myEditor)) {
-        int savedOffset = myEditor.logicalPositionToOffset(savedPosition.position);
-        FoldRegion collapsedAtSaved = myFoldTree.fetchOutermost(savedOffset);
-        if (collapsedAtSaved == null) {
-          positionToUse = savedPosition.position;
+        if (savedPosition != null && savedPosition.isUpToDate(myEditor)) {
+          int savedOffset = myEditor.logicalPositionToOffset(savedPosition.position);
+          FoldRegion collapsedAtSaved = myFoldTree.fetchOutermost(savedOffset);
+          if (collapsedAtSaved == null) {
+            positionToUse = savedPosition.position;
+          }
+          else {
+            offsetToUse = collapsedAtSaved.getStartOffset();
+          }
         }
-        else {
-          offsetToUse = collapsedAtSaved.getStartOffset();
+
+        if (collapsed != null && positionToUse == null) {
+          positionToUse = myEditor.offsetToLogicalPosition(collapsed.getStartOffset());
+        }
+
+        if ((markedForUpdate || moveCaretFromCollapsedRegion) && caret.isUpToDate()) {
+          if (offsetToUse >= 0) {
+            caret.moveToOffset(offsetToUse);
+          }
+          else if (positionToUse != null) {
+            caret.moveToLogicalPosition(positionToUse);
+          }
+          else {
+            ((CaretImpl)caret).updateVisualPosition();
+          }
+        }
+
+        caret.putUserData(SAVED_CARET_POSITION, savedPosition);
+        caret.putUserData(MARK_FOR_UPDATE, null);
+
+        if (isOffsetInsideCollapsedRegion(selectionStart) || isOffsetInsideCollapsedRegion(selectionEnd)) {
+          caret.removeSelection();
+        } else if (selectionStart < myEditor.getDocument().getTextLength()) {
+          caret.setSelection(selectionStart, selectionEnd);
         }
       }
-
-      if (collapsed != null && positionToUse == null) {
-        positionToUse = myEditor.offsetToLogicalPosition(collapsed.getStartOffset());
-      }
-
-      if ((markedForUpdate || moveCaretFromCollapsedRegion) && caret.isUpToDate()) {
-        if (offsetToUse >= 0) {
-          caret.moveToOffset(offsetToUse);
-        }
-        else if (positionToUse != null) {
-          caret.moveToLogicalPosition(positionToUse);
-        }
-        else {
-          ((CaretImpl)caret).updateVisualPosition();
-        }
-      }
-
-      caret.putUserData(SAVED_CARET_POSITION, savedPosition);
-      caret.putUserData(MARK_FOR_UPDATE, null);
-
-      if (isOffsetInsideCollapsedRegion(selectionStart) || isOffsetInsideCollapsedRegion(selectionEnd)) {
-        caret.removeSelection();
-      } else if (selectionStart < myEditor.getDocument().getTextLength()) {
-        caret.setSelection(selectionStart, selectionEnd);
-      }
-    }
-
+    });
     if (mySavedCaretShift > 0) {
       final ScrollingModel scrollingModel = myEditor.getScrollingModel();
       scrollingModel.disableAnimation();
@@ -580,7 +549,8 @@ public class FoldingModelImpl extends InlayModel.SimpleAdapter
 
   @Override
   public void onUpdated(@NotNull Inlay inlay) {
-    myFoldTree.clearCachedInlayValues();
+    Inlay.Placement placement = inlay.getPlacement();
+    if (placement == Inlay.Placement.ABOVE_LINE || placement == Inlay.Placement.BELOW_LINE) myFoldTree.clearCachedInlayValues();
   }
 
   @Nullable
@@ -713,6 +683,83 @@ public class FoldingModelImpl extends InlayModel.SimpleAdapter
 
     private boolean isUpToDate(Editor editor) {
       return docStamp == editor.getDocument().getModificationStamp();
+    }
+  }
+
+  private class MyMarkerTree extends HardReferencingRangeMarkerTree<FoldRegionImpl> {
+    private boolean inCollectCall;
+
+    private MyMarkerTree(Document document) {
+      super(document);
+    }
+
+    @NotNull
+    private FoldRegionImpl getRegion(@NotNull IntervalNode<FoldRegionImpl> node) {
+      assert node.intervals.size() == 1;
+      FoldRegionImpl region = node.intervals.get(0).get();
+      assert region != null;
+      return region;
+    }
+
+    @NotNull
+    @Override
+    protected Node<FoldRegionImpl> createNewNode(@NotNull FoldRegionImpl key,
+                                                 int start,
+                                                 int end,
+                                                 boolean greedyToLeft,
+                                                 boolean greedyToRight,
+                                                 boolean stickingToRight,
+                                                 int layer) {
+      return new Node<FoldRegionImpl>(this, key, start, end, greedyToLeft, greedyToRight, stickingToRight) {
+        @Override
+        void onRemoved() {
+          for (Getter<FoldRegionImpl> getter : intervals) {
+            removeRegionFromGroup(getter.get());
+          }
+        }
+
+        @Override
+        void addIntervalsFrom(@NotNull IntervalNode<FoldRegionImpl> otherNode) {
+          FoldRegionImpl region = getRegion(this);
+          FoldRegionImpl otherRegion = getRegion(otherNode);
+          if (otherRegion.mySizeBeforeUpdate > region.mySizeBeforeUpdate) {
+            setNode(region, null);
+            removeRegionFromGroup(region);
+            removeIntervalInternal(0);
+            super.addIntervalsFrom(otherNode);
+          }
+          else {
+            otherNode.setValid(false);
+            ((RMNode)otherNode).onRemoved();
+          }
+        }
+      };
+    }
+
+    @Override
+    boolean collectAffectedMarkersAndShiftSubtrees(@Nullable IntervalNode<FoldRegionImpl> root,
+                                                   @NotNull DocumentEvent e,
+                                                   @NotNull List<? super IntervalNode<FoldRegionImpl>> affected) {
+      if (inCollectCall) return super.collectAffectedMarkersAndShiftSubtrees(root, e, affected);
+      inCollectCall = true;
+      boolean result;
+      try {
+        result = super.collectAffectedMarkersAndShiftSubtrees(root, e, affected);
+      }
+      finally {
+        inCollectCall = false;
+      }
+      if (e.getOldLength() > 0 /* document change can cause regions to become equal*/) {
+        for (Object o : affected) {
+          //noinspection unchecked
+          Node<FoldRegionImpl> node = (Node<FoldRegionImpl>)o;
+          FoldRegionImpl region = getRegion(node);
+          // region with the largest metric value is kept when several regions become identical after document change
+          // we want the largest collapsed region to survive
+          region.mySizeBeforeUpdate = region.isExpanded() ? 0 : node.intervalEnd() - node.intervalStart();
+        }
+      }
+      return result;
     }
   }
 }

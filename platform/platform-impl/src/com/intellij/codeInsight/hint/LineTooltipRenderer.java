@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2014 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.hint;
 
 import com.intellij.ide.BrowserUtil;
@@ -25,7 +11,6 @@ import com.intellij.openapi.actionSystem.IdeActions;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.ui.*;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.GridBag;
 import com.intellij.util.ui.Html;
 import com.intellij.util.ui.JBUI;
@@ -43,7 +28,6 @@ import javax.swing.*;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.HyperlinkListener;
 import java.awt.*;
-import java.awt.event.FocusEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -55,9 +39,17 @@ import java.util.ArrayList;
  */
 public class LineTooltipRenderer extends ComparableObject.Impl implements TooltipRenderer {
 
+  /**
+   * Html-like text for showing
+   * Please note that the tooltip size is calculated dynamically based on the html so
+   * if the html content doesn't allow soft line breaks the tooltip can be too big for showing
+   * e.g.
+   * <br>
+   * very nbsp; long nbsp; text nbsp; with nbsp; 'nbsp;' as spaces cannot be break
+   */
   @NonNls @Nullable protected String myText;
 
-  //is used for suppressing some events while processing links  
+  //is used for suppressing some events while processing links
   private volatile boolean myActiveLink;
   //mostly is used as a marker that we are in popup with description
   protected final int myCurrentWidth;
@@ -78,7 +70,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
   }
 
   @NotNull
-  private JPanel createMainPanel(@NotNull final HintHint hintHint, @NotNull JComponent pane, @NotNull JEditorPane editorPane) {
+  private static JPanel createMainPanel(@NotNull final HintHint hintHint, @NotNull JComponent pane, @NotNull JEditorPane editorPane) {
     JPanel grid = new JPanel(new GridBagLayout()) {
       @Override
       public AccessibleContext getAccessibleContext() {
@@ -133,8 +125,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
       correctLocation(editor, editorPane, p, alignToRight, expanded, myCurrentWidth);
     }
 
-    final JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(editorPane);
-    scrollPane.setBorder(null);
+    JScrollPane scrollPane = ScrollPaneFactory.createScrollPane(editorPane, true);
 
     scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED);
     scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
@@ -146,11 +137,12 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
     scrollPane.getViewport().setBackground(hintHint.getTextBackground());
     scrollPane.setViewportBorder(null);
 
+    editorPane.setBorder(JBUI.Borders.emptyBottom(2));
     if (hintHint.isRequestFocus()) {
       editorPane.setFocusable(true);
     }
 
-    ArrayList<AnAction> actions = ContainerUtil.newArrayList();
+    ArrayList<AnAction> actions = new ArrayList<>();
     JPanel grid = createMainPanel(hintHint, scrollPane, editorPane);
     if (ScreenReader.isActive()) {
       grid.setFocusTraversalPolicyProvider(true);
@@ -199,7 +191,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
       public void actionPerformed(@NotNull final AnActionEvent e) {
         // The tooltip gets the focus if using a screen reader and invocation through a keyboard shortcut.
         hintHint.setRequestFocus(ScreenReader.isActive() && e.getInputEvent() instanceof KeyEvent);
-        ActionsCollector.getInstance().record("tooltip.actions.show.description.shortcut", getClass());
+        ActionsCollector.getInstance().record("tooltip.actions.show.description.shortcut", e.getInputEvent(), getClass());
         reloader.reload(!expanded);
       }
     });
@@ -227,7 +219,7 @@ public class LineTooltipRenderer extends ComparableObject.Impl implements Toolti
             return;
           }
 
-          ActionsCollector.getInstance().record("tooltip.actions.show.description.morelink", getClass());
+          ActionsCollector.getInstance().record("tooltip.actions.show.description.morelink", e.getInputEvent(), getClass());
 
           reloader.reload(!expanded);
         }

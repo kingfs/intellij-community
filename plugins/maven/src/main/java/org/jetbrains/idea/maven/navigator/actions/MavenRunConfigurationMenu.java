@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.navigator.actions;
 
 import com.intellij.execution.Executor;
@@ -31,14 +31,16 @@ public class MavenRunConfigurationMenu extends DefaultActionGroup implements Dum
 
     final Project project = e.getProject();
 
-    final RunnerAndConfigurationSettings settings = MavenDataKeys.RUN_CONFIGURATION.getData(e.getDataContext());
+    final RunnerAndConfigurationSettings settings = e.getData(MavenDataKeys.RUN_CONFIGURATION);
 
     if (settings == null || project == null) return;
 
     Executor[] executors = ExecutorRegistry.getInstance().getRegisteredExecutors();
     for (int i = executors.length; --i >= 0; ) {
-      final ProgramRunner runner = ProgramRunner.getRunner(executors[i].getId(), settings.getConfiguration());
-      AnAction action = new ExecuteMavenRunConfigurationAction(executors[i], runner != null, settings);
+      Executor executor = executors[i];
+      if(!executor.isApplicable(project)) continue;
+      final ProgramRunner runner = ProgramRunner.getRunner(executor.getId(), settings.getConfiguration());
+      AnAction action = new ExecuteMavenRunConfigurationAction(executor, runner != null, settings);
       addAction(action, Constraints.FIRST);
     }
 
@@ -69,7 +71,6 @@ public class MavenRunConfigurationMenu extends DefaultActionGroup implements Dum
 
     @Override
     public void update(@NotNull AnActionEvent e) {
-      super.update(e);
       e.getPresentation().setEnabled(myEnabled);
     }
   }

@@ -13,7 +13,7 @@ import com.intellij.codeInspection.*;
 import com.intellij.codeInspection.ex.*;
 import com.intellij.codeInspection.ui.InspectionToolPresentation;
 import com.intellij.concurrency.JobLauncher;
-import com.intellij.ide.plugins.PluginManagerCore;
+import com.intellij.diagnostic.PluginException;
 import com.intellij.injected.editor.DocumentWindow;
 import com.intellij.lang.Language;
 import com.intellij.lang.annotation.HighlightSeverity;
@@ -40,6 +40,7 @@ import com.intellij.profile.codeInspection.ProjectInspectionProfileManager;
 import com.intellij.psi.*;
 import com.intellij.util.*;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.Interner;
 import com.intellij.util.containers.SmartHashSet;
 import com.intellij.util.containers.WeakInterner;
 import com.intellij.util.ui.UIUtil;
@@ -51,6 +52,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -70,7 +72,8 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
   private final String myShortcutText;
   private final SeverityRegistrar mySeverityRegistrar;
   private final InspectionProfileWrapper myProfileWrapper;
-  private final Map<String, Set<PsiElement>> mySuppressedElements = new HashMap<>();
+  private final Map<String, Set<PsiElement>> mySuppressedElements = new ConcurrentHashMap<>();
+  private final boolean myInspectInjectedPsi;
 
   public LocalInspectionsPass(@NotNull PsiFile file,
                               @Nullable Document document,
@@ -78,7 +81,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
                               int endOffset,
                               @NotNull TextRange priorityRange,
                               boolean ignoreSuppressed,
-                              @NotNull HighlightInfoProcessor highlightInfoProcessor) {
+                              @NotNull HighlightInfoProcessor highlightInfoProcessor, boolean inspectInjectedPsi) {
     super(file.getProject(), document, PRESENTABLE_NAME, file, null, new TextRange(startOffset, endOffset), true, highlightInfoProcessor);
     assert file.isPhysical() : "can't inspect non-physical file: " + file + "; " + file.getVirtualFile();
     myPriorityRange = priorityRange;
@@ -98,6 +101,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     myProfileWrapper = custom == null ? new InspectionProfileWrapper(profileToUse) : custom.apply(profileToUse);
     assert myProfileWrapper != null;
     mySeverityRegistrar = myProfileWrapper.getInspectionProfile().getProfileManager().getSeverityRegistrar();
+    myInspectInjectedPsi = inspectInjectedPsi;
 
     // initial guess
     setProgressLimit(300 * 2);
@@ -129,7 +133,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
                                @NotNull final List<? extends LocalInspectionToolWrapper> toolWrappers) {
     final ProgressIndicator progress = ProgressManager.getInstance().getProgressIndicator();
     inspect(new ArrayList<>(toolWrappers), iManager, false, progress);
-    addDescriptorsFromInjectedResults(iManager, context);
+    addDescriptorsFromInjectedResults(context);
     List<InspectionResult> resultList = result.get(getFile());
     if (resultList == null) return;
     for (InspectionResult inspectionResult : resultList) {
@@ -159,7 +163,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
                                                    toolWrapper.getTool());
   }
 
-  private void addDescriptorsFromInjectedResults(@NotNull InspectionManager iManager, @NotNull GlobalInspectionContextImpl context) {
+  private void addDescriptorsFromInjectedResults(@NotNull GlobalInspectionContextImpl context) {
     for (Map.Entry<PsiFile, List<InspectionResult>> entry : result.entrySet()) {
       PsiFile file = entry.getKey();
       if (file == getFile()) continue; // not injected
@@ -195,9 +199,9 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
 
     List<InspectionContext> init = visitPriorityElementsAndInit(toolToSpecifiedLanguageIds, iManager, isOnTheFly, progress, inside, session,
                                                                 elementDialectIds);
-    inspectInjectedPsi(inside, isOnTheFly, progress, iManager, true, toolWrappers);
+    Set<PsiFile> alreadyVisitedInjected = inspectInjectedPsi(inside, isOnTheFly, progress, iManager, true, toolWrappers, Collections.emptySet());
     visitRestElementsAndCleanup(progress, outside, session, init, elementDialectIds);
-    inspectInjectedPsi(outside, isOnTheFly, progress, iManager, false, toolWrappers);
+    inspectInjectedPsi(outside, isOnTheFly, progress, iManager, false, toolWrappers, alreadyVisitedInjected);
     ProgressManager.checkCanceled();
 
     myInfos = new ArrayList<>();
@@ -208,8 +212,8 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
 
   private void highlightRedundantSuppressions(@NotNull List<? extends LocalInspectionToolWrapper> toolWrappers,
                                               @NotNull InspectionManager iManager,
-                                              List<PsiElement> inside, 
-                                              List<PsiElement> outside, 
+                                              List<? extends PsiElement> inside,
+                                              List<? extends PsiElement> outside,
                                               Set<String> elementDialectIds) {
     HighlightDisplayKey key = HighlightDisplayKey.find(RedundantSuppressInspection.SHORT_NAME);
     final InspectionProfileImpl inspectionProfile = myProfileWrapper.getInspectionProfile();
@@ -253,13 +257,14 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     final List<InspectionContext> init = new ArrayList<>();
     List<Map.Entry<LocalInspectionToolWrapper, Set<String>>> entries = new ArrayList<>(toolToSpecifiedLanguageIds.entrySet());
 
+    PsiFile file = session.getFile();
     Processor<Map.Entry<LocalInspectionToolWrapper, Set<String>>> processor = pair ->
-      AstLoadingFilter.disallowTreeLoading(() -> {
+      AstLoadingFilter.disallowTreeLoading(() -> AstLoadingFilter.<Boolean, RuntimeException>forceAllowTreeLoading(file, () -> {
         LocalInspectionToolWrapper toolWrapper = pair.getKey();
         Set<String> dialectIdsSpecifiedForTool = pair.getValue();
         runToolOnElements(toolWrapper, dialectIdsSpecifiedForTool, iManager, isOnTheFly, indicator, elements, session, init, elementDialectIds);
         return true;
-      });
+      }));
     boolean result = JobLauncher.getInstance().invokeConcurrentlyUnderProgress(entries, indicator, processor);
     if (!result) throw new ProcessCanceledException();
     return init;
@@ -331,26 +336,32 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     }
   }
 
-  void inspectInjectedPsi(@NotNull final List<? extends PsiElement> elements,
-                          final boolean onTheFly,
-                          @NotNull final ProgressIndicator indicator,
-                          @NotNull final InspectionManager iManager,
-                          final boolean inVisibleRange,
-                          @NotNull final List<? extends LocalInspectionToolWrapper> wrappers) {
-    final Set<PsiFile> injected = new THashSet<>();
+  @NotNull
+  Set<PsiFile> inspectInjectedPsi(@NotNull final List<? extends PsiElement> elements,
+                                  final boolean onTheFly,
+                                  @NotNull final ProgressIndicator indicator,
+                                  @NotNull final InspectionManager iManager,
+                                  final boolean inVisibleRange,
+                                  @NotNull final List<? extends LocalInspectionToolWrapper> wrappers,
+                                  @NotNull Set<? extends PsiFile> alreadyVisitedInjected) {
+    if (!myInspectInjectedPsi) return Collections.emptySet();
+    Set<PsiFile> injected = new THashSet<>();
     for (PsiElement element : elements) {
       PsiFile containingFile = getFile();
       InjectedLanguageManager.getInstance(containingFile.getProject()).enumerateEx(element, containingFile, false,
                                                                                    (injectedPsi, places) -> injected.add(injectedPsi));
     }
-    if (injected.isEmpty()) return;
-    Processor<PsiFile> processor = injectedPsi -> {
-      doInspectInjectedPsi(injectedPsi, onTheFly, indicator, iManager, inVisibleRange, wrappers);
-      return true;
-    };
-    if (!JobLauncher.getInstance().invokeConcurrentlyUnderProgress(new ArrayList<>(injected), indicator, processor)) {
-      throw new ProcessCanceledException();
+    injected.removeAll(alreadyVisitedInjected);
+    if (!injected.isEmpty()) {
+      Processor<PsiFile> processor = injectedPsi -> {
+        doInspectInjectedPsi(injectedPsi, onTheFly, indicator, iManager, inVisibleRange, wrappers);
+        return true;
+      };
+      if (!JobLauncher.getInstance().invokeConcurrentlyUnderProgress(new ArrayList<>(injected), indicator, processor)) {
+        throw new ProcessCanceledException();
+      }
     }
+    return injected;
   }
 
   private static final TextAttributes NONEMPTY_TEXT_ATTRIBUTES = new TextAttributes() {
@@ -505,7 +516,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     if (!inspectionProfile.isToolEnabled(key, getFile())) return;
 
     HighlightInfoType type = new InspectionHighlightInfoType(level, element);
-    final String plainMessage = message.startsWith("<html>") ? StringUtil.unescapeXml(XmlStringUtil.stripHtml(message).replaceAll("<[^>]*>", "")) : message;
+    final String plainMessage = message.startsWith("<html>") ? StringUtil.unescapeXmlEntities(XmlStringUtil.stripHtml(message).replaceAll("<[^>]*>", "")) : message;
     @NonNls String link = "";
     if (showToolDescription(toolWrapper)) {
       link = " <a "
@@ -528,14 +539,14 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
     PsiFile myContext = getTopLevelFileInBaseLanguage(getFile());
     if (context != getFile()) {
       String errorMessage = "Reported element " + element +
-                       " is not from the file '" + file +
+                       " is not from the file '" + file.getVirtualFile().getPath() +
                        "' the inspection '" + toolWrapper +
                        "' (" + tool.getClass() +
                        ") was invoked for. Message: '" + descriptor + "'.\nElement' containing file: " +
                        context + "\nInspection invoked for file: " + myContext + "\n";
-      LOG.error(PluginManagerCore.createPluginException(errorMessage, null, tool.getClass()));
+      PluginException.logPluginError(LOG, errorMessage, null, tool.getClass());
     }
-    boolean isInjected = file != getFile();
+    boolean isInjected = myInspectInjectedPsi && file != getFile();
     if (!isInjected) {
       outInfos.add(info);
       return;
@@ -583,7 +594,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
   }
 
 
-  private static final WeakInterner<String> tooltips = new WeakInterner<>();
+  private static final Interner<String> tooltips = new WeakInterner<>();
 
   private static boolean showToolDescription(@NotNull LocalInspectionToolWrapper tool) {
     return tool.getStaticDescription() == null || !tool.getStaticDescription().isEmpty();
@@ -728,6 +739,7 @@ public class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass
         @Override
         public void registerProblem(@NotNull ProblemDescriptor descriptor) {
           if (host != null && myIgnoreSuppressed && SuppressionUtil.inspectionResultSuppressed(host, tool)) {
+            mySuppressedElements.computeIfAbsent(wrapper.getID(), shortName -> new HashSet<>()).add(host);
             return;
           }
           super.registerProblem(descriptor);

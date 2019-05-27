@@ -1,8 +1,9 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
-
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.groovy.lang.psi.impl.types;
 
 import com.intellij.lang.ASTNode;
+import com.intellij.psi.PsiElement;
+import com.intellij.psi.PsiListLikeElement;
 import com.intellij.psi.PsiType;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.plugins.groovy.lang.lexer.GroovyTokenTypes;
@@ -11,11 +12,17 @@ import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeArgumentList;
 import org.jetbrains.plugins.groovy.lang.psi.api.types.GrTypeElement;
 import org.jetbrains.plugins.groovy.lang.psi.impl.GroovyPsiElementImpl;
 
+import java.util.Arrays;
+import java.util.List;
+
+import static com.intellij.psi.util.PsiTreeUtil.countChildrenOfType;
+
 /**
  * @author: Dmitry.Krasilschikov
  * @date: 28.03.2007
  */
-public class GrTypeArgumentListImpl extends GroovyPsiElementImpl implements GrTypeArgumentList {
+public class GrTypeArgumentListImpl extends GroovyPsiElementImpl implements GrTypeArgumentList, PsiListLikeElement {
+
   public GrTypeArgumentListImpl(@NotNull ASTNode node) {
     super(node);
   }
@@ -25,8 +32,14 @@ public class GrTypeArgumentListImpl extends GroovyPsiElementImpl implements GrTy
     visitor.visitTypeArgumentList(this);
   }
 
+  @Override
   public String toString() {
     return "Type arguments";
+  }
+
+  @Override
+  public int getTypeArgumentCount() {
+    return countChildrenOfType(this, GrTypeElement.class);
   }
 
   @Override
@@ -48,7 +61,7 @@ public class GrTypeArgumentListImpl extends GroovyPsiElementImpl implements GrTy
 
   @Override
   public boolean isDiamond() {
-    return getTypeArgumentElements().length == 0;
+    return findChildByClass(GrTypeElement.class) == null;
   }
 
   @Override
@@ -73,5 +86,11 @@ public class GrTypeArgumentListImpl extends GroovyPsiElementImpl implements GrTy
     else {
       return super.addInternal(first, last, anchor, before);
     }
+  }
+
+  @NotNull
+  @Override
+  public List<? extends PsiElement> getComponents() {
+    return Arrays.asList(getTypeArgumentElements());
   }
 }

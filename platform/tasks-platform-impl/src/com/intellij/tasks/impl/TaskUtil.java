@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.tasks.impl;
 
@@ -17,7 +17,6 @@ import com.intellij.tasks.CommitPlaceholderProvider;
 import com.intellij.tasks.LocalTask;
 import com.intellij.tasks.Task;
 import com.intellij.tasks.TaskRepository;
-import com.intellij.util.JdomKt;
 import com.intellij.util.NullableFunction;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.text.DateFormatUtil;
@@ -58,8 +57,7 @@ public class TaskUtil {
   public static String formatTask(@NotNull Task task, String format) {
 
     Map map = formatFromExtensions(task instanceof LocalTask ? (LocalTask)task : new LocalTaskImpl(task));
-
-    format = format.replaceAll("\\{", "\\$\\{").replaceAll("\\$\\$\\{", "\\$\\{");
+    format = updateToVelocity(format);
     try {
       return FileTemplateUtil.mergeTemplate(map, format, false);
     }
@@ -162,7 +160,7 @@ public class TaskUtil {
     if (!Comparing.equal(t1.getCreated(), t2.getCreated())) return false;
     if (!Comparing.equal(t1.getUpdated(), t2.getUpdated())) return false;
     if (!Comparing.equal(t1.getIssueUrl(), t2.getIssueUrl())) return false;
-    if (!Comparing.equal(t1.getComments(), t2.getComments())) return false;
+    if (!Arrays.equals(t1.getComments(), t2.getComments())) return false;
     if (!Comparing.equal(t1.getIcon(), t2.getIcon())) return false;
     if (!Comparing.equal(t1.getCustomIcon(), t2.getCustomIcon())) return false;
     return Comparing.equal(t1.getRepository(), t2.getRepository());
@@ -213,7 +211,7 @@ public class TaskUtil {
   public static void prettyFormatXmlToLog(@NotNull Logger logger, @NotNull String xml) {
     if (logger.isDebugEnabled()) {
       try {
-        logger.debug("\n" + JDOMUtil.createOutputter("\n").outputString(JdomKt.loadElement(xml)));
+        logger.debug("\n" + JDOMUtil.createOutputter("\n").outputString(JDOMUtil.load(xml)));
       }
       catch (Exception e) {
         logger.debug(e);
@@ -283,5 +281,9 @@ public class TaskUtil {
     }
 
     return NameUtil.buildMatcher(builder.toString(), NameUtil.MatchingCaseSensitivity.NONE);
+  }
+
+  static String updateToVelocity(String format) {
+    return format.replaceAll("\\{", "\\$\\{").replaceAll("\\$\\$\\{", "\\$\\{");
   }
 }

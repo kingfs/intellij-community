@@ -4,21 +4,19 @@ package com.intellij.codeInspection;
 import com.intellij.codeInsight.Nullability;
 import com.intellij.codeInspection.dataFlow.NullabilityUtil;
 import com.intellij.codeInspection.util.LambdaGenerationUtil;
+import com.intellij.codeInspection.util.OptionalRefactoringUtil;
 import com.intellij.codeInspection.util.OptionalUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Ref;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleManager;
-import com.intellij.psi.codeStyle.JavaCodeStyleManager;
-import com.intellij.psi.codeStyle.SuggestedNameInfo;
 import com.intellij.psi.codeStyle.VariableKind;
-import com.intellij.psi.impl.PsiDiamondTypeUtil;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiTypesUtil;
 import com.intellij.psi.util.PsiUtil;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.ObjectUtils;
+import com.siyeh.ig.callMatcher.CallMatcher;
 import com.siyeh.ig.psiutils.*;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.Nls;
@@ -31,6 +29,9 @@ import static com.intellij.codeInsight.PsiEquivalenceUtil.areElementsEquivalent;
 
 public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspectionTool {
   private static final Logger LOG = Logger.getInstance(OptionalIsPresentInspection.class);
+
+  private static final CallMatcher OPTIONAL_IS_PRESENT =
+    CallMatcher.instanceCall(CommonClassNames.JAVA_UTIL_OPTIONAL, "isPresent").parameterCount(0);
 
   private static final OptionalIsPresentCase[] CASES = {
     new ReturnCase(),
@@ -135,14 +136,8 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
   @Nullable
   @Contract("null -> null")
   static PsiReferenceExpression extractOptionalFromIsPresentCheck(PsiExpression expression) {
-    if (!(expression instanceof PsiMethodCallExpression)) return null;
-    PsiMethodCallExpression call = (PsiMethodCallExpression)expression;
-    if (!call.getArgumentList().isEmpty()) return null;
-    if (!"isPresent".equals(call.getMethodExpression().getReferenceName())) return null;
-    PsiMethod method = call.resolveMethod();
-    if (method == null) return null;
-    PsiClass containingClass = method.getContainingClass();
-    if (containingClass == null || !CommonClassNames.JAVA_UTIL_OPTIONAL.equals(containingClass.getQualifiedName())) return null;
+    PsiMethodCallExpression call = ObjectUtils.tryCast(expression, PsiMethodCallExpression.class);
+    if (!OPTIONAL_IS_PRESENT.matches(call)) return null;
     PsiReferenceExpression qualifier =
       ObjectUtils.tryCast(call.getMethodExpression().getQualifierExpression(), PsiReferenceExpression.class);
     if (qualifier == null) return null;
@@ -153,12 +148,10 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
 
   @Contract("null, _ -> false")
   static boolean isOptionalGetCall(PsiElement element, @NotNull PsiReferenceExpression optionalRef) {
-    if (!(element instanceof PsiMethodCallExpression)) return false;
-    PsiMethodCallExpression call = (PsiMethodCallExpression)element;
-    if (!call.getArgumentList().isEmpty()) return false;
-    PsiReferenceExpression methodExpression = call.getMethodExpression();
-    return "get".equals(methodExpression.getReferenceName()) &&
-           areElementsEquivalent(ExpressionUtils.getQualifierOrThis(methodExpression), optionalRef);
+    PsiMethodCallExpression call = ObjectUtils.tryCast(element, PsiMethodCallExpression.class);
+    if (!OptionalUtil.JDK_OPTIONAL_GET.matches(call)) return false;
+    PsiExpression qualifier = ExpressionUtils.getEffectiveQualifier(call.getMethodExpression());
+    return qualifier != null && areElementsEquivalent(qualifier, optionalRef);
   }
 
   @NotNull
@@ -191,10 +184,16 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
       }
       PsiType falseType = falseExpression.getType();
       PsiType trueType = expression.getType();
-      // like x ? double_expression : integer_expression; support only if integer_expression is simple literal,
-      // so could be converted explicitly to double
-      if (falseType instanceof PsiPrimitiveType && trueType instanceof PsiPrimitiveType &&
-          !falseType.equals(trueType) && JavaPsiMathUtil.getNumberFromLiteral(falseExpression) == null) {
+      if (falseType == null || trueType == null) return ProblemType.NONE;
+      if (falseType instanceof PsiPrimitiveType && trueType instanceof PsiPrimitiveType) {
+        if (falseType.equals(trueType) || JavaPsiMathUtil.getNumberFromLiteral(falseExpression) != null) {
+          // like x ? double_expression : integer_expression; support only if integer_expression is simple literal,
+          // so could be converted explicitly to double
+          return ProblemType.WARNING;
+        }
+        return ProblemType.NONE;
+      }
+      if (!trueType.isAssignableFrom(falseType)) {
         return ProblemType.NONE;
       }
     }
@@ -207,10 +206,8 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
                                        PsiReferenceExpression optionalRef,
                                        PsiElement trueValue) {
     PsiType type = optionalRef.getType();
-    JavaCodeStyleManager javaCodeStyleManager = JavaCodeStyleManager.getInstance(trueValue.getProject());
-    SuggestedNameInfo info = javaCodeStyleManager.suggestVariableName(VariableKind.PARAMETER, null, null, type);
-    String baseName = ObjectUtils.coalesce(ArrayUtil.getFirstElement(info.names), "value");
-    String paramName = javaCodeStyleManager.suggestUniqueVariableName(baseName, trueValue, true);
+    String paramName = new VariableNameGenerator(trueValue, VariableKind.PARAMETER)
+      .byType(OptionalUtil.getOptionalElementType(type)).byName("value").generate(true);
     if(trueValue instanceof PsiExpressionStatement) {
       trueValue = ((PsiExpressionStatement)trueValue).getExpression();
     }
@@ -242,8 +239,8 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
     String lambdaText = generateOptionalLambda(factory, ct, optionalRef, trueValue);
     PsiLambdaExpression lambda = (PsiLambdaExpression)factory.createExpressionFromText(lambdaText, trueValue);
     PsiExpression body = Objects.requireNonNull((PsiExpression)lambda.getBody());
-    return OptionalUtil.generateOptionalUnwrap(optionalRef.getText(), lambda.getParameterList().getParameters()[0],
-                                               body, ct.markUnchanged(falseValue), targetType, true);
+    return OptionalRefactoringUtil.generateOptionalUnwrap(optionalRef.getText(), lambda.getParameterList().getParameters()[0],
+                                                          body, ct.markUnchanged(falseValue), targetType, true);
   }
 
   static boolean isSimpleOrUnchecked(PsiExpression expression) {
@@ -279,13 +276,17 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
       PsiElement cond = PsiTreeUtil.getParentOfType(element, PsiIfStatement.class, PsiConditionalExpression.class);
       PsiElement thenElement;
       PsiElement elseElement;
-      if(cond instanceof PsiIfStatement) {
+      if (cond instanceof PsiIfStatement) {
         thenElement = extractThenStatement((PsiIfStatement)cond, invert);
         elseElement = extractElseStatement((PsiIfStatement)cond, invert);
-      } else if(cond instanceof PsiConditionalExpression) {
+      }
+      else if (cond instanceof PsiConditionalExpression) {
         thenElement = invert ? ((PsiConditionalExpression)cond).getElseExpression() : ((PsiConditionalExpression)cond).getThenExpression();
         elseElement = invert ? ((PsiConditionalExpression)cond).getThenExpression() : ((PsiConditionalExpression)cond).getElseExpression();
-      } else return;
+      }
+      else {
+        return;
+      }
       if (myScenario.getProblemType(optionalRef, thenElement, elseElement) == ProblemType.NONE) return;
       PsiElementFactory factory = JavaPsiFacade.getElementFactory(project);
       CommentTracker ct = new CommentTracker();
@@ -294,7 +295,7 @@ public class OptionalIsPresentInspection extends AbstractBaseJavaLocalInspection
       if (elseElement != null && !PsiTreeUtil.isAncestor(cond, elseElement, true)) ct.delete(elseElement);
       PsiElement result = ct.replaceAndRestoreComments(cond, replacementText);
       LambdaCanBeMethodReferenceInspection.replaceAllLambdasWithMethodReferences(result);
-      PsiDiamondTypeUtil.removeRedundantTypeArguments(result);
+      RemoveRedundantTypeArgumentsUtil.removeRedundantTypeArguments(result);
       CodeStyleManager.getInstance(project).reformat(result);
     }
   }

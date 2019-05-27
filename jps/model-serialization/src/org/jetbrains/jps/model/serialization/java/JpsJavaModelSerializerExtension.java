@@ -69,6 +69,8 @@ public class JpsJavaModelSerializerExtension extends JpsModelSerializerExtension
   public static final String IS_GENERATED_ATTRIBUTE = "generated";
   public static final JavaSourceRootPropertiesSerializer JAVA_SOURCE_ROOT_PROPERTIES_SERIALIZER =
     new JavaSourceRootPropertiesSerializer(JavaSourceRootType.SOURCE, JpsModuleRootModelSerializer.JAVA_SOURCE_ROOT_TYPE_ID);
+  public static final String JAVA_RESOURCE_ROOT_ID = "java-resource";
+  public static final String JAVA_TEST_RESOURCE_ROOT_ID = "java-test-resource";
 
   @Override
   public void loadRootModel(@NotNull JpsModule module, @NotNull Element rootModel) {
@@ -98,6 +100,7 @@ public class JpsJavaModelSerializerExtension extends JpsModelSerializerExtension
   public List<? extends JpsProjectExtensionSerializer> getProjectExtensionSerializers() {
     return Arrays.asList(new JavaProjectExtensionSerializer(),
                          new JpsJavaCompilerConfigurationSerializer(),
+                         new JpsValidationSerializer(),
                          new JpsJavaCompilerNotNullableSerializer(),
                          new JpsCompilerValidationExcludeSerializer(),
                          new JpsJavaCompilerWorkspaceConfigurationSerializer(),
@@ -111,8 +114,8 @@ public class JpsJavaModelSerializerExtension extends JpsModelSerializerExtension
   public List<? extends JpsModuleSourceRootPropertiesSerializer<?>> getModuleSourceRootPropertiesSerializers() {
     return Arrays.asList(JAVA_SOURCE_ROOT_PROPERTIES_SERIALIZER,
                          new JavaSourceRootPropertiesSerializer(JavaSourceRootType.TEST_SOURCE, JpsModuleRootModelSerializer.JAVA_TEST_ROOT_TYPE_ID),
-                         new JavaResourceRootPropertiesSerializer(JavaResourceRootType.RESOURCE, "java-resource"),
-                         new JavaResourceRootPropertiesSerializer(JavaResourceRootType.TEST_RESOURCE, "java-test-resource"));
+                         new JavaResourceRootPropertiesSerializer(JavaResourceRootType.RESOURCE, JAVA_RESOURCE_ROOT_ID),
+                         new JavaResourceRootPropertiesSerializer(JavaResourceRootType.TEST_RESOURCE, JAVA_TEST_RESOURCE_ROOT_ID));
   }
 
   @Override
@@ -207,7 +210,7 @@ public class JpsJavaModelSerializerExtension extends JpsModelSerializerExtension
 
     final String languageLevel = rootModelComponent.getAttributeValue(MODULE_LANGUAGE_LEVEL_ATTRIBUTE);
     if (languageLevel != null) {
-      extension.setLanguageLevel(LanguageLevel.valueOf(languageLevel));
+      extension.setLanguageLevel(readLanguageLevel(languageLevel, null));
     }
 
     loadAdditionalRoots(rootModelComponent, ANNOTATION_PATHS_TAG, extension.getAnnotationRoots());
@@ -319,6 +322,15 @@ public class JpsJavaModelSerializerExtension extends JpsModelSerializerExtension
     }
   }
 
+  private static LanguageLevel readLanguageLevel(String level, LanguageLevel defaultLevel) {
+    for (LanguageLevel languageLevel : LanguageLevel.values()) {
+      if (level.equals(languageLevel.name())) {
+        return languageLevel;
+      }
+    }
+    return defaultLevel;
+  }
+
   private static class JavaProjectExtensionSerializer extends JpsProjectExtensionSerializer {
     JavaProjectExtensionSerializer() {
       super(null, "ProjectRootManager");
@@ -336,7 +348,7 @@ public class JpsJavaModelSerializerExtension extends JpsModelSerializerExtension
       }
       String languageLevel = componentTag.getAttributeValue(LANGUAGE_LEVEL_ATTRIBUTE);
       if (languageLevel != null) {
-        extension.setLanguageLevel(LanguageLevel.valueOf(languageLevel));
+        extension.setLanguageLevel(readLanguageLevel(languageLevel, LanguageLevel.HIGHEST));
       }
     }
 

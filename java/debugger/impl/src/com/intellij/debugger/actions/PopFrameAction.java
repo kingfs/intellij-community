@@ -327,7 +327,8 @@ public class PopFrameAction extends DebuggerAction implements DumbAware {
       enable = proxy.getVirtualMachine().canPopFrames();
     }
 
-    if(ActionPlaces.isMainMenuOrActionSearch(e.getPlace()) || ActionPlaces.DEBUGGER_TOOLBAR.equals(e.getPlace())) {
+    if((ActionPlaces.isMainMenuOrActionSearch(e.getPlace()) || ActionPlaces.DEBUGGER_TOOLBAR.equals(e.getPlace()))
+        && isInJavaSession(e)) {
       e.getPresentation().setEnabled(enable);
     }
     else {

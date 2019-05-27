@@ -6,7 +6,6 @@ import com.intellij.diagnostic.logging.LogFilesManager;
 import com.intellij.diagnostic.logging.OutputFileUtil;
 import com.intellij.execution.configurations.RunConfigurationBase;
 import com.intellij.execution.configurations.RunProfile;
-import com.intellij.execution.configurations.SearchScopeProvider;
 import com.intellij.execution.process.ProcessHandler;
 import com.intellij.execution.ui.ExecutionConsole;
 import com.intellij.execution.ui.RunContentDescriptor;
@@ -17,6 +16,7 @@ import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.actionSystem.LangDataKeys;
 import com.intellij.openapi.project.Project;
 import com.intellij.psi.search.GlobalSearchScope;
+import com.intellij.psi.search.GlobalSearchScopes;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -31,13 +31,13 @@ public abstract class RunTab implements DataProvider, Disposable {
 
   protected ExecutionEnvironment myEnvironment;
   protected final Project myProject;
-  private final GlobalSearchScope mySearchScope;
+  protected final GlobalSearchScope mySearchScope;
 
   private LogConsoleManagerBase logConsoleManager;
 
   protected RunTab(@NotNull ExecutionEnvironment environment, @NotNull String runnerType) {
     this(environment.getProject(),
-         SearchScopeProvider.createSearchScope(environment.getProject(), environment.getRunProfile()),
+         GlobalSearchScopes.executionScope(environment.getProject(), environment.getRunProfile()),
          runnerType,
          environment.getExecutor().getId(),
          environment.getRunProfile().getName());

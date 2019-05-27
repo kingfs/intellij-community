@@ -161,12 +161,8 @@ public class GitTagDialog extends DialogWrapper {
       try {
         messageFile = FileUtil.createTempFile(MESSAGE_FILE_PREFIX, MESSAGE_FILE_SUFFIX);
         messageFile.deleteOnExit();
-        Writer out = new OutputStreamWriter(new FileOutputStream(messageFile), MESSAGE_FILE_ENCODING);
-        try {
+        try (Writer out = new OutputStreamWriter(new FileOutputStream(messageFile), MESSAGE_FILE_ENCODING)) {
           out.write(message);
-        }
-        finally {
-          out.close();
         }
       }
       catch (IOException ex) {
@@ -187,7 +183,8 @@ public class GitTagDialog extends DialogWrapper {
         h.addParameters("-f");
       }
       if (hasMessage) {
-        h.addParameters("-F", messageFile.getAbsolutePath());
+        h.addParameters("-F");
+        h.addAbsoluteFile(messageFile);
       }
       h.addParameters(myTagNameTextField.getText());
       String object = myCommitTextField.getText().trim();
@@ -206,7 +203,7 @@ public class GitTagDialog extends DialogWrapper {
 
       GitRepository repository = GitUtil.getRepositoryManager(myProject).getRepositoryForRoot(getGitRoot());
       if (repository != null) {
-        repository.getRepositoryFiles().refresh();
+        repository.getRepositoryFiles().refreshTagsFiles();
       }
       else {
         LOG.error("No repository registered for root: " + getGitRoot());

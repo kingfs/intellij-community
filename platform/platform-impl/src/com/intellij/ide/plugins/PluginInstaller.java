@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.plugins;
 
 import com.intellij.ide.IdeBundle;
@@ -7,6 +7,7 @@ import com.intellij.notification.Notification;
 import com.intellij.notification.NotificationType;
 import com.intellij.notification.Notifications;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ModalityState;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
 import com.intellij.openapi.diagnostic.Logger;
@@ -17,13 +18,11 @@ import com.intellij.openapi.updateSettings.impl.PluginDownloader;
 import com.intellij.openapi.updateSettings.impl.UpdateSettings;
 import com.intellij.openapi.util.Ref;
 import com.intellij.openapi.util.text.StringUtil;
-import com.intellij.ui.GuiUtils;
 import com.intellij.util.ArrayUtil;
 import com.intellij.util.SmartList;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.UIUtil;
 import gnu.trove.THashSet;
-import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -35,7 +34,6 @@ import java.util.zip.ZipFile;
 
 /**
  * @author stathik
- * @since Nov 29, 2003
  */
 public class PluginInstaller {
   private static final Logger LOG = Logger.getInstance(PluginInstaller.class);
@@ -73,7 +71,7 @@ public class PluginInstaller {
     List<String> hosts = ContainerUtil.newSmartList();
     ContainerUtil.addIfNotNull(hosts, ApplicationInfoEx.getInstanceEx().getBuiltinPluginsUrl());
     hosts.addAll(UpdateSettings.getInstance().getPluginHosts());
-    Map<PluginId, IdeaPluginDescriptor> allPlugins = ContainerUtil.newHashMap();
+    Map<PluginId, IdeaPluginDescriptor> allPlugins = new HashMap<>();
     for (String host : hosts) {
       try {
         List<IdeaPluginDescriptor> descriptors = RepositoryHelper.loadPlugins(host, indicator);
@@ -133,7 +131,7 @@ public class PluginInstaller {
     installedDependant.add(pluginNode);
 
     // check for dependent plugins at first.
-    if (pluginNode.getDepends() != null && pluginNode.getDepends().size() > 0) {
+    if (pluginNode.getDepends() != null && !pluginNode.getDepends().isEmpty()) {
       // prepare plugins list for install
       final PluginId[] optionalDependentPluginIds = pluginNode.getOptionalDependentPluginIds();
       final List<PluginNode> depends = new ArrayList<>();
@@ -142,7 +140,7 @@ public class PluginInstaller {
         PluginId depPluginId = pluginNode.getDepends().get(i);
         if (PluginManager.isPluginInstalled(depPluginId) || PluginManagerCore.isModuleDependency(depPluginId) ||
             InstalledPluginsState.getInstance().wasInstalled(depPluginId) ||
-            (pluginIds != null && pluginIds.contains(depPluginId))) {
+            pluginIds != null && pluginIds.contains(depPluginId)) {
           // ignore installed or installing plugins
           continue;
         }
@@ -151,7 +149,8 @@ public class PluginInstaller {
         PluginNode depPlugin;
         if (depPluginDescriptor instanceof PluginNode) {
           depPlugin = (PluginNode) depPluginDescriptor;
-        } else {
+        }
+        else {
           depPlugin = new PluginNode(depPluginId, depPluginId.getIdString(), "-1");
         }
 
@@ -165,15 +164,15 @@ public class PluginInstaller {
         }
       }
 
-      if (depends.size() > 0) { // has something to install prior installing the plugin
+      if (!depends.isEmpty()) { // has something to install prior installing the plugin
         final boolean[] proceed = new boolean[1];
         try {
-          GuiUtils.runOrInvokeAndWait(() -> {
+          ApplicationManager.getApplication().invokeAndWait(() -> {
             String title = IdeBundle.message("plugin.manager.dependencies.detected.title");
             String deps = StringUtil.join(depends, node -> node.getName(), ", ");
             String message = IdeBundle.message("plugin.manager.dependencies.detected.message", depends.size(), deps);
             proceed[0] = Messages.showYesNoDialog(message, title, Messages.getWarningIcon()) == Messages.YES;
-          });
+          }, ModalityState.any());
         }
         catch (Exception e) {
           return false;
@@ -183,15 +182,15 @@ public class PluginInstaller {
         }
       }
 
-      if (optionalDeps.size() > 0) {
+      if (!optionalDeps.isEmpty()) {
         final boolean[] proceed = new boolean[1];
         try {
-          GuiUtils.runOrInvokeAndWait(() -> {
+          ApplicationManager.getApplication().invokeAndWait(() -> {
             String title = IdeBundle.message("plugin.manager.dependencies.detected.title");
             String deps = StringUtil.join(optionalDeps, node -> node.getName(), ", ");
             String message = IdeBundle.message("plugin.manager.optional.dependencies.detected.message", optionalDeps.size(), deps);
             proceed[0] = Messages.showYesNoDialog(message, title, Messages.getWarningIcon()) == Messages.YES;
-          });
+          }, ModalityState.any());
         }
         catch (Exception e) {
           return false;
@@ -203,10 +202,9 @@ public class PluginInstaller {
     }
 
     Ref<IdeaPluginDescriptor> toDisable = Ref.create(null);
-    Optional<PluginReplacement> replacement = StreamEx.of(PluginReplacement.EP_NAME.getExtensions())
-      .findFirst(r -> r.getNewPluginId().equals(pluginNode.getPluginId().getIdString()));
-    if (replacement.isPresent()) {
-      PluginReplacement pluginReplacement = replacement.get();
+    PluginReplacement pluginReplacement = ContainerUtil.find(PluginReplacement.EP_NAME.getExtensions(),
+      r -> r.getNewPluginId().equals(pluginNode.getPluginId().getIdString()));
+    if (pluginReplacement != null) {
       IdeaPluginDescriptor oldPlugin = PluginManager.getPlugin(pluginReplacement.getOldPluginDescriptor().getPluginId());
       if (oldPlugin == null) {
         LOG.warn("Plugin with id '" + pluginReplacement.getOldPluginDescriptor().getPluginId() + "' not found");
@@ -228,7 +226,7 @@ public class PluginInstaller {
       synchronized (ourLock) {
         downloader.install();
       }
-      pluginNode.setStatus(PluginNode.STATUS_DOWNLOADED);
+      pluginNode.setStatus(PluginNode.Status.DOWNLOADED);
       if (!toDisable.isNull()) {
         pluginEnabler.disablePlugins(Collections.singleton(toDisable.get()));
       }
@@ -309,30 +307,26 @@ public class PluginInstaller {
     throw new IOException("Corrupted archive (no file entries): " + zip);
   }
 
-  private static List<PluginStateListener> myStateListeners;
+  private static final List<PluginStateListener> myStateListeners = ContainerUtil.createLockFreeCopyOnWriteList();
 
   public static void addStateListener(@NotNull PluginStateListener listener) {
-    (myStateListeners != null ? myStateListeners : (myStateListeners = new ArrayList<>())).add(listener);
+    myStateListeners.add(listener);
   }
 
   public static void removeStateListener(@NotNull PluginStateListener listener) {
-    if (myStateListeners != null) {
-      myStateListeners.remove(listener);
-    }
+    myStateListeners.remove(listener);
   }
 
   private static void fireState(@NotNull IdeaPluginDescriptor descriptor, boolean install) {
-    if (myStateListeners != null) {
-      UIUtil.invokeLaterIfNeeded(() -> {
-        for (PluginStateListener listener : myStateListeners) {
-          if (install) {
-            listener.install(descriptor);
-          }
-          else {
-            listener.uninstall(descriptor);
-          }
+    UIUtil.invokeLaterIfNeeded(() -> {
+      for (PluginStateListener listener : myStateListeners) {
+        if (install) {
+          listener.install(descriptor);
         }
-      });
-    }
+        else {
+          listener.uninstall(descriptor);
+        }
+      }
+    });
   }
 }

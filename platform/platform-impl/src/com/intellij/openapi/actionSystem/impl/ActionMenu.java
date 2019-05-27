@@ -13,6 +13,7 @@ import com.intellij.openapi.ui.JBPopupMenu;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.IconLoader;
 import com.intellij.openapi.util.SystemInfo;
+import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.wm.IdeFocusManager;
 import com.intellij.openapi.wm.IdeFrame;
 import com.intellij.openapi.wm.StatusBar;
@@ -36,6 +37,7 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 
 public final class ActionMenu extends JBMenu {
+  private static final boolean KEEP_MENU_HIERARCHY = SystemInfo.isMacSystemMenu && Registry.is("keep.menu.hierarchy", false);
   private final String myPlace;
   private DataContext myContext;
   private final ActionRef<ActionGroup> myGroup;
@@ -69,9 +71,6 @@ public final class ActionMenu extends JBMenu {
     // addNotify won't be called for menus in MacOS system menu
     if (SystemInfo.isMacSystemMenu) {
       installSynchronizer();
-    }
-    if (UIUtil.isUnderIntelliJLaF()) {
-      setOpaque(true);
     }
 
     // Triggering initialization of private field "popupMenu" from JMenu with our own JBPopupMenu
@@ -213,8 +212,10 @@ public final class ActionMenu extends JBMenu {
   private class MenuListenerImpl implements MenuListener {
     @Override
     public void menuCanceled(MenuEvent e) {
-      clearItems();
-      addStubItem();
+      if (!KEEP_MENU_HIERARCHY) {
+        clearItems();
+        addStubItem();
+      }
     }
 
     @Override
@@ -223,8 +224,10 @@ public final class ActionMenu extends JBMenu {
         Disposer.dispose(myDisposable);
         myDisposable = null;
       }
-      clearItems();
-      addStubItem();
+      if (!KEEP_MENU_HIERARCHY) {
+        clearItems();
+        addStubItem();
+      }
     }
 
     @Override
@@ -234,6 +237,8 @@ public final class ActionMenu extends JBMenu {
         myDisposable = Disposer.newDisposable();
       }
       Disposer.register(myDisposable, helper);
+      if (KEEP_MENU_HIERARCHY)
+        clearItems();
       fillMenu();
     }
   }
@@ -262,11 +267,9 @@ public final class ActionMenu extends JBMenu {
 
   public void fillMenu() {
     DataContext context;
-    boolean mayContextBeInvalid;
 
     if (myContext != null) {
       context = myContext;
-      mayContextBeInvalid = false;
     }
     else {
       @SuppressWarnings("deprecation") DataContext contextFromFocus = DataManager.getInstance().getDataContext();
@@ -275,11 +278,10 @@ public final class ActionMenu extends JBMenu {
         IdeFrame frame = UIUtil.getParentOfType(IdeFrame.class, this);
         context = DataManager.getInstance().getDataContext(IdeFocusManager.getGlobalInstance().getLastFocusedFor(frame));
       }
-      mayContextBeInvalid = true;
     }
 
     final boolean isDarkMenu = SystemInfo.isMacSystemMenu && NSDefaults.isDarkMenuBar();
-    Utils.fillMenu(myGroup.getAction(), this, myMnemonicEnabled, myPresentationFactory, context, myPlace, true, mayContextBeInvalid, LaterInvocator.isInModalContext(), isDarkMenu);
+    Utils.fillMenu(myGroup.getAction(), this, myMnemonicEnabled, myPresentationFactory, context, myPlace, true, LaterInvocator.isInModalContext(), isDarkMenu);
   }
 
   private class MenuItemSynchronizer implements PropertyChangeListener {

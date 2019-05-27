@@ -1,10 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection.dataFlow;
 
 import com.intellij.codeInsight.ExpressionUtil;
 import com.intellij.codeInsight.Nullability;
-import com.intellij.codeInspection.dataFlow.inference.InferenceFromSourceUtil;
 import com.intellij.codeInspection.dataFlow.instructions.*;
+import com.intellij.codeInspection.dataFlow.rangeSet.LongRangeSet;
 import com.intellij.codeInspection.dataFlow.value.*;
 import com.intellij.openapi.util.MultiValuesMap;
 import com.intellij.openapi.util.TextRange;
@@ -20,11 +20,14 @@ import com.intellij.util.containers.FList;
 import com.siyeh.ig.psiutils.ExpressionUtils;
 import com.siyeh.ig.psiutils.TypeUtils;
 import gnu.trove.THashSet;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.function.Predicate;
+
+import static com.intellij.util.ObjectUtils.tryCast;
 
 /**
  * @author Gregory.Shrago
@@ -62,6 +65,7 @@ public class DfaUtil {
   /**
    * @deprecated for removal; use {@link #checkNullability(PsiVariable, PsiElement)}
    */
+  @ApiStatus.ScheduledForRemoval
   @Deprecated
   @NotNull
   public static Nullness checkNullness(@Nullable final PsiVariable variable, @Nullable final PsiElement context) {
@@ -148,7 +152,18 @@ public class DfaUtil {
       return Nullability.UNKNOWN;
     }
 
-    return inferBlockNullability(method, InferenceFromSourceUtil.suppressNullable(method));
+    return inferBlockNullability(method, suppressNullable(method));
+  }
+
+  private static boolean suppressNullable(PsiMethod method) {
+    if (method.getParameterList().isEmpty()) return false;
+
+    for (StandardMethodContract contract : JavaMethodContractUtil.getMethodContracts(method)) {
+      if (contract.getReturnValue().isNull()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   @NotNull
@@ -286,19 +301,18 @@ public class DfaUtil {
   }
 
   public static boolean ignoreInitializer(PsiVariable variable) {
-    // Skip boolean constant fields as they usually used as control knobs to modify program logic
-    // it's better to analyze both true and false values even if it's predefined
-    PsiExpression initializer = PsiUtil.skipParenthesizedExprDown(variable.getInitializer());
-    return initializer != null &&
-           variable instanceof PsiField &&
-           variable.hasModifierProperty(PsiModifier.FINAL) &&
-           variable.getType().equals(PsiType.BOOLEAN) &&
-           (ExpressionUtils.isLiteral(initializer, Boolean.TRUE) || ExpressionUtils.isLiteral(initializer, Boolean.FALSE));
+    if (variable instanceof PsiField && variable.hasModifierProperty(PsiModifier.FINAL) && variable.getType().equals(PsiType.BOOLEAN)) {
+      // Skip boolean constant fields as they usually used as control knobs to modify program logic
+      // it's better to analyze both true and false values even if it's predefined
+      PsiLiteralExpression initializer = tryCast(PsiUtil.skipParenthesizedExprDown(variable.getInitializer()), PsiLiteralExpression.class);
+      return initializer != null && initializer.getValue() instanceof Boolean;
+    }
+    return false;
   }
 
   static boolean isEffectivelyUnqualified(DfaVariableValue variableValue) {
     return variableValue.getQualifier() == null ||
-     variableValue.getQualifier().getSource() instanceof DfaExpressionFactory.ThisSource;
+     variableValue.getQualifier().getDescriptor() instanceof DfaExpressionFactory.ThisDescriptor;
   }
 
   public static boolean hasImplicitImpureSuperCall(PsiClass aClass, PsiMethod constructor) {
@@ -311,7 +325,8 @@ public class DfaUtil {
 
   /**
    * Returns a surrounding PSI element which should be analyzed via DFA
-   * (e.g. passed to {@link DataFlowRunner#analyzeMethodRecursively(PsiElement, StandardInstructionVisitor)}) to cover given expression.
+   * (e.g. passed to {@link DataFlowRunner#analyzeMethodRecursively(PsiElement, StandardInstructionVisitor, boolean)}) to cover 
+   * given expression.
    *
    * @param expression expression to cover
    * @return a dataflow context; null if no applicable context found.
@@ -336,7 +351,8 @@ public class DfaUtil {
   @Nullable
   public static Boolean evaluateCondition(@Nullable PsiExpression condition) {
     CommonDataflow.DataflowResult result = CommonDataflow.getDataflowResult(condition);
-    return result == null ? null : ObjectUtils.tryCast(result.getExpressionValue(condition), Boolean.class);
+    if (result == null) return null;
+    return tryCast(ContainerUtil.getOnlyItem(result.getExpressionValues(condition)), Boolean.class);
   }
 
   public static boolean isComparedByEquals(PsiType type) {
@@ -347,14 +363,14 @@ public class DfaUtil {
     if (TypeConversionUtil.isPrimitiveWrapper(type)) {
       if (value instanceof DfaConstValue ||
           (value instanceof DfaVariableValue && TypeConversionUtil.isPrimitiveAndNotNull(value.getType()))) {
-        DfaValue boxed = value.getFactory().getBoxedFactory().createBoxed(value);
+        DfaValue boxed = value.getFactory().getBoxedFactory().createBoxed(value, type);
         return boxed == null ? DfaUnknownValue.getInstance() : boxed;
       }
     }
     if (TypeConversionUtil.isPrimitiveAndNotNull(type)) {
       if (value instanceof DfaBoxedValue ||
           (value instanceof DfaVariableValue && TypeConversionUtil.isPrimitiveWrapper(value.getType()))) {
-        return value.getFactory().getBoxedFactory().createUnboxed(value, ObjectUtils.tryCast(type, PsiPrimitiveType.class));
+        return SpecialField.UNBOX.createValue(value.getFactory(), value);
       }
     }
     return value;
@@ -408,8 +424,35 @@ public class DfaUtil {
     return null;
   }
 
+  @NotNull
+  public static List<? extends MethodContract> addRangeContracts(@Nullable PsiMethod method,
+                                                                 @NotNull List<? extends MethodContract> contracts) {
+    if (method == null) return contracts;
+    PsiParameter[] parameters = method.getParameterList().getParameters();
+    List<MethodContract> rangeContracts = new ArrayList<>();
+    for (int i = 0; i < parameters.length; i++) {
+      PsiParameter parameter = parameters[i];
+      LongRangeSet fromType = LongRangeSet.fromType(parameter.getType());
+      if (fromType == null) continue;
+      LongRangeSet fromAnnotation = LongRangeSet.fromPsiElement(parameter);
+      if (fromAnnotation.min() > fromType.min()) {
+        MethodContract contract = MethodContract.singleConditionContract(
+          ContractValue.argument(i), DfaRelationValue.RelationType.LT, ContractValue.constant(fromAnnotation.min(), PsiType.LONG),
+          ContractReturnValue.fail());
+        rangeContracts.add(contract);
+      }
+      if (fromAnnotation.max() < fromType.max()) {
+        MethodContract contract = MethodContract.singleConditionContract(
+          ContractValue.argument(i), DfaRelationValue.RelationType.GT, ContractValue.constant(fromAnnotation.max(), PsiType.LONG),
+          ContractReturnValue.fail());
+        rangeContracts.add(contract);
+      }
+    }
+    return ContainerUtil.concat(rangeContracts, contracts);
+  }
+
   private static class ValuableInstructionVisitor extends StandardInstructionVisitor {
-    final Map<PsiElement, PlaceResult> myResults = ContainerUtil.newHashMap();
+    final Map<PsiElement, PlaceResult> myResults = new HashMap<>();
 
     static class PlaceResult {
       final MultiValuesMap<PsiVariable, FList<PsiExpression>> myValues = new MultiValuesMap<>(true);

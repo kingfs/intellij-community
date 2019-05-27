@@ -67,7 +67,7 @@ public class CoverageSuiteChooserDialog extends DialogWrapper {
     mySuitesTree.setShowsRootHandles(false);
     TreeUtil.installActions(mySuitesTree);
     TreeUtil.expandAll(mySuitesTree);
-    TreeUtil.selectFirstNode(mySuitesTree);
+    TreeUtil.promiseSelectFirst(mySuitesTree);
     mySuitesTree.setMinimumSize(new Dimension(25, -1));
     setOKButtonText("Show selected");
     init();
@@ -336,9 +336,7 @@ public class CoverageSuiteChooserDialog extends DialogWrapper {
         final Object userObject = selectedNode.getUserObject();
         if (userObject instanceof CoverageSuite) {
           final CoverageSuite selectedSuite = (CoverageSuite)userObject;
-          if (selectedSuite.getCoverageDataFileProvider() instanceof DefaultCoverageFileProvider &&
-              Comparing.strEqual(((DefaultCoverageFileProvider)selectedSuite.getCoverageDataFileProvider()).getSourceProvider(),
-                                 DefaultCoverageFileProvider.class.getName())) {
+          if (selectedSuite.canRemove()) {
             myCoverageManager.removeCoverageSuite(selectedSuite);
             TreeUtil.removeLastPathComponent(mySuitesTree, new TreePath(selectedNode.getPath()));
           }
@@ -355,9 +353,7 @@ public class CoverageSuiteChooserDialog extends DialogWrapper {
         final Object userObject = node.getUserObject();
         if (userObject instanceof CoverageSuite) {
           final CoverageSuite selectedSuite = (CoverageSuite)userObject;
-          if (selectedSuite.getCoverageDataFileProvider() instanceof DefaultCoverageFileProvider &&
-              Comparing.strEqual(((DefaultCoverageFileProvider)selectedSuite.getCoverageDataFileProvider()).getSourceProvider(),
-                                 DefaultCoverageFileProvider.class.getName())) {
+          if (selectedSuite.canRemove()) {
             presentation.setEnabled(true);
           }
         }

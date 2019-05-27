@@ -1,4 +1,4 @@
-// Copyright 2000-2017 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.daemon.impl.analysis;
 
 import com.intellij.codeInsight.daemon.JavaErrorMessages;
@@ -21,6 +21,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.impl.PsiClassImplUtil;
+import com.intellij.psi.impl.PsiImplUtil;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.search.PsiShortNamesCache;
 import com.intellij.psi.search.searches.ReferencesSearch;
@@ -28,7 +29,6 @@ import com.intellij.psi.search.searches.SuperMethodsSearch;
 import com.intellij.psi.util.*;
 import com.intellij.util.ArrayUtilRt;
 import com.intellij.util.containers.ContainerUtil;
-import com.siyeh.ig.psiutils.ExpressionUtils;
 import gnu.trove.THashMap;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
@@ -669,8 +669,8 @@ public class GenericsHighlightUtil {
     if (!checkEqualsSuper && MethodSignatureUtil.isSubsignature(superSignature, signatureToCheck)) {
       return null;
     }
-    if (!javaVersionService.isAtLeast(aClass, JavaSdkVersion.JDK_1_8)) {
-      //javac <= 1.7 didn't check transitive overriding rules for interfaces
+    if (!javaVersionService.isCompilerVersionAtLeast(aClass, JavaSdkVersion.JDK_1_7)) {
+      //javac <= 1.6 didn't check transitive overriding rules for interfaces
       if (superContainingClass != null && !superContainingClass.isInterface() && checkContainingClass.isInterface() && !aClass.equals(superContainingClass)) return null;
     }
     if (aClass.equals(checkContainingClass)) {
@@ -807,7 +807,7 @@ public class GenericsHighlightUtil {
 
     if (!(resolved instanceof PsiField)) return null;
     if (!((PsiModifierListOwner)resolved).hasModifierProperty(PsiModifier.STATIC)) return null;
-    if (expr.getParent() instanceof PsiSwitchLabelStatement) return null;
+    if (PsiImplUtil.getSwitchLabel(expr) != null) return null;
     final PsiMember constructorOrInitializer = PsiUtil.findEnclosingConstructorOrInitializer(expr);
     if (constructorOrInitializer == null) return null;
     if (constructorOrInitializer.hasModifierProperty(PsiModifier.STATIC)) return null;
@@ -838,7 +838,7 @@ public class GenericsHighlightUtil {
   @Nullable
   static HighlightInfo checkEnumInstantiation(@NotNull PsiElement expression, @Nullable PsiClass aClass) {
     if (aClass != null && aClass.isEnum() &&
-        !(expression instanceof PsiNewExpression && ExpressionUtils.isArrayCreationExpression((PsiNewExpression)expression))) {
+        !(expression instanceof PsiNewExpression && ((PsiNewExpression)expression).isArrayCreation())) {
       String description = JavaErrorMessages.message("enum.types.cannot.be.instantiated");
       return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR).range(expression).descriptionAndTooltip(description).create();
     }
@@ -872,7 +872,7 @@ public class GenericsHighlightUtil {
     final PsiType javaLangString = PsiType.getJavaLangString(PsiManager.getInstance(project), GlobalSearchScope.allScope(project));
     final MethodSignature valueOfMethod = MethodSignatureUtil.createMethodSignature("valueOf", new PsiType[]{javaLangString}, PsiTypeParameter.EMPTY_ARRAY,
                                                                                     PsiSubstitutor.EMPTY);
-    return valueOfMethod.equals(methodSignature);
+    return MethodSignatureUtil.areSignaturesErasureEqual(valueOfMethod, methodSignature);
   }
 
   @Nullable
@@ -919,7 +919,7 @@ public class GenericsHighlightUtil {
   @Nullable
   static Collection<HighlightInfo> checkCatchParameterIsClass(@NotNull PsiParameter parameter) {
     if (!(parameter.getDeclarationScope() instanceof PsiCatchSection)) return null;
-    final Collection<HighlightInfo> result = ContainerUtil.newArrayList();
+    final Collection<HighlightInfo> result = new ArrayList<>();
 
     final List<PsiTypeElement> typeElements = PsiUtil.getParameterTypeElements(parameter);
     for (PsiTypeElement typeElement : typeElements) {
@@ -1465,7 +1465,9 @@ public class GenericsHighlightUtil {
       PsiClass superClass = superClassResolveResult.getElement();
       if (superClass == null) continue;
       PsiClassType superType = elementFactory.createType(superClass, superClassResolveResult.getSubstitutor());
-      final String notAccessibleErrorMessage = isTypeAccessible(superType, new HashSet<>(), checkParameters, resolveScope, factory);
+      HashSet<PsiClass> checked = new HashSet<>();
+      checked.add(aClass);
+      final String notAccessibleErrorMessage = isTypeAccessible(superType, checked, checkParameters, resolveScope, factory);
       if (notAccessibleErrorMessage != null) {
         return HighlightInfo.newHighlightInfo(HighlightInfoType.ERROR)
           .descriptionAndTooltip(notAccessibleErrorMessage)

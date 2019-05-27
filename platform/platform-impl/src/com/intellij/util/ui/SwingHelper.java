@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.util.ui;
 
 import com.intellij.ide.BrowserUtil;
@@ -20,7 +20,6 @@ import com.intellij.openapi.ui.*;
 import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.ui.HyperlinkLabel;
-import com.intellij.ui.JBColor;
 import com.intellij.ui.TextFieldWithHistory;
 import com.intellij.ui.TextFieldWithHistoryWithBrowseButton;
 import com.intellij.ui.components.ComponentsKt;
@@ -340,9 +339,9 @@ public class SwingHelper {
   public static void setHistory(@NotNull TextFieldWithHistory textFieldWithHistory,
                                 @NotNull List<String> history,
                                 boolean mergeWithPrevHistory) {
-    Set<String> newHistorySet = ContainerUtil.newHashSet(history);
+    Set<String> newHistorySet = new HashSet<>(history);
     List<String> prevHistory = textFieldWithHistory.getHistory();
-    List<String> mergedHistory = ContainerUtil.newArrayListWithCapacity(history.size());
+    List<String> mergedHistory = new ArrayList<>(history.size());
     if (mergeWithPrevHistory) {
       for (String item : prevHistory) {
         if (!newHistorySet.contains(item)) {
@@ -481,7 +480,7 @@ public class SwingHelper {
   }
 
   private static void getAllElements(Element root, List<? super Element> list, List<String> toCheck) {
-    if (toCheck.contains(root.getName().toLowerCase(Locale.US))) {
+    if (toCheck.contains(StringUtil.toLowerCase(root.getName()))) {
       list.add(root);
     }
     for (int i = 0; i < root.getElementCount(); i++) {
@@ -617,7 +616,7 @@ public class SwingHelper {
                              @NotNull String bodyInnerHtml,
                              @Nullable Color foregroundColor) {
     editorPane.setText(buildHtml(
-      UIUtil.getCssFontDeclaration(editorPane.getFont(), foregroundColor, JBColor.link(), null),
+      UIUtil.getCssFontDeclaration(editorPane.getFont(), foregroundColor, JBUI.CurrentTheme.Link.linkColor(), null),
       bodyInnerHtml
     ));
   }

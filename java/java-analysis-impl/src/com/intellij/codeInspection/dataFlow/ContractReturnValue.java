@@ -93,6 +93,12 @@ public abstract class ContractReturnValue {
     return FAIL_VALUE;
   }
 
+  public boolean isSuperValueOf(ContractReturnValue value) {
+    if (value == this || this == ANY_VALUE) return true;
+    if (this == NOT_NULL_VALUE && value.isNotNull()) return true;
+    return false;
+  }
+
   static DfaValue merge(DfaValue defaultValue, DfaValue newValue, DfaMemoryState memState) {
     if (defaultValue == null || defaultValue == DfaUnknownValue.getInstance()) return newValue;
     if (newValue == null || newValue == DfaUnknownValue.getInstance()) return defaultValue;
@@ -409,8 +415,7 @@ public abstract class ContractReturnValue {
     @Override
     public DfaValue getDfaValue(DfaValueFactory factory, DfaValue defaultValue, DfaCallState callState) {
       if (defaultValue instanceof DfaVariableValue) {
-        callState.myMemoryState.forceVariableFact((DfaVariableValue)defaultValue, DfaFactType.NULLABILITY, DfaNullability.NOT_NULL);
-        return defaultValue;
+        defaultValue = factory.getFactFactory().createValue(callState.myMemoryState.getFacts((DfaVariableValue)defaultValue));
       }
       DfaValue value = factory.withFact(defaultValue, DfaFactType.NULLABILITY, DfaNullability.NOT_NULL);
       if (callState.myCallArguments.myPure) {

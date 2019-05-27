@@ -32,7 +32,7 @@ import org.jetbrains.jps.model.serialization.module.JpsModuleRootModelSerializer
 /**
  * @author dsl
  */
-public class InheritedJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implements InheritedJdkOrderEntry, ClonableOrderEntry, WritableOrderEntry {
+class InheritedJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implements InheritedJdkOrderEntry, ClonableOrderEntry, WritableOrderEntry {
   @NonNls public static final String ENTRY_TYPE = JpsModuleRootModelSerializer.INHERITED_JDK_TYPE;
   private final MyProjectJdkListener myListener = new MyProjectJdkListener();
 
@@ -74,7 +74,7 @@ public class InheritedJdkOrderEntryImpl extends LibraryOrderEntryBaseImpl implem
   }
 
   @Override
-  public void writeExternal(Element rootElement) throws WriteExternalException {
+  public void writeExternal(@NotNull Element rootElement) throws WriteExternalException {
     final Element orderEntryElement = OrderEntryFactory.createOrderEntryElement(ENTRY_TYPE);
     rootElement.addContent(orderEntryElement);
   }

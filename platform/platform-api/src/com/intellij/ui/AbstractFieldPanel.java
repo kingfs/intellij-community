@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ui;
 
 import com.intellij.icons.AllIcons;
@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.CommonShortcuts;
 import com.intellij.openapi.actionSystem.CustomShortcutSet;
 import com.intellij.openapi.application.Experiments;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.openapi.ui.FixedSizeButton;
@@ -25,9 +26,6 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.util.ArrayList;
 
-/**
- * @author Alexey Kudravtsev
- */
 public abstract class AbstractFieldPanel extends JPanel {
   private static final Logger LOG = Logger.getInstance("#com.intellij.ui.AbstractFieldPanel");
   private final JComponent myComponent;
@@ -114,9 +112,7 @@ public abstract class AbstractFieldPanel extends JPanel {
     if (myBrowseButtonActionListener != null) {
       if (Experiments.isFeatureEnabled("inline.browse.button") && myComponent instanceof ExtendableTextComponent) {
         ((ExtendableTextComponent)myComponent).addExtension(ExtendableTextComponent.Extension.create(
-          AllIcons.General.OpenDisk, AllIcons.General.OpenDiskHover,
-          UIBundle.message("component.with.browse.button.browse.button.tooltip.text"),
-          this::notifyActionListener));
+          getDefaultIcon(), getHoveredIcon(), getIconTooltip(), this::notifyActionListener));
         new DumbAwareAction() {
           @Override
           public void actionPerformed(@NotNull AnActionEvent e) {
@@ -152,6 +148,22 @@ public abstract class AbstractFieldPanel extends JPanel {
       myButtons.add(showViewerButton);
       this.add(showViewerButton, new GridBagConstraints(GridBagConstraints.RELATIVE, 1, 1, 1, 0.0, 0.0, GridBagConstraints.WEST, GridBagConstraints.NONE, JBUI.emptyInsets(), 0, 0));
     }
+  }
+
+  @NotNull
+  protected Icon getDefaultIcon() {
+    return AllIcons.General.OpenDisk;
+  }
+
+  @NotNull
+  protected Icon getHoveredIcon() {
+    return AllIcons.General.OpenDiskHover;
+  }
+
+  @NotNull
+  protected String getIconTooltip() {
+    return UIBundle.message("component.with.browse.button.browse.button.tooltip.text") + " (" +
+           KeymapUtil.getKeystrokeText(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK)) + ")";
   }
 
   private void notifyActionListener() {

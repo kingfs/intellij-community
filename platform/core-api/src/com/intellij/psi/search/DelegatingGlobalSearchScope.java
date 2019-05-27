@@ -8,7 +8,7 @@ import com.intellij.util.ArrayUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.Icon;
+import javax.swing.*;
 import java.util.Arrays;
 import java.util.Collection;
 
@@ -73,8 +73,8 @@ public class DelegatingGlobalSearchScope extends GlobalSearchScope {
 
   @Nullable
   @Override
-  public Icon getDisplayIcon() {
-    return myBaseScope.getDisplayIcon();
+  public Icon getIcon() {
+    return myBaseScope.getIcon();
   }
 
   @Override
@@ -96,8 +96,8 @@ public class DelegatingGlobalSearchScope extends GlobalSearchScope {
   }
 
   @Override
-  public int hashCode() {
-    int result = myBaseScope.hashCode();
+  public int calcHashCode() {
+    int result = myBaseScope.calcHashCode();
     result = 31 * result + myEquality.hashCode();
     return result;
   }

@@ -11,8 +11,10 @@ import com.intellij.java.navigation.ChooseByNameTest
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.Computable
 import com.intellij.testFramework.PlatformTestUtil
 import com.intellij.testFramework.fixtures.LightCodeInsightFixtureTestCase
+import gnu.trove.Equality
 import groovy.transform.CompileStatic
 import org.jetbrains.annotations.NonNls
 import org.jetbrains.annotations.NotNull
@@ -24,14 +26,18 @@ import java.util.concurrent.TimeUnit
  */
 @CompileStatic
 class GotoActionTest extends LightCodeInsightFixtureTestCase {
-  private static final DataKey<Boolean> SHOW_HIDDEN_KEY = DataKey.create("GotoActionTest.DataKey");
+  private static final DataKey<Boolean> SHOW_HIDDEN_KEY = DataKey.create("GotoActionTest.DataKey")
+  private static final Comparator<MatchedValue> MATCH_COMPARATOR =
+    { MatchedValue item1, MatchedValue item2 -> return item1.compareWeights(item2) } as Comparator<MatchedValue>
+  private static final Equality<MatchedValue> MATCH_EQUALITY =
+    { MatchedValue item1, MatchedValue item2 -> item1 == item2 } as Equality<MatchedValue>
 
   void "test shorter actions first despite ellipsis"() {
     def pattern = 'Rebas'
     def fork = 'Rebase my GitHub fork'
     def rebase = 'Rebase...'
     def items = [matchedAction(fork, pattern),
-                 matchedAction(rebase, pattern)].sort()
+                 matchedAction(rebase, pattern)].toSorted(MATCH_COMPARATOR)
     assert [rebase, fork] == items.collect { it.valueText }
   }
 
@@ -40,7 +46,7 @@ class GotoActionTest extends LightCodeInsightFixtureTestCase {
     def byName = 'By Name'
     def byDesc = 'By Desc'
     def items = [matchedAction(byName, pattern),
-                 matchedAction(byDesc, pattern, MatchMode.DESCRIPTION)].sort()
+                 matchedAction(byDesc, pattern, MatchMode.DESCRIPTION)].toSorted(MATCH_COMPARATOR)
     assert [byName, byDesc] == items.collect { it.valueText }
   }
 
@@ -59,7 +65,7 @@ class GotoActionTest extends LightCodeInsightFixtureTestCase {
                  matchedAction(eclaire, pattern),
                  matchedAction(deaf, pattern),
                  matchedAction(cut, pattern),
-                 matchedAction(c, pattern)].sort()
+                 matchedAction(c, pattern)].toSorted(MATCH_COMPARATOR)
     assert [c, copy, cut, aardvark, eclaire, boom, deaf] == items.collect { it.valueText }
   }
 
@@ -83,26 +89,21 @@ class GotoActionTest extends LightCodeInsightFixtureTestCase {
       items += matchedOption(name, pattern)
       items += matchedOption(name, pattern)
       items += matchedBooleanOption(name, pattern)
-      items += new MatchedValue(name, pattern)
     }
 
-    PlatformTestUtil.assertComparisonContractNotViolated(items,
-                                                         { def item1, def item2 -> (item1 <=> item2) },
-                                                         { def item1, def item2 -> item1 == item2 })
+    PlatformTestUtil.assertComparisonContractNotViolated(items, MATCH_COMPARATOR, MATCH_EQUALITY)
 
     // order can be different on EDT and pooled threads
     ApplicationManager.getApplication().executeOnPooledThread {
-      PlatformTestUtil.assertComparisonContractNotViolated(items,
-                                                           { def item1, def item2 -> (item1 <=> item2) },
-                                                           { def item1, def item2 -> item1 == item2 })
+      PlatformTestUtil.assertComparisonContractNotViolated(items, MATCH_COMPARATOR, MATCH_EQUALITY)
     }.get(20000, TimeUnit.MILLISECONDS)
   }
 
   void "test same action is not reported twice"() {
-    def patterns = ["Patch", "Add", "Delete", "Show", "Toggle"]
+    def patterns = ["Patch", "Add", "Delete", "Show", "Toggle", "New", "New Class"]
 
     def model = new GotoActionModel(project, null, null)
-    def provider = new GotoActionItemProvider(model);
+    def provider = new GotoActionItemProvider(model)
 
     def popup = ChooseByNamePopup.createPopup(project, model, provider)
     try {
@@ -112,7 +113,7 @@ class GotoActionTest extends LightCodeInsightFixtureTestCase {
           if (it instanceof MatchedValue) {
             def value = it.value
             if (value instanceof ActionWrapper) {
-              return (value as ActionWrapper).action;
+              return (value as ActionWrapper).action
             }
             if (value instanceof OptionDescription) {
               return value
@@ -126,6 +127,13 @@ class GotoActionTest extends LightCodeInsightFixtureTestCase {
     finally {
       popup.close(false)
     }
+  }
+
+  void "test detected action groups"() {
+    assert getPresentableGroupName(project, "Zoom", "Images.Editor.ZoomIn", false) == "Images"
+    assert getPresentableGroupName(project, "Next Tab", "SearchEverywhere.NextTab", false) == "Search Everywhere"
+    assert getPresentableGroupName(project, "Next Tab", "NextTab", false) == "Window | Editor Tabs"
+    assert getPresentableGroupName(project, "Next Tab", "NextEditorTab", false) == "Tabs"
   }
 
   void "test same invisible groups are ignored"() {
@@ -143,71 +151,141 @@ class GotoActionTest extends LightCodeInsightFixtureTestCase {
     hiddenGroup1.add(testAction)
     hiddenGroup2.add(testAction)
 
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, false) == "Outer | VisibleGroup"
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, true) == "Outer | A HiddenGroup1"
+    runWithGlobalAction(pattern, testAction) {
+      runWithMainMenuGroup(outerGroup) {
+        assert getPresentableGroupName(project, pattern, testAction, false) == "Outer | VisibleGroup"
+        assert getPresentableGroupName(project, pattern, testAction, true) == "Outer | A HiddenGroup1"
 
-    outerGroup.remove(visibleGroup)
+        outerGroup.remove(visibleGroup)
 
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, false) == null
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, true) == "Outer | A HiddenGroup1"
+        assert getPresentableGroupName(project, pattern, testAction, false) == null
+        assert getPresentableGroupName(project, pattern, testAction, true) == "Outer | A HiddenGroup1"
 
-    outerGroup.remove(hiddenGroup1)
+        outerGroup.remove(hiddenGroup1)
 
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, false) == null
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, true) == "Outer | Z HiddenGroup2"
+        assert getPresentableGroupName(project, pattern, testAction, false) == null
+        assert getPresentableGroupName(project, pattern, testAction, true) == "Outer | Z HiddenGroup2"
 
-    hiddenGroup2.remove(testAction)
+        hiddenGroup2.remove(testAction)
 
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, false) == null
-    assert getPresentableGroupName(project, pattern, testAction, outerGroup, true) == null
+        assert getPresentableGroupName(project, pattern, testAction, false) == null
+        assert getPresentableGroupName(project, pattern, testAction, true) == null
+      }
+    }
   }
 
-  private static String getPresentableGroupName(Project project, String pattern, AnAction testAction, DefaultActionGroup menuGroup,
-                                                boolean passFlag) {
-    def mainMenuGroup = (DefaultActionGroup)ActionManager.getInstance().getAction(IdeActions.GROUP_MAIN_MENU);
-    ActionManager.instance.registerAction(pattern, testAction)
-    mainMenuGroup.add(menuGroup)
+  void "test action order is stable with different presentation"() {
+    def pattern = "GotoActionTest.TestAction"
 
+    def testAction1 = createAction(pattern)
+    def testAction2 = createAction(pattern)
+    def outerGroup = createActionGroup("Outer", false)
+    def hiddenGroup = createActionGroup("A Hidden", false)
+    def visibleGroup1 = createActionGroup("K Visible", true)
+    def visibleGroup2 = createActionGroup("Z Visible", true)
+    outerGroup.add(hiddenGroup)
+    outerGroup.add(visibleGroup1)
+    outerGroup.add(visibleGroup2)
+    visibleGroup1.add(testAction1)
+    visibleGroup2.add(testAction2)
+    hiddenGroup.add(testAction2)
+
+    runWithGlobalAction(pattern + "1", testAction1) {
+      runWithGlobalAction(pattern + "2", testAction2) {
+        runWithMainMenuGroup(outerGroup) {
+          def order1 = computeWithCustomDataProvider(true) {
+            getSortedActionsFromPopup(project, pattern)
+          }
+
+          def order2 = computeWithCustomDataProvider(false) {
+            getSortedActionsFromPopup(project, pattern)
+          }
+
+          assert order1 == order2
+        }
+      }
+    }
+  }
+
+  private static List<ActionWrapper> getSortedActionsFromPopup(Project project, String pattern) {
+    def wrappers = getActionsFromPopup(project, pattern)
+    wrappers.every { it.getPresentation() } // update best group name
+    wrappers.sort()
+    return wrappers
+  }
+
+  private static String getPresentableGroupName(Project project, String pattern, String testActionId, boolean passFlag) {
+    def action = ActionManager.instance.getAction(testActionId)
+    assert action != null
+    return getPresentableGroupName(project, pattern, action, passFlag)
+  }
+
+  private static String getPresentableGroupName(Project project, String pattern, AnAction testAction, boolean passFlag) {
+    return computeWithCustomDataProvider(passFlag) {
+      def result = getActionsFromPopup(project, pattern)
+      def matches = result.findAll { it.action == testAction }
+      if (matches.size() != 1) {
+        fail("Matches: " + matches + "\nPopup actions:  " + result.size() + " - " + result)
+      }
+
+      ActionWrapper wrapper = matches[0]
+      wrapper.getPresentation() // update before show
+      return wrapper.groupName
+    }
+  }
+
+  private static void runWithGlobalAction(String id, AnAction action, Runnable task) {
+    ActionManager.instance.registerAction(id, action)
+    try {
+      task.run()
+    }
+    finally {
+      ActionManager.instance.unregisterAction(id)
+    }
+  }
+
+  private static void runWithMainMenuGroup(ActionGroup group, Runnable task) {
+    def mainMenuGroup = (DefaultActionGroup)ActionManager.getInstance().getAction(IdeActions.GROUP_MAIN_MENU)
+    mainMenuGroup.add(group)
+    try {
+      task.run()
+    }
+    finally {
+      mainMenuGroup.remove(group)
+    }
+  }
+
+  private static <T> T computeWithCustomDataProvider(passHiddenFlag, Computable<T> task) {
     IdeaTestApplication.getInstance().setDataProvider(new DataProvider() {
       @Override
       Object getData(@NotNull @NonNls String dataId) {
-        if (SHOW_HIDDEN_KEY.is(dataId) && passFlag) return Boolean.TRUE;
+        if (SHOW_HIDDEN_KEY.is(dataId) && passHiddenFlag) return Boolean.TRUE
         return null
       }
     })
+
     try {
-
-
-      def model = new GotoActionModel(project, null, null)
-      def provider = new GotoActionItemProvider(model);
-
-      def popup = ChooseByNamePopup.createPopup(project, model, provider)
-      try {
-        def result = ChooseByNameTest.calcPopupElements(popup, pattern, true)
-        def matches = result.findResults {
-          if (it instanceof MatchedValue) {
-            def value = it.value
-            if (value instanceof ActionWrapper &&
-                (value as ActionWrapper).action == testAction) {
-              return value as ActionWrapper;
-            }
-          }
-          return null
-        }
-        assert matches.size() == 1
-
-        ActionWrapper wrapper = matches[0]
-        wrapper.getPresentation() // update before show
-        return wrapper.groupName
-      }
-      finally {
-        popup.close(false)
-      }
+      return task.compute()
     }
     finally {
-      mainMenuGroup.remove(menuGroup)
-      ActionManager.instance.unregisterAction(pattern)
       IdeaTestApplication.getInstance().setDataProvider(null)
+    }
+  }
+
+  private static List<ActionWrapper> getActionsFromPopup(Project project, String pattern) {
+    def model = new GotoActionModel(project, null, null)
+    def provider = new GotoActionItemProvider(model)
+    def popup = ChooseByNamePopup.createPopup(project, model, provider)
+    try {
+      return ChooseByNameTest.calcPopupElements(popup, pattern, true).findResults {
+        if (it instanceof MatchedValue && it.value instanceof ActionWrapper) {
+          return it.value as ActionWrapper
+        }
+        return null
+      } as List<ActionWrapper>
+    }
+    finally {
+      popup.close(false)
     }
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl.source.codeStyle;
 
 import com.intellij.application.options.CodeStyle;
@@ -20,6 +20,7 @@ import com.intellij.util.ArrayUtil;
 import com.intellij.util.BitUtil;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.text.NameUtilCore;
 import gnu.trove.THashSet;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -570,7 +571,7 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
   private static String findLiteralText(@NotNull PsiExpression expr) {
     final PsiElement[] literals = PsiTreeUtil.collectElements(expr, new PsiElementFilter() {
       @Override
-      public boolean isAccepted(PsiElement element) {
+      public boolean isAccepted(@NotNull PsiElement element) {
         if (isStringPsiLiteral(element) && isNameSupplier(element)) {
           final PsiElement exprList = element.getParent();
           if (exprList instanceof PsiExpressionList) {
@@ -623,7 +624,7 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
           }
         }
 
-        String[] words = NameUtil.nameToWords(methodName);
+        String[] words = NameUtilCore.nameToWords(methodName);
         if (words.length > 0) {
           final String firstWord = words[0];
           if (GET_PREFIX.equals(firstWord)
@@ -813,7 +814,7 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
             name = variableNameToPropertyName(name, VariableKind.PARAMETER);
             if (expressions.length == 1) {
               final String methodName = method.getName();
-              String[] words = NameUtil.nameToWords(methodName);
+              String[] words = NameUtilCore.nameToWords(methodName);
               if (words.length > 0) {
                 final String firstWord = words[0];
                 if (SET_PREFIX.equals(firstWord)) {
@@ -911,7 +912,7 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
   @Override
   public String propertyNameToVariableName(@NotNull String propertyName, @NotNull VariableKind variableKind) {
     if (variableKind == VariableKind.STATIC_FINAL_FIELD) {
-      String[] words = NameUtil.nameToWords(propertyName);
+      String[] words = NameUtilCore.nameToWords(propertyName);
       return StringUtil.join(words, StringUtil::toUpperCase, "_");
     }
 
@@ -946,7 +947,10 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
       answer.add(correctKeywords ? changeIfNotIdentifier(suggestion) : suggestion);
     }
 
-    ContainerUtil.addIfNotNull(answer, getWordByPreposition(name, prefix, suffix, upperCaseStyle));
+    String wordByPreposition = getWordByPreposition(name, prefix, suffix, upperCaseStyle);
+    if (wordByPreposition != null && (!correctKeywords || isIdentifier(wordByPreposition))) {
+      answer.add(wordByPreposition);
+    }
     return answer;
   }
 
@@ -977,7 +981,7 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
   @NotNull
   @Override
   public String suggestUniqueVariableName(@NotNull String baseName, PsiElement place, boolean lookForward) {
-    return suggestUniqueVariableName(baseName, place, lookForward, false, v -> false);
+    return suggestUniqueVariableName(baseName, place, lookForward, false, v -> place instanceof PsiParameter && !PsiTreeUtil.isAncestor(((PsiParameter)place).getDeclarationScope(), v, false));
   }
 
   @NotNull
@@ -1066,6 +1070,7 @@ public class JavaCodeStyleManagerImpl extends JavaCodeStyleManager {
             if (name.equals(variable.getName()) && !canBeReused.test(variable)) {
               throw new CancelException();
             }
+            super.visitVariable(variable);
           }
         });
       }

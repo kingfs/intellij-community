@@ -811,7 +811,8 @@ public class PyFunctionImpl extends PyBaseElementImpl<PyFunctionStub> implements
       .skipWhile(siblingStub -> !stub.equals(siblingStub))
       .transform(nextSiblingStub -> as(nextSiblingStub, PyTargetExpressionStub.class))
       .filter(Objects::nonNull)
-      .filter(nextSiblingStub -> nextSiblingStub.getInitializerType() == PyTargetExpressionStub.InitializerType.CallExpression)
+      .filter(nextSiblingStub -> nextSiblingStub.getInitializerType() == PyTargetExpressionStub.InitializerType.CallExpression &&
+                                 Objects.equals(stub.getName(), nextSiblingStub.getName()))
       .transform(PyTargetExpressionStub::getInitializer)
       .transform(
         initializerName -> {
@@ -877,7 +878,7 @@ public class PyFunctionImpl extends PyBaseElementImpl<PyFunctionStub> implements
   @NotNull
   @Override
   public List<PyAssignmentStatement> findAttributes() {
-    /**
+    /*
      * TODO: This method if insanely heavy since it unstubs foreign files.
      * Need to save stubs and use them somehow.
      *

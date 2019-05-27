@@ -18,6 +18,7 @@ package com.intellij.openapi.vcs;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vcs.changes.Change;
 import com.intellij.openapi.vcs.changes.CommitContext;
+import com.intellij.vcs.commit.CommitWorkflowHandler;
 import com.intellij.openapi.vcs.ui.Refreshable;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
@@ -37,6 +38,9 @@ public interface CheckinProjectPanel extends Refreshable, CommitMessageI {
   JComponent getComponent();
 
   JComponent getPreferredFocusedComponent();
+
+  @NotNull
+  CommitWorkflowHandler getCommitWorkflowHandler();
 
   /**
    * Checks if the checkin operation has anything to check in.
@@ -60,7 +64,6 @@ public interface CheckinProjectPanel extends Refreshable, CommitMessageI {
    * includes files which will be deleted from the VCS during the check-in operation.
    *
    * @return the files selected for checkin.
-   * @since 5.1
    */
   Collection<File> getFiles();
 
@@ -89,7 +92,6 @@ public interface CheckinProjectPanel extends Refreshable, CommitMessageI {
    * Gets the description for the check-in.
    *
    * @return the description text.
-   * @since 5.1
    */
   @NotNull
   String getCommitMessage();

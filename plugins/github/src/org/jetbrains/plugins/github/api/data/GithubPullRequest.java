@@ -1,49 +1,47 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.api.data;
 
 import com.intellij.util.ObjectUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.io.mandatory.Mandatory;
-import org.jetbrains.io.mandatory.RestModel;
 import org.jetbrains.plugins.github.api.data.util.GithubLink;
 
 import java.util.Date;
 import java.util.List;
+import java.util.Objects;
 
-@RestModel
 @SuppressWarnings("UnusedDeclaration")
 public class GithubPullRequest {
-  @Mandatory private String url;
-  @Mandatory private Long id;
+  private String url;
+  private Long id;
 
   //non-api urls
-  @Mandatory private String htmlUrl;
-  @Mandatory private String diffUrl;
-  @Mandatory private String patchUrl;
+  private String htmlUrl;
+  private String diffUrl;
+  private String patchUrl;
 
-  @Mandatory private Long number;
-  @Mandatory private String state;
-  @Mandatory private Boolean locked;
+  private Long number;
+  private GithubIssueState state;
+  private Boolean locked;
   private String activeLockReason;
-  @Mandatory private String title;
+  private String title;
   private GithubUser user;
-  @Mandatory private String body;
+  private String body;
 
-  @Mandatory private Date updatedAt;
+  private Date updatedAt;
   private Date closedAt;
   private Date mergedAt;
-  @Mandatory private Date createdAt;
+  private Date createdAt;
   private String mergeCommitSha;
-  @Mandatory private List<GithubUser> assignees;
-  //requestedReviewers
+  private List<GithubUser> assignees;
+  private List<GithubUser> requestedReviewers;
   //requestedTeams
-  //labels
+  private List<GithubIssueLabel> labels;
   //milestone
 
   private Tag head;
   private Tag base;
-  @Mandatory private Links _links;
+  private Links _links;
   private String authorAssociation;
 
   @NotNull
@@ -71,7 +69,7 @@ public class GithubPullRequest {
   }
 
   @NotNull
-  public String getState() {
+  public GithubIssueState getState() {
     return state;
   }
 
@@ -116,6 +114,16 @@ public class GithubPullRequest {
   }
 
   @NotNull
+  public List<GithubUser> getRequestedReviewers() {
+    return requestedReviewers;
+  }
+
+  @Nullable
+  public List<GithubIssueLabel> getLabels() {
+    return labels;
+  }
+
+  @NotNull
   public Links getLinks() {
     return _links;
   }
@@ -130,15 +138,11 @@ public class GithubPullRequest {
     return base;
   }
 
-  public boolean isClosed() {
-    return "closed".equals(state);
-  }
 
-  @RestModel
   public static class Tag {
-    @Mandatory private String label;
-    @Mandatory private String ref;
-    @Mandatory private String sha;
+    private String label;
+    private String ref;
+    private String sha;
 
     private GithubRepo repo;
     private GithubUser user;
@@ -167,17 +171,34 @@ public class GithubPullRequest {
     public GithubUser getUser() {
       return user;
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (!(o instanceof Tag)) return false;
+      Tag tag = (Tag)o;
+      return Objects.equals(label, tag.label) &&
+             Objects.equals(ref, tag.ref) &&
+             Objects.equals(sha, tag.sha) &&
+             Objects.equals(repo, tag.repo) &&
+             Objects.equals(user, tag.user);
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(label, ref, sha, repo, user);
+    }
   }
 
-  @RestModel
+
   public static class Links {
-    @Mandatory private GithubLink self;
-    @Mandatory private GithubLink html;
-    @Mandatory private GithubLink issue;
-    @Mandatory private GithubLink comments;
-    @Mandatory private GithubLink reviewComments;
-    @Mandatory private GithubLink reviewComment;
-    @Mandatory private GithubLink commits;
-    @Mandatory private GithubLink statuses;
+    private GithubLink self;
+    private GithubLink html;
+    private GithubLink issue;
+    private GithubLink comments;
+    private GithubLink reviewComments;
+    private GithubLink reviewComment;
+    private GithubLink commits;
+    private GithubLink statuses;
   }
 }

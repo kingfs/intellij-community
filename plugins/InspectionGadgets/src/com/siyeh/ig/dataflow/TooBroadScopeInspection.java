@@ -1,5 +1,5 @@
 /*
- * Copyright 2003-2018 Dave Griffith, Bas Leijdekkers
+ * Copyright 2003-2019 Dave Griffith, Bas Leijdekkers
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,11 +34,13 @@ import com.siyeh.ig.BaseInspection;
 import com.siyeh.ig.BaseInspectionVisitor;
 import com.siyeh.ig.InspectionGadgetsFix;
 import com.siyeh.ig.psiutils.*;
+import org.intellij.lang.annotations.Pattern;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.util.List;
+import java.util.Objects;
 
 public class TooBroadScopeInspection extends BaseInspection {
 
@@ -58,6 +60,7 @@ public class TooBroadScopeInspection extends BaseInspection {
     return InspectionGadgetsBundle.message("too.broad.scope.display.name");
   }
 
+  @Pattern(VALID_ID_PATTERN)
   @Override
   @NotNull
   public String getID() {
@@ -238,6 +241,7 @@ public class TooBroadScopeInspection extends BaseInspection {
 
   static List<PsiReferenceExpression> findReferences(@NotNull PsiLocalVariable variable) {
     final List<PsiReferenceExpression> result = new SmartList<>();
+    //noinspection ConstantConditions
     ReferencesSearch.search(variable, variable.getUseScope())
                     .forEach(reference -> reference instanceof PsiReferenceExpression && result.add((PsiReferenceExpression)reference));
     return result;
@@ -364,7 +368,6 @@ public class TooBroadScopeInspection extends BaseInspection {
       }
       final PsiLocalVariable variable = (PsiLocalVariable)variableIdentifier.getParent();
       assert variable != null;
-      final PsiElement variableScope = PsiTreeUtil.getParentOfType(variable, PsiCodeBlock.class, PsiForStatement.class, PsiTryStatement.class);
       final List<PsiReferenceExpression> references = findReferences(variable);
       PsiElement commonParent = ScopeUtils.getCommonParent(references);
       if (commonParent == null) {
@@ -372,14 +375,19 @@ public class TooBroadScopeInspection extends BaseInspection {
       }
       final PsiExpression initializer = variable.getInitializer();
       if (initializer != null) {
-        assert variableScope != null;
+        final PsiElement variableScope =
+          PsiTreeUtil.getParentOfType(variable, PsiCodeBlock.class, PsiForStatement.class, PsiTryStatement.class);
+        if (variableScope == null) {
+          return;
+        }
         commonParent = ScopeUtils.moveOutOfLoopsAndClasses(commonParent, variableScope);
         if (commonParent == null) {
           return;
         }
       }
       final PsiElement referenceElement = references.get(0);
-      final PsiElement firstReferenceScope = PsiTreeUtil.getParentOfType(referenceElement, PsiCodeBlock.class, PsiForStatement.class, PsiTryStatement.class);
+      final PsiElement firstReferenceScope =
+        PsiTreeUtil.getParentOfType(referenceElement, PsiCodeBlock.class, PsiForStatement.class, PsiTryStatement.class);
       if (firstReferenceScope == null) {
         return;
       }
@@ -387,7 +395,8 @@ public class TooBroadScopeInspection extends BaseInspection {
       CommentTracker tracker = new CommentTracker();
       if (commonParent instanceof PsiTryStatement) {
         PsiElement resourceReference = referenceElement.getParent();
-        PsiResourceVariable resourceVariable = createResourceVariable(project, variable, initializer != null ? tracker.markUnchanged(initializer) : null);
+        PsiResourceVariable resourceVariable = JavaPsiFacade.getElementFactory(project).createResourceVariable(
+          Objects.requireNonNull(variable.getName()), variable.getType(), tracker.markUnchanged(initializer), variable);
         newDeclaration = resourceReference.getParent().addBefore(resourceVariable, resourceReference);
         resourceReference.delete();
       }
@@ -432,23 +441,6 @@ public class TooBroadScopeInspection extends BaseInspection {
       }
     }
 
-    private PsiResourceVariable createResourceVariable(@NotNull Project project, PsiLocalVariable variable, PsiExpression initializer) {
-      PsiTryStatement tryStatement = (PsiTryStatement)JavaPsiFacade.getElementFactory(project).createStatementFromText("try (X x = null){}", variable);
-      PsiResourceList resourceList = tryStatement.getResourceList();
-      assert resourceList != null;
-      PsiResourceVariable resourceVariable = (PsiResourceVariable)resourceList.iterator().next();
-      resourceVariable.getTypeElement().replace(variable.getTypeElement());
-      PsiIdentifier nameIdentifier = resourceVariable.getNameIdentifier();
-      assert nameIdentifier != null;
-      PsiIdentifier oldIdentifier = variable.getNameIdentifier();
-      assert oldIdentifier != null;
-      nameIdentifier.replace(oldIdentifier);
-      if (initializer != null) {
-        resourceVariable.setInitializer(initializer);
-      }
-      return resourceVariable;
-    }
-
     private void removeOldVariable(@NotNull PsiVariable variable, CommentTracker tracker) {
       final PsiDeclarationStatement declaration = (PsiDeclarationStatement)variable.getParent();
       if (declaration == null) {
@@ -475,7 +467,7 @@ public class TooBroadScopeInspection extends BaseInspection {
       }
 
       final PsiType type = variable.getType();
-      final PsiDeclarationStatement newDeclaration = factory.createVariableDeclarationStatement(name, type, initializer != null ? tracker.markUnchanged(initializer) : null, variable);
+      final PsiDeclarationStatement newDeclaration = factory.createVariableDeclarationStatement(name, type, tracker.markUnchanged(initializer), variable);
       final PsiLocalVariable newVariable = (PsiLocalVariable)newDeclaration.getDeclaredElements()[0];
       final PsiModifierList newModifierList = newVariable.getModifierList();
       final PsiModifierList modifierList = variable.getModifierList();
@@ -483,6 +475,11 @@ public class TooBroadScopeInspection extends BaseInspection {
         // remove final when PsiDeclarationFactory adds one by mistake
         newModifierList.setModifierProperty(PsiModifier.FINAL, variable.hasModifierProperty(PsiModifier.FINAL));
         GenerateMembersUtil.copyAnnotations(modifierList, newModifierList);
+      }
+      PsiTypeElement typeElement = variable.getTypeElement();
+      if (typeElement != null && typeElement.isInferredType()) {
+        //restore 'var' for local variables
+        newVariable.getTypeElement().replace(factory.createTypeElementFromText("var", variable));
       }
       return newDeclaration;
     }

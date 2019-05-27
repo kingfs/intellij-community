@@ -6,6 +6,7 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.PairProcessor;
+import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.jsonSchema.JsonSchemaMappingsProjectConfiguration;
 import com.jetbrains.jsonSchema.UserDefinedJsonSchemaConfiguration;
 import com.jetbrains.jsonSchema.impl.JsonSchemaVersion;
@@ -14,10 +15,8 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static com.jetbrains.jsonSchema.remote.JsonFileResolver.isHttpPath;
 
@@ -31,10 +30,9 @@ public class JsonSchemaUserDefinedProviderFactory implements JsonSchemaProviderF
     final JsonSchemaMappingsProjectConfiguration configuration = JsonSchemaMappingsProjectConfiguration.getInstance(project);
 
     final Map<String, UserDefinedJsonSchemaConfiguration> map = configuration.getStateMap();
-    final List<JsonSchemaFileProvider> providers = map.values().stream()
-                                                      .map(schema -> createProvider(project, schema)).collect(Collectors.toList());
+    final List<JsonSchemaFileProvider> providers = ContainerUtil.map(map.values(), schema -> createProvider(project, schema));
 
-    return providers.isEmpty() ? Collections.emptyList() : providers;
+    return providers;
   }
 
   @NotNull
@@ -107,7 +105,7 @@ public class JsonSchemaUserDefinedProviderFactory implements JsonSchemaProviderF
     @Override
     public boolean isAvailable(@NotNull VirtualFile file) {
       //noinspection SimplifiableIfStatement
-      if (myPatterns.isEmpty() || file.isDirectory() || !file.isValid() || getSchemaFile() == null) return false;
+      if (myPatterns.isEmpty() || file.isDirectory() || !file.isValid()) return false;
       return myPatterns.stream().anyMatch(processor -> processor.process(myProject, file));
     }
 

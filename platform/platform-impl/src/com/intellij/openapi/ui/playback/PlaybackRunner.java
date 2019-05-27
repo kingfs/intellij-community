@@ -24,7 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-public class PlaybackRunner {
+public class PlaybackRunner implements Disposable {
 
   private static final Logger LOG = Logger.getInstance("#com.intellij.ui.debugger.extensions.PlaybackRunner");
 
@@ -200,7 +200,7 @@ public class PlaybackRunner {
     includeScript(myScript, getScriptDir(), myCommands, 0);
   }
 
-  private void includeScript(String scriptText, File scriptDir, ArrayList<PlaybackCommand> commandList, int line) {
+  private void includeScript(String scriptText, File scriptDir, ArrayList<? super PlaybackCommand> commandList, int line) {
     final StringTokenizer tokens = new StringTokenizer(scriptText, "\n");
     while (tokens.hasMoreTokens()) {
       final String eachLine = tokens.nextToken();
@@ -304,6 +304,11 @@ public class PlaybackRunner {
 
   public void setScriptDir(File baseDir) {
     myScriptDir = baseDir;
+  }
+
+  @Override
+  public void dispose() {
+    myCommands.clear();
   }
 
   public interface StatusCallback {

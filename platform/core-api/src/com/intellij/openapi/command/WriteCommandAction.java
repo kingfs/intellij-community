@@ -30,6 +30,7 @@ import com.intellij.util.ThrowableRunnable;
 import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.TestOnly;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -259,12 +260,10 @@ public abstract class WriteCommandAction<T> extends BaseActionRunnable<T> {
     // this is needed to prevent memory leak, since the command is put into undo queue
     final RunResult[] results = {result};
 
-    doExecuteCommand(() -> {
-      ApplicationManager.getApplication().runWriteAction(() -> {
-        results[0].run();
-        results[0] = null;
-      });
-    });
+    doExecuteCommand(() -> ApplicationManager.getApplication().runWriteAction(() -> {
+      results[0].run();
+      results[0] = null;
+    }));
   }
 
   /**
@@ -351,6 +350,12 @@ public abstract class WriteCommandAction<T> extends BaseActionRunnable<T> {
     protected abstract void run() throws Throwable;
   }
 
+  /**
+   * If run a write command using this method then "Undo" action always shows "Undefined" text - {@link #DEFAULT_COMMAND_NAME}.
+   *
+   * Please use {@link #runWriteCommandAction(Project, String, String, Runnable, PsiFile...)} instead.
+   */
+  @TestOnly
   public static void runWriteCommandAction(Project project, @NotNull Runnable runnable) {
     runWriteCommandAction(project, DEFAULT_COMMAND_NAME, DEFAULT_GROUP_ID, runnable);
   }

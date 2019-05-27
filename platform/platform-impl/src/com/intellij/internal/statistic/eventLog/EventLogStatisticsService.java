@@ -1,14 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.internal.statistic.eventLog;
 
 import com.intellij.internal.statistic.connect.StatServiceException;
 import com.intellij.internal.statistic.connect.StatisticsResult;
 import com.intellij.internal.statistic.connect.StatisticsResult.ResultCode;
 import com.intellij.internal.statistic.connect.StatisticsService;
-import com.intellij.internal.statistic.persistence.UsageStatisticsPersistenceComponent;
-import com.intellij.notification.Notification;
-import com.intellij.notification.NotificationListener;
-import com.intellij.openapi.application.PermanentInstallationID;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.util.io.BufferExposingByteArrayOutputStream;
 import com.intellij.openapi.util.text.StringUtil;
@@ -19,22 +15,40 @@ import org.jetbrains.annotations.Nullable;
 import java.io.File;
 import java.io.OutputStreamWriter;
 import java.net.HttpURLConnection;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.zip.GZIPOutputStream;
 
 public class EventLogStatisticsService implements StatisticsService {
   private static final Logger LOG = Logger.getInstance("com.intellij.internal.statistic.eventLog.EventLogStatisticsService");
-  private static final EventLogSettingsService mySettingsService = EventLogExternalSettingsService.getInstance();
+  private static final int MAX_FILES_TO_SEND = 20;
+
+  private final String myRecorder;
+  private final EventLogSettingsService mySettingsService;
+
+  public EventLogStatisticsService(@NotNull String recorder) {
+    myRecorder = recorder;
+    mySettingsService = new EventLogExternalSettingsService(recorder);
+  }
 
   @Override
   public StatisticsResult send() {
-    return send(mySettingsService, new EventLogCounterResultDecorator());
+    return send(myRecorder, mySettingsService, new EventLogCounterResultDecorator());
   }
 
-  public static StatisticsResult send(@NotNull EventLogSettingsService settings, @NotNull EventLogResultDecorator decorator) {
-    if (!FeatureUsageLogger.INSTANCE.isEnabled()) {
-      throw new StatServiceException("Event Log collector is not enabled");
+  public static StatisticsResult send(@NotNull String recorder, @NotNull EventLogSettingsService settings, @NotNull EventLogResultDecorator decorator) {
+    final StatisticsEventLoggerProvider config = StatisticsEventLoggerKt.getEventLogProvider(recorder);
+
+    final List<File> logs = getLogFiles(config);
+    if (!config.isSendEnabled()) {
+      cleanupFiles(logs);
+      return new StatisticsResult(ResultCode.NOTHING_TO_SEND, "Event Log collector is not enabled");
+    }
+
+    if (logs.isEmpty()) {
+      return new StatisticsResult(ResultCode.NOTHING_TO_SEND, "No files to send");
     }
 
     final String serviceUrl = settings.getServiceUrl();
@@ -43,16 +57,18 @@ public class EventLogStatisticsService implements StatisticsService {
     }
 
     if (!isSendLogsEnabled(settings.getPermittedTraffic())) {
-      cleanupAllFiles();
+      cleanupFiles(logs);
       return new StatisticsResult(StatisticsResult.ResultCode.NOT_PERMITTED_SERVER, "NOT_PERMITTED");
     }
 
     final LogEventFilter filter = settings.getEventFilter();
     try {
-      final List<File> logs = FeatureUsageLogger.INSTANCE.getLogFiles();
+      int failed = 0;
       final List<File> toRemove = new ArrayList<>(logs.size());
-      for (File file : logs) {
-        final LogEventRecordRequest recordRequest = LogEventRecordRequest.Companion.create(file, filter);
+      int size = Math.min(MAX_FILES_TO_SEND, logs.size());
+      for (int i = 0; i < size; i++) {
+        final File file = logs.get(i);
+        final LogEventRecordRequest recordRequest = LogEventRecordRequest.Companion.create(file, config.getRecorderId(), filter, settings.isInternal());
         final String error = validate(recordRequest, file);
         if (StringUtil.isNotEmpty(error) || recordRequest == null) {
           if (LOG.isTraceEnabled()) {
@@ -60,6 +76,7 @@ public class EventLogStatisticsService implements StatisticsService {
           }
           decorator.failed(recordRequest);
           toRemove.add(file);
+          failed++;
           continue;
         }
 
@@ -70,7 +87,7 @@ public class EventLogStatisticsService implements StatisticsService {
             .tuner(connection -> connection.setRequestProperty("Content-Encoding", "gzip"))
             .connect(request -> {
               final BufferExposingByteArrayOutputStream out = new BufferExposingByteArrayOutputStream();
-              try (OutputStreamWriter writer = new OutputStreamWriter(new GZIPOutputStream(out))) {
+              try (OutputStreamWriter writer = new OutputStreamWriter(new GZIPOutputStream(out), StandardCharsets.UTF_8)) {
                 LogEventSerializer.INSTANCE.toString(recordRequest, writer);
               }
               request.write(out.toByteArray());
@@ -83,6 +100,7 @@ public class EventLogStatisticsService implements StatisticsService {
           toRemove.add(file);
         }
         catch (HttpRequests.HttpStatusException e) {
+          failed++;
           decorator.failed(recordRequest);
           if (e.getStatusCode() == HttpURLConnection.HTTP_BAD_REQUEST) {
             toRemove.add(file);
@@ -93,6 +111,7 @@ public class EventLogStatisticsService implements StatisticsService {
           }
         }
         catch (Exception e) {
+          failed++;
           if (LOG.isTraceEnabled()) {
             LOG.trace(file.getName() + " -> " + e.getMessage());
           }
@@ -100,8 +119,7 @@ public class EventLogStatisticsService implements StatisticsService {
       }
 
       cleanupFiles(toRemove);
-
-      UsageStatisticsPersistenceComponent.getInstance().setEventLogSentTime(System.currentTimeMillis());
+      EventLogSystemLogger.logFilesSend(config.getRecorderId(), logs.size(), size, failed);
       return decorator.toResult();
     }
     catch (Exception e) {
@@ -124,8 +142,7 @@ public class EventLogStatisticsService implements StatisticsService {
     if (percent == 0) {
       return false;
     }
-    final String userId = PermanentInstallationID.get();
-    return (Math.abs(userId.hashCode()) % 100) < percent;
+    return EventLogConfiguration.INSTANCE.getBucket() < percent * 2.56;
   }
 
   @Nullable
@@ -134,11 +151,14 @@ public class EventLogStatisticsService implements StatisticsService {
       return "File is empty or has invalid format: " + file.getName();
     }
 
-    if (StringUtil.isEmpty(request.getUser())) {
-      return "Cannot upload event log, user ID is empty";
+    if (StringUtil.isEmpty(request.getDevice())) {
+      return "Cannot upload event log, device ID is empty";
     }
     else if (StringUtil.isEmpty(request.getProduct())) {
       return "Cannot upload event log, product code is empty";
+    }
+    else if (StringUtil.isEmpty(request.getRecorder())) {
+      return "Cannot upload event log, recorder code is empty";
     }
     else if (request.getRecords().isEmpty()) {
       return "Cannot upload event log, record list is empty";
@@ -152,19 +172,18 @@ public class EventLogStatisticsService implements StatisticsService {
     return null;
   }
 
-  private static void cleanupAllFiles() {
+  @NotNull
+  protected static List<File> getLogFiles(StatisticsEventLoggerProvider config) {
     try {
-      final List<File> logs = FeatureUsageLogger.INSTANCE.getLogFiles();
-      if (!logs.isEmpty()) {
-        cleanupFiles(logs);
-      }
+      return config.getLogFiles();
     }
     catch (Exception e) {
       LOG.info(e);
     }
+    return Collections.emptyList();
   }
 
-  private static void cleanupFiles(@NotNull List<File> toRemove) {
+  private static void cleanupFiles(@NotNull List<? extends File> toRemove) {
     for (File file : toRemove) {
       if (!file.delete()) {
         LOG.warn("Failed deleting event log: " + file.getName());
@@ -174,11 +193,6 @@ public class EventLogStatisticsService implements StatisticsService {
         LOG.trace("Removed sent log: " + file.getName());
       }
     }
-  }
-
-  @Override
-  public Notification createNotification(@NotNull String groupDisplayId, @Nullable NotificationListener listener) {
-    return null;
   }
 
   private static class EventLogCounterResultDecorator implements EventLogResultDecorator {

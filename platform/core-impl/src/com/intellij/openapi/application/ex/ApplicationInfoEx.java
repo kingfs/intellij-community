@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2015 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.application.ex;
 
 import com.intellij.openapi.application.ApplicationInfo;
@@ -26,7 +12,6 @@ import java.util.List;
 
 /**
  * @author mike
- * @since Sep 16, 2002
  */
 public abstract class ApplicationInfoEx extends ApplicationInfo {
   public static ApplicationInfoEx getInstanceEx() {
@@ -47,6 +32,11 @@ public abstract class ApplicationInfoEx extends ApplicationInfo {
   @Deprecated
   public abstract String getIconUrl();
 
+  /**
+   * @deprecated use {@link #getSmallApplicationSvgIconUrl()} instead
+   */
+  @Deprecated
+  @NotNull
   public abstract String getSmallIconUrl();
 
   /**
@@ -62,6 +52,12 @@ public abstract class ApplicationInfoEx extends ApplicationInfo {
    */
   @Nullable
   public abstract String getApplicationSvgIconUrl();
+
+  /**
+   * Return path to an svg file containing a variant of {@link #getApplicationSvgIconUrl() the product icon} which is suitable for 16x16 images.
+   */
+  @Nullable
+  public abstract String getSmallApplicationSvgIconUrl();
 
   /**
    * Return an svg file containing icon of the current version of the product. It may return special icon for EAP builds.
@@ -86,6 +82,11 @@ public abstract class ApplicationInfoEx extends ApplicationInfo {
 
   public abstract boolean isEAP();
 
+  /**
+   * Returns {@code true} only for EAP builds of "major" releases (i.e. for 2018.3, but not for 2018.3.1).
+   */
+  public abstract boolean isMajorEAP();
+
   public abstract UpdateUrls getUpdateUrls();
 
   public abstract String getDocumentationUrl();
@@ -96,7 +97,12 @@ public abstract class ApplicationInfoEx extends ApplicationInfo {
 
   public abstract String getFeedbackUrl();
 
+  /*
+   * Returns url to plugins repository without trailing slash
+   */
   public abstract String getPluginManagerUrl();
+
+  public abstract boolean usesJetBrainsPluginRepository();
 
   public abstract String getPluginsListUrl();
 
@@ -120,17 +126,6 @@ public abstract class ApplicationInfoEx extends ApplicationInfo {
     String getCheckingUrl();
     String getPatchesUrl();
   }
-
-  public interface PluginChooserPage {
-    @NotNull
-    String getTitle();
-    @Nullable
-    String getCategory();
-    @Nullable
-    String getDependentPlugin();
-  }
-
-  public abstract List<PluginChooserPage> getPluginChooserPages();
 
   /**
    * @return {@code true} if the specified plugin is an essential part of the IDE so it cannot be disabled and isn't shown in Settings | Plugins
@@ -159,4 +154,6 @@ public abstract class ApplicationInfoEx extends ApplicationInfo {
   public final boolean isVendorJetBrains() {
     return "JetBrains".equals(getShortCompanyName());
   }
+
+  public abstract List<ProgressSlide> getProgressSlides();
 }

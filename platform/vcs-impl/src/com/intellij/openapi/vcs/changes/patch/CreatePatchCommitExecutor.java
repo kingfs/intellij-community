@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.changes.patch;
 
 import com.intellij.CommonBundle;
@@ -50,6 +50,7 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
     myChangeListManager = changeListManager;
   }
 
+  @NotNull
   @Override
   @Nls
   public String getActionText() {
@@ -66,10 +67,10 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
     return true;
   }
 
-  @Override
   @NotNull
-  public CommitSession createCommitSession() {
-    return new CreatePatchCommitSession();
+  @Override
+  public CommitSession createCommitSession(@NotNull CommitContext commitContext) {
+    return new CreatePatchCommitSession(commitContext);
   }
 
   @Override
@@ -77,26 +78,16 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
     myChangeListManager.registerCommitExecutor(this);
   }
 
-  private class CreatePatchCommitSession implements CommitSession, CommitSessionContextAware {
+  private class CreatePatchCommitSession implements CommitSession {
     private final CreatePatchConfigurationPanel myPanel = new CreatePatchConfigurationPanel(myProject);
-    private CommitContext myCommitContext;
+    @NotNull private final CommitContext myCommitContext;
 
-    CreatePatchCommitSession() {
+    CreatePatchCommitSession(@NotNull CommitContext commitContext) {
+      myCommitContext = commitContext;
     }
 
     @Override
-    public void setContext(CommitContext context) {
-      myCommitContext = context;
-    }
-
-    @Override
-    @Nullable
-    public JComponent getAdditionalConfigurationUI() {
-      return myPanel.getPanel();
-    }
-
-    @Override
-    public JComponent getAdditionalConfigurationUI(final Collection<Change> changes, final String commitMessage) {
+    public JComponent getAdditionalConfigurationUI(@NotNull Collection<Change> changes, @Nullable String commitMessage) {
       String patchPath = StringUtil.nullize(PropertiesComponent.getInstance(myProject).getValue(VCS_PATCH_PATH_KEY));
       if (patchPath == null) {
         patchPath = VcsApplicationSettings.getInstance().PATCH_STORAGE_LOCATION;
@@ -127,7 +118,7 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
       try {
         if (myPanel.isToClipboard()) {
           String base = myPanel.getBaseDirName();
-          List<FilePatch> patches = IdeaTextPatchBuilder.buildPatch(myProject, changes, base, myPanel.isReversePatch());
+          List<FilePatch> patches = IdeaTextPatchBuilder.buildPatch(myProject, changes, base, myPanel.isReversePatch(), true);
           writeAsPatchToClipboard(myProject, patches, base, myCommitContext);
           VcsNotifier.getInstance(myProject).notifySuccess("Patch copied to clipboard");
         }
@@ -143,7 +134,7 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
       }
     }
 
-    private void validateAndWritePatchToFile(@NotNull Collection<Change> changes) throws VcsException, IOException {
+    private void validateAndWritePatchToFile(@NotNull Collection<? extends Change> changes) throws VcsException, IOException {
       final String fileName = myPanel.getFileName();
       final File file = new File(fileName).getAbsoluteFile();
       if (!checkIsFileValid(file)) return;
@@ -157,7 +148,7 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
       final boolean reversePatch = myPanel.isReversePatch();
 
       String baseDirName = myPanel.getBaseDirName();
-      List<FilePatch> patches = IdeaTextPatchBuilder.buildPatch(myProject, changes, baseDirName, reversePatch);
+      List<FilePatch> patches = IdeaTextPatchBuilder.buildPatch(myProject, changes, baseDirName, reversePatch, true);
       PatchWriter.writePatches(myProject, fileName, baseDirName, patches, myCommitContext, myPanel.getEncoding(), true);
       WaitForProgressToShow.runOrInvokeLaterAboveProgress(() -> {
         final VcsConfiguration configuration = VcsConfiguration.getInstance(myProject);
@@ -183,7 +174,7 @@ public class CreatePatchCommitExecutor extends LocalCommitExecutor implements Pr
       WaitForProgressToShow.runOrInvokeAndWaitAboveProgress(
         () -> result[0] = Messages.showYesNoDialog(myProject, "File " + file.getName() + " (" + file.getParent() + ")" +
                                                               " already exists.\nDo you want to overwrite it?",
-                                                   CommonBundle.getWarningTitle(),
+                                                   "Save Patch File",
                                                    "Overwrite", "Cancel",
                                                    Messages.getWarningIcon()));
       if (Messages.NO == result[0]) return false;

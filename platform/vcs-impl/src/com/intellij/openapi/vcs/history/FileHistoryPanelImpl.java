@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.history;
 
 import com.intellij.CommonBundle;
@@ -86,8 +86,8 @@ public class FileHistoryPanelImpl extends JPanel implements DataProvider, Dispos
   @NotNull private final FileHistoryRefresherI myRefresherI;
   @NotNull private final FilePath myFilePath;
   @Nullable private final VcsRevisionNumber myStartingRevision;
-  @NotNull private final Map<VcsRevisionNumber, Integer> myRevisionsOrder = ContainerUtil.newHashMap();
-  @NotNull private final Map<VcsFileRevision, VirtualFile> myRevisionToVirtualFile = ContainerUtil.newHashMap();
+  @NotNull private final Map<VcsRevisionNumber, Integer> myRevisionsOrder = new HashMap<>();
+  @NotNull private final Map<VcsFileRevision, VirtualFile> myRevisionToVirtualFile = new HashMap<>();
   @NotNull private final DetailsPanel myDetails;
   @NotNull private final DualView myDualView;
   @Nullable private final JComponent myAdditionalDetails;
@@ -676,7 +676,7 @@ public class FileHistoryPanelImpl extends JPanel implements DataProvider, Dispos
           setOpaque(selected);
           Date date = (Date)value;
           if (date != null) {
-            append(DateFormatUtil.formatPrettyDateTime(date), getDefaultAttributes());
+            append(DateFormatUtil.formatDateTime(date), getDefaultAttributes());
           }
           SpeedSearchUtil.applySpeedSearchHighlighting(table, this, false, selected);
         }
@@ -697,7 +697,7 @@ public class FileHistoryPanelImpl extends JPanel implements DataProvider, Dispos
 
     @Override
     public String getPreferredStringValue() {
-      return DateFormatUtil.formatPrettyDateTime(Clock.getTime() + 1000);
+      return DateFormatUtil.formatDateTime(Clock.getTime() + 1000);
     }
 
     @Nullable
@@ -888,9 +888,9 @@ public class FileHistoryPanelImpl extends JPanel implements DataProvider, Dispos
 
   private static class MyTreeCellRenderer implements TreeCellRenderer {
     private final TreeCellRenderer myDefaultCellRenderer;
-    private final Getter<VcsHistorySession> myHistorySession;
+    private final Getter<? extends VcsHistorySession> myHistorySession;
 
-    MyTreeCellRenderer(final TreeCellRenderer defaultCellRenderer, final Getter<VcsHistorySession> historySession) {
+    MyTreeCellRenderer(final TreeCellRenderer defaultCellRenderer, final Getter<? extends VcsHistorySession> historySession) {
       myDefaultCellRenderer = defaultCellRenderer;
       myHistorySession = historySession;
     }
@@ -930,9 +930,9 @@ public class FileHistoryPanelImpl extends JPanel implements DataProvider, Dispos
   }
 
   private static class MyCellWrapper implements CellWrapper {
-    private final Getter<VcsHistorySession> myHistorySession;
+    private final Getter<? extends VcsHistorySession> myHistorySession;
 
-    MyCellWrapper(final Getter<VcsHistorySession> historySession) {
+    MyCellWrapper(final Getter<? extends VcsHistorySession> historySession) {
       myHistorySession = historySession;
     }
 

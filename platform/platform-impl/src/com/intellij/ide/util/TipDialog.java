@@ -1,10 +1,9 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.ide.util;
 
 import com.intellij.CommonBundle;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.TipsOfTheDayUsagesCollector;
-import com.intellij.internal.statistic.service.fus.collectors.FUSApplicationUsageTrigger;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
@@ -15,7 +14,6 @@ import com.intellij.openapi.util.SystemInfo;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.wm.ex.WindowManagerEx;
-import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -26,6 +24,9 @@ import java.awt.event.ActionEvent;
 import java.util.ArrayList;
 
 public class TipDialog extends DialogWrapper {
+  private static TipDialog ourInstance;
+
+
   private TipPanel myTipPanel;
 
   @Nullable
@@ -49,7 +50,7 @@ public class TipDialog extends DialogWrapper {
     setTitle(IdeBundle.message("title.tip.of.the.day"));
     setCancelButtonText(CommonBundle.getCloseButtonText());
     myTipPanel = new TipPanel();
-    myTipPanel.setTips(ContainerUtil.newArrayList(TipAndTrickBean.EP_NAME.getExtensionList()));
+    myTipPanel.setTips(new ArrayList<>(TipAndTrickBean.EP_NAME.getExtensionList()));
     myTipPanel.nextTip();
     setDoNotAskOption(myTipPanel);
     setHorizontalStretch(1.33f);
@@ -89,9 +90,28 @@ public class TipDialog extends DialogWrapper {
     super.dispose();
   }
 
-  public static TipDialog createForProject(final Project project) {
-    final Window w = WindowManagerEx.getInstanceEx().suggestParentWindow(project);
-    return (w == null) ? new TipDialog() : new TipDialog(w);
+  public static void showForProject(@Nullable Project project) {
+    createForProject(project);
+    ourInstance.show();
+  }
+
+  /**
+   * @deprecated Use {@link #showForProject(Project)} instead
+   */
+  @Deprecated
+  public static TipDialog createForProject(@Nullable Project project) {
+    Window w = WindowManagerEx.getInstanceEx().suggestParentWindow(project);
+    if (ourInstance != null && ourInstance.isVisible()) {
+      ourInstance.dispose();
+    }
+    return ourInstance = (w == null) ? new TipDialog() : new TipDialog(w);
+  }
+
+  public static void hideForProject(@Nullable Project project) {
+    if (ourInstance != null) {
+      ourInstance.dispose();
+      ourInstance = null;
+    }
   }
 
   private class OpenTipsAction extends AbstractAction {
@@ -111,7 +131,7 @@ public class TipDialog extends DialogWrapper {
       VirtualFile[] pathToSelect = lastOpenedTip != null ? new VirtualFile[]{lastOpenedTip} : VirtualFile.EMPTY_ARRAY;
       VirtualFile[] choose = FileChooserFactory.getInstance().createFileChooser(descriptor, null, myTipPanel).choose(null, pathToSelect);
       if (choose.length > 0) {
-        ArrayList<TipAndTrickBean> tips = ContainerUtil.newArrayList();
+        ArrayList<TipAndTrickBean> tips = new ArrayList<>();
         for (VirtualFile file : choose) {
           TipAndTrickBean tip = new TipAndTrickBean();
           tip.fileName = file.getPath();
@@ -132,7 +152,7 @@ public class TipDialog extends DialogWrapper {
 
     @Override
     public void actionPerformed(ActionEvent e) {
-      FUSApplicationUsageTrigger.getInstance().trigger(TipsOfTheDayUsagesCollector.class, "previous.tip");
+      TipsOfTheDayUsagesCollector.trigger("previous.tip");
       myTipPanel.prevTip();
     }
   }
@@ -146,7 +166,7 @@ public class TipDialog extends DialogWrapper {
 
     @Override
     public void actionPerformed(ActionEvent e) {
-      FUSApplicationUsageTrigger.getInstance().trigger(TipsOfTheDayUsagesCollector.class, "next.tip");
+      TipsOfTheDayUsagesCollector.trigger("next.tip");
       myTipPanel.nextTip();
     }
   }

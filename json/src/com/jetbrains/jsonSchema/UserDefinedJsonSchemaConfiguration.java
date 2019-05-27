@@ -92,7 +92,7 @@ public class UserDefinedJsonSchemaConfiguration {
   }
 
   public String getRelativePathToSchema() {
-    return relativePathToSchema;
+    return Item.normalizePath(relativePathToSchema);
   }
 
   public JsonSchemaVersion getSchemaVersion() {
@@ -104,7 +104,7 @@ public class UserDefinedJsonSchemaConfiguration {
   }
 
   public void setRelativePathToSchema(String relativePathToSchema) {
-    this.relativePathToSchema = relativePathToSchema;
+    this.relativePathToSchema = Item.neutralizePath(relativePathToSchema);
   }
 
   public boolean isApplicationDefined() {
@@ -158,7 +158,7 @@ public class UserDefinedJsonSchemaConfiguration {
             final VirtualFile relativeFile = getRelativeFile(project, patternText);
             if (relativeFile == null || !VfsUtilCore.isAncestor(relativeFile, vfile, true)) return false;
             JsonSchemaService service = JsonSchemaService.Impl.get(project);
-            return service.isApplicableToFile(vfile) && !service.isSchemaFile(vfile);
+            return service.isApplicableToFile(vfile);
           });
           break;
       }
@@ -235,12 +235,12 @@ public class UserDefinedJsonSchemaConfiguration {
     }
 
     @NotNull
-    private static String normalizePath(String path) {
+    private static String normalizePath(@NotNull String path) {
       if (preserveSlashes(path)) return path;
       return StringUtil.trimEnd(FileUtilRt.toSystemDependentName(path), File.separatorChar);
     }
 
-    private static boolean preserveSlashes(String path) {
+    private static boolean preserveSlashes(@NotNull String path) {
       // http/https URLs to schemas
       // mock URLs of fragments editor
       return StringUtil.startsWith(path, "http:")
@@ -249,7 +249,7 @@ public class UserDefinedJsonSchemaConfiguration {
     }
 
     @NotNull
-    private static String neutralizePath(String path) {
+    private static String neutralizePath(@NotNull String path) {
       if (preserveSlashes(path)) return path;
       return StringUtil.trimEnd(FileUtilRt.toSystemIndependentName(path), '/');
     }

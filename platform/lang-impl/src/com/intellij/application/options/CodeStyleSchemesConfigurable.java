@@ -1,18 +1,4 @@
-/*
- * Copyright 2000-2017 JetBrains s.r.o.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.application.options;
 
@@ -30,7 +16,6 @@ import com.intellij.psi.codeStyle.CodeStyleScheme;
 import com.intellij.psi.codeStyle.CodeStyleSettingsManager;
 import com.intellij.psi.codeStyle.CodeStyleSettingsProvider;
 import com.intellij.psi.codeStyle.LanguageCodeStyleSettingsProvider;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -41,7 +26,7 @@ import java.util.List;
 import java.util.Set;
 
 public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.Abstract
-  implements OptionsContainingConfigurable, Configurable.NoMargin, Configurable.NoScroll, Configurable.VariableProjectAppLevel {
+  implements Configurable.NoMargin, Configurable.NoScroll, Configurable.VariableProjectAppLevel {
 
   private CodeStyleSchemesPanel myRootSchemesPanel;
   private @NotNull final CodeStyleSchemesModel myModel;
@@ -205,9 +190,9 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
   protected Configurable[] buildConfigurables() {
     CodeStyleGroupProviderFactory groupProviderFactory = new CodeStyleGroupProviderFactory(getModel(), this);
     myPanels = new ArrayList<>();
-    Set<CodeStyleGroupProvider> addedGroupProviders = ContainerUtil.newHashSet();
+    Set<CodeStyleGroupProvider> addedGroupProviders = new HashSet<>();
 
-    final List<CodeStyleSettingsProvider> providers = ContainerUtil.newArrayList();
+    final List<CodeStyleSettingsProvider> providers = new ArrayList<>();
     providers.addAll(CodeStyleSettingsProvider.EXTENSION_POINT_NAME.getExtensionList());
     providers.addAll(LanguageCodeStyleSettingsProvider.getSettingsPagesProviders());
 
@@ -287,27 +272,25 @@ public class CodeStyleSchemesConfigurable extends SearchableConfigurable.Parent.
   }
 
   @Override
-  public Set<String> processListOptions() {
-    HashSet<String> result = new HashSet<>();
-    for (Configurable panel : myPanels) {
-      if (panel instanceof CodeStyleConfigurableWrapper) {
-        result.addAll(((CodeStyleConfigurableWrapper)panel).processListOptions());
-      }
-    }
-    return result;
-  }
-
-  @Override
   public boolean isProjectLevel() {
     return myModel.isUsePerProjectSettings();
   }
 
   @Nullable
-  public SearchableConfigurable findSubConfigurable(final String name) {
-    if (myPanels == null) {
-      buildConfigurables();
+  public SearchableConfigurable findSubConfigurable(@NotNull final String name) {
+    return findSubConfigurable(this, name);
+  }
+
+  private static SearchableConfigurable findSubConfigurable(SearchableConfigurable.Parent topConfigurable, @NotNull final String name) {
+    for (Configurable configurable : topConfigurable.getConfigurables()) {
+      if (configurable instanceof SearchableConfigurable) {
+        if (name.equals(configurable.getDisplayName())) return (SearchableConfigurable)configurable;
+        if (configurable instanceof SearchableConfigurable.Parent) {
+          SearchableConfigurable child = findSubConfigurable((Parent)configurable, name);
+          if (child != null) return child;
+        }
+      }
     }
-    Configurable found = myPanels.stream().filter(panel -> panel.getDisplayName().equals(name)).findFirst().orElse(null);
-    return found instanceof SearchableConfigurable ? (SearchableConfigurable)found : null;
+    return null;
   }
 }

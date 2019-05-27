@@ -2,12 +2,20 @@
 package com.intellij.ui.javafx;
 
 import com.intellij.ide.IdeEventQueue;
+import com.intellij.ide.ui.LafManager;
+import com.intellij.ide.ui.LafManagerListener;
+import com.intellij.ide.ui.laf.darcula.DarculaLookAndFeelInfo;
+import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.ui.JBColor;
 import com.intellij.util.ui.JBUI;
+import com.intellij.util.ui.UIUtil;
 import com.sun.javafx.application.PlatformImpl;
+import com.sun.javafx.webkit.Accessor;
+import com.sun.webkit.WebPage;
 import javafx.application.Platform;
+import javafx.concurrent.Worker;
 import javafx.embed.swing.JFXPanel;
 import javafx.scene.Scene;
 import javafx.scene.web.WebEngine;
@@ -17,31 +25,47 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
 public class JavaFxHtmlPanel implements Disposable {
+  // flag is reset after check
+  public static final String JAVAFX_INITIALIZATION_INCOMPLETE_PROPERTY = "js.debugger.javafx.inititalization";
   @NotNull
   private final JPanel myPanelWrapper;
   @NotNull
   private final List<Runnable> myInitActions = new ArrayList<>();
   @Nullable
-  private JFXPanel myPanel;
+  protected JFXPanel myPanel;
   @Nullable protected WebView myWebView;
+  private Color background;
 
   public JavaFxHtmlPanel() {
+    PropertiesComponent.getInstance().setValue(JAVAFX_INITIALIZATION_INCOMPLETE_PROPERTY, true, false);
+    ApplicationManager.getApplication().saveSettings();
+    background = JBColor.background();
     myPanelWrapper = new JPanel(new BorderLayout());
-    myPanelWrapper.setBackground(JBColor.background());
+    myPanelWrapper.setBackground(background);
 
     ApplicationManager.getApplication().invokeLater(() -> runFX(() -> PlatformImpl.startup(() -> {
+      PropertiesComponent.getInstance().setValue(JAVAFX_INITIALIZATION_INCOMPLETE_PROPERTY, false, false);
       myWebView = new WebView();
       myWebView.setContextMenuEnabled(false);
       myWebView.setZoom(JBUI.scale(1.f));
 
       final WebEngine engine = myWebView.getEngine();
       registerListeners(engine);
+      engine.getLoadWorker().stateProperty().addListener((observable, oldValue, newValue) -> {
+        if (newValue == Worker.State.RUNNING) {
+            WebPage page = Accessor.getPageFor(engine);
+            page.setBackgroundColor(background.getRGB());
+          }
+        }
+      );
 
-      final Scene scene = new Scene(myWebView);
+      javafx.scene.paint.Color fxColor = toFxColor(background);
+      final Scene scene = new Scene(myWebView, fxColor);
 
       ApplicationManager.getApplication().invokeLater(() -> runFX(() -> {
         myPanel = new JFXPanelWrapper();
@@ -58,6 +82,28 @@ public class JavaFxHtmlPanel implements Disposable {
         myPanelWrapper.repaint();
       }));
     })));
+
+    LafManager.getInstance().addLafManagerListener(new JavaFXLafManagerListener());
+    runInPlatformWhenAvailable(() -> updateLaf(UIUtil.isUnderDarcula()));
+  }
+
+  @NotNull
+  public static javafx.scene.paint.Color toFxColor(Color background) {
+    double r = background.getRed() / 255.0;
+    double g = background.getGreen() / 255.0;
+    double b = background.getBlue() / 255.0;
+    double a = background.getAlpha() / 255.0;
+    return javafx.scene.paint.Color.color(r, g, b, a);
+  }
+
+  public void setBackground(Color background) {
+    this.background = background;
+    myPanelWrapper.setBackground(background);
+    ApplicationManager.getApplication().invokeLater(() -> runFX(() -> {
+      if (myPanel != null) {
+        myPanel.getScene().setFill(toFxColor(background));
+      }
+    }));
   }
 
   protected void registerListeners(@NotNull WebEngine engine) {
@@ -99,9 +145,39 @@ public class JavaFxHtmlPanel implements Disposable {
     });
   }
 
+  @Nullable
+  protected URL getStyle(boolean isDarcula) {
+    return null;
+  }
+
+  private class JavaFXLafManagerListener implements LafManagerListener {
+    @Override
+    public void lookAndFeelChanged(@NotNull LafManager manager) {
+      updateLaf(manager.getCurrentLookAndFeel() instanceof DarculaLookAndFeelInfo);
+    }
+  }
+
+  private void updateLaf(boolean isDarcula) {
+    URL styleUrl = getStyle(isDarcula);
+    if (styleUrl == null) {
+      return;
+    }
+    ApplicationManager.getApplication().invokeLater(
+      () -> runInPlatformWhenAvailable(
+        () -> {
+          final WebView webView = getWebViewGuaranteed();
+          webView.getEngine().setUserStyleSheetLocation(styleUrl.toExternalForm());
+        }
+      ));
+  }
+
   @Override
   public void dispose() {
+    runInPlatformWhenAvailable(
+      () -> getWebViewGuaranteed().getEngine().load(null)
+    );
   }
+
 
   @NotNull
   protected WebView getWebViewGuaranteed() {

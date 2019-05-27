@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.psi.impl;
 
 import com.intellij.application.options.CodeStyle;
@@ -24,17 +24,16 @@ import com.intellij.openapi.vfs.jrt.JrtFileSystem;
 import com.intellij.pom.java.LanguageLevel;
 import com.intellij.psi.*;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.JavaCodeStyleManager;
 import com.intellij.psi.codeStyle.JavaCodeStyleSettings;
 import com.intellij.psi.codeStyle.arrangement.MemberOrderService;
 import com.intellij.psi.impl.compiled.ClsClassImpl;
 import com.intellij.psi.impl.compiled.ClsElementImpl;
-import com.intellij.psi.impl.file.impl.JavaFileManager;
 import com.intellij.psi.impl.source.codeStyle.ImportHelper;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.intellij.psi.util.PsiTreeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.IncorrectOperationException;
-import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -67,7 +66,7 @@ public class JavaPsiImplementationHelperImpl extends JavaPsiImplementationHelper
   @NotNull
   @Override
   public PsiJavaModule getOriginalModule(@NotNull PsiJavaModule module) {
-    return findCompiledElement(module, scope -> JavaFileManager.getInstance(myProject).findModules(module.getName(), scope));
+    return findCompiledElement(module, scope -> JavaPsiFacade.getInstance(myProject).findModules(module.getName(), scope));
   }
 
   private <T extends PsiElement> T findCompiledElement(T original, Function<? super GlobalSearchScope, ? extends Collection<T>> candidateFinder) {
@@ -82,7 +81,7 @@ public class JavaPsiImplementationHelperImpl extends JavaPsiImplementationHelper
       ProjectFileIndex idx = ProjectRootManager.getInstance(myProject).getFileIndex();
       if (vFile != null && idx.isInLibrarySource(vFile)) {
         GlobalSearchScope librariesScope = LibraryScopeCache.getInstance(myProject).getLibrariesOnlyScope();
-        Set<OrderEntry> originalEntries = ContainerUtil.newHashSet(idx.getOrderEntriesForFile(vFile));
+        Set<OrderEntry> originalEntries = new HashSet<>(idx.getOrderEntriesForFile(vFile));
         for (T candidate : candidateFinder.apply(librariesScope)) {
           PsiFile candidateFile = candidate.getContainingFile();
           if (candidateFile != null) {
@@ -184,7 +183,7 @@ public class JavaPsiImplementationHelperImpl extends JavaPsiImplementationHelper
   private LanguageLevel getClassesLanguageLevel(VirtualFile virtualFile) {
     final ProjectFileIndex index = ProjectRootManager.getInstance(myProject).getFileIndex();
     final VirtualFile sourceRoot = index.getSourceRootForFile(virtualFile);
-    final VirtualFile folder = virtualFile.getParent();
+    VirtualFile folder = virtualFile.isDirectory() ? virtualFile : virtualFile.getParent();
     if (sourceRoot != null && sourceRoot.isDirectory() && folder != null) {
       String relativePath = VfsUtilCore.getRelativePath(folder, sourceRoot, '/');
       if (relativePath == null) {
@@ -192,7 +191,7 @@ public class JavaPsiImplementationHelperImpl extends JavaPsiImplementationHelper
         return null;
       }
       String className = virtualFile.getNameWithoutExtension();
-      Set<VirtualFile> visitedRoots = ContainerUtil.newHashSet();
+      Set<VirtualFile> visitedRoots = new HashSet<>();
       for (OrderEntry entry : index.getOrderEntriesForFile(virtualFile)) {
         for (VirtualFile rootFile : entry.getFiles(OrderRootType.CLASSES)) {
           if (visitedRoots.add(rootFile)) {
@@ -291,7 +290,7 @@ public class JavaPsiImplementationHelperImpl extends JavaPsiImplementationHelper
   @Override
   public void setupCatchBlock(@NotNull String exceptionName, @NotNull PsiType exceptionType, PsiElement context, @NotNull PsiCatchSection catchSection) {
     FileTemplate template = FileTemplateManager.getInstance(catchSection.getProject()).getCodeTemplate(JavaTemplateUtil.TEMPLATE_CATCH_BODY);
-    if (template == null) throw new IncorrectOperationException("Missing template: " + JavaTemplateUtil.TEMPLATE_CATCH_BODY);
+    FileTemplate declarationTemplate = FileTemplateManager.getInstance(catchSection.getProject()).getCodeTemplate(JavaTemplateUtil.TEMPLATE_CATCH_DECLARATION);
 
     Properties props = FileTemplateManager.getInstance(myProject).getDefaultProperties();
     props.setProperty(FileTemplate.ATTRIBUTE_EXCEPTION, exceptionName);
@@ -304,8 +303,26 @@ public class JavaPsiImplementationHelperImpl extends JavaPsiImplementationHelper
     }
 
     try {
+      PsiTryStatement tryStmt = (PsiTryStatement)PsiElementFactory.getInstance(myProject)
+        .createStatementFromText("try {} catch (" + declarationTemplate.getText(props) + ") {\n}", null);
+      PsiParameter parameter = tryStmt.getCatchSections()[0].getParameter();
+
+      String parameterName = parameter == null ? null : parameter.getName();
+      if (parameterName != null) {
+        if (!exceptionName.equals(parameterName)) {
+          parameterName = JavaCodeStyleManager.getInstance(myProject).suggestUniqueVariableName(parameterName, context, false);
+          props.setProperty(FileTemplate.ATTRIBUTE_EXCEPTION, parameterName);
+          parameter.setName(parameterName);
+        }
+
+        PsiParameter sectionParameter = catchSection.getParameter();
+        if (sectionParameter != null) {
+          sectionParameter.replace(parameter);
+        }
+      }
+
       PsiCodeBlock block =
-        PsiElementFactory.SERVICE.getInstance(myProject).createCodeBlockFromText("{\n" + template.getText(props) + "\n}", null);
+        PsiElementFactory.getInstance(myProject).createCodeBlockFromText("{\n" + template.getText(props) + "\n}", null);
       Objects.requireNonNull(catchSection.getCatchBlock()).replace(block);
     }
     catch (ProcessCanceledException ce) {

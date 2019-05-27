@@ -104,7 +104,7 @@ public class MoveInnerProcessor extends BaseRefactoringProcessor {
   protected UsageInfo[] findUsages() {
     LOG.assertTrue(myTargetContainer != null);
 
-    Collection<PsiReference> innerClassRefs = ReferencesSearch.search(myInnerClass).findAll();
+    Collection<PsiReference> innerClassRefs = ReferencesSearch.search(myInnerClass, myRefactoringScope).findAll();
     ArrayList<UsageInfo> usageInfos = new ArrayList<>(innerClassRefs.size());
     for (PsiReference innerClassRef : innerClassRefs) {
       PsiElement ref = innerClassRef.getElement();
@@ -132,8 +132,8 @@ public class MoveInnerProcessor extends BaseRefactoringProcessor {
     else {
       newQName = myNewClassName;
     }
-    MoveClassesOrPackagesUtil.findNonCodeUsages(mySearchInComments, mySearchInNonJavaFiles,
-                                                myInnerClass, newQName, usageInfos);
+    MoveClassesOrPackagesUtil.findNonCodeUsages(myInnerClass, myRefactoringScope, mySearchInComments, mySearchInNonJavaFiles,
+                                                newQName, usageInfos);
     return usageInfos.toArray(UsageInfo.EMPTY_ARRAY);
   }
 
@@ -192,12 +192,17 @@ public class MoveInnerProcessor extends BaseRefactoringProcessor {
       }
 
       // replace references in a new class to old inner class with references to itself
-      for (PsiReference ref : ReferencesSearch.search(myInnerClass, new LocalSearchScope(newClass), true)) {
+      for (PsiReference ref : ReferencesSearch.search(myInnerClass, new LocalSearchScope(newClass.getContainingFile()), true)) {
         PsiElement element = ref.getElement();
         if (element.getParent() instanceof PsiJavaCodeReferenceElement) {
           PsiJavaCodeReferenceElement parentRef = (PsiJavaCodeReferenceElement)element.getParent();
           PsiElement parentRefElement = parentRef.resolve();
           if (parentRefElement instanceof PsiClass) { // reference to inner class inside our inner
+            PsiImportStatementBase insertedImport = PsiTreeUtil.getParentOfType(parentRef, PsiImportStatementBase.class);
+            if (insertedImport != null) {
+              insertedImport.delete();
+              continue;
+            }
             final PsiReferenceList referenceList = PsiTreeUtil.getTopmostParentOfType(parentRef, PsiReferenceList.class);
             if (referenceList == null || referenceList.getParent() != newClass) {
               parentRef.getQualifier().delete();

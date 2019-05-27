@@ -1,15 +1,14 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.updateSettings.impl;
 
 import com.intellij.ide.AppLifecycleListener;
 import com.intellij.ide.IdeBundle;
 import com.intellij.ide.util.PropertiesComponent;
-import com.intellij.internal.statistic.service.fus.collectors.FUSApplicationUsageTrigger;
 import com.intellij.notification.NotificationListener;
 import com.intellij.notification.NotificationType;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationInfo;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ConfigImportHelper;
 import com.intellij.openapi.application.PathManager;
 import com.intellij.openapi.application.ex.ApplicationInfoEx;
@@ -26,12 +25,13 @@ import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.util.Alarm;
 import com.intellij.util.text.DateFormatUtil;
+import org.jdom.JDOMException;
 import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 
-import static com.intellij.openapi.application.PathManager.isSnap;
 import static java.lang.Math.max;
 
 /**
@@ -46,26 +46,24 @@ public class UpdateCheckerComponent implements Disposable, BaseComponent {
 
   private final Alarm myCheckForUpdatesAlarm = new Alarm(Alarm.ThreadToUse.SWING_THREAD);
   private final Runnable myCheckRunnable = () -> UpdateChecker.updateAndShowResult().doWhenProcessed(() -> queueNextCheck(CHECK_INTERVAL));
-  private final UpdateSettings mySettings;
 
-  public UpdateCheckerComponent(@NotNull Application app, @NotNull UpdateSettings settings) {
+  public UpdateCheckerComponent() {
     Disposer.register(this, myCheckForUpdatesAlarm);
 
-    mySettings = settings;
     updateDefaultChannel();
-    checkSecureConnection();
-    scheduleOnStartCheck(app);
+    scheduleOnStartCheck();
     cleanupPatch();
-    snapPackageNotification(app);
+    snapPackageNotification();
   }
 
-  private void updateDefaultChannel() {
-    ChannelStatus current = mySettings.getSelectedChannelStatus();
+  private static void updateDefaultChannel() {
+    UpdateSettings settings = UpdateSettings.getInstance();
+    ChannelStatus current = settings.getSelectedChannelStatus();
     LOG.info("channel: " + current.getCode());
-    boolean eap = ApplicationInfoEx.getInstanceEx().isEAP();
+    boolean eap = ApplicationInfoEx.getInstanceEx().isMajorEAP();
 
     if (eap && current != ChannelStatus.EAP && UpdateStrategyCustomization.getInstance().forceEapUpdateChannelForEapBuilds()) {
-      mySettings.setSelectedChannelStatus(ChannelStatus.EAP);
+      settings.setSelectedChannelStatus(ChannelStatus.EAP);
       LOG.info("channel forced to 'eap'");
       if (!ConfigImportHelper.isFirstSession()) {
         String title = IdeBundle.message("update.notifications.title");
@@ -75,30 +73,23 @@ public class UpdateCheckerComponent implements Disposable, BaseComponent {
     }
 
     if (!eap && current == ChannelStatus.EAP && ConfigImportHelper.isConfigImported()) {
-      mySettings.setSelectedChannelStatus(ChannelStatus.RELEASE);
+      settings.setSelectedChannelStatus(ChannelStatus.RELEASE);
       LOG.info("channel set to 'release'");
     }
   }
 
-  private void checkSecureConnection() {
-    if (mySettings.isSecureConnection() && !mySettings.canUseSecureConnection()) {
-      String title = IdeBundle.message("update.notifications.title");
-      String message = IdeBundle.message("update.sni.disabled.message");
-      UpdateChecker.NOTIFICATIONS.createNotification(title, message, NotificationType.WARNING, null).notify(null);
-    }
-  }
-
-  private void scheduleOnStartCheck(Application app) {
-    if (!mySettings.isCheckNeeded()) {
+  private void scheduleOnStartCheck() {
+    UpdateSettings settings = UpdateSettings.getInstance();
+    if (!settings.isCheckNeeded()) {
       return;
     }
 
-    app.getMessageBus().connect().subscribe(AppLifecycleListener.TOPIC, new AppLifecycleListener() {
+    ApplicationManager.getApplication().getMessageBus().connect().subscribe(AppLifecycleListener.TOPIC, new AppLifecycleListener() {
       @Override
-      public void appFrameCreated(String[] commandLineArgs, @NotNull Ref<Boolean> willOpenProject) {
+      public void appFrameCreated(@NotNull List<String> commandLineArgs, @NotNull Ref<? super Boolean> willOpenProject) {
         BuildNumber currentBuild = ApplicationInfo.getInstance().getBuild();
-        BuildNumber lastBuildChecked = BuildNumber.fromString(mySettings.getLastBuildChecked());
-        long timeSinceLastCheck = max(System.currentTimeMillis() - mySettings.getLastTimeChecked(), 0);
+        BuildNumber lastBuildChecked = BuildNumber.fromString(settings.getLastBuildChecked());
+        long timeSinceLastCheck = max(System.currentTimeMillis() - settings.getLastTimeChecked(), 0);
 
         if (lastBuildChecked == null || currentBuild.compareTo(lastBuildChecked) > 0 || timeSinceLastCheck >= CHECK_INTERVAL) {
           myCheckRunnable.run();
@@ -135,7 +126,7 @@ public class UpdateCheckerComponent implements Disposable, BaseComponent {
       File updateErrorsLog = new File(PathManager.getLogPath(), ERROR_LOG_FILE_NAME);
       try {
         if (updateErrorsLog.isFile() && !StringUtil.isEmptyOrSpaces(FileUtil.loadFile(updateErrorsLog))) {
-          FUSApplicationUsageTrigger.getInstance().trigger(IdeUpdateUsageTriggerCollector.class, "update.failed");
+          IdeUpdateUsageTriggerCollector.trigger("update.failed");
           LOG.info("Previous update of the IDE failed");
         }
       }
@@ -157,12 +148,15 @@ public class UpdateCheckerComponent implements Disposable, BaseComponent {
     myCheckForUpdatesAlarm.cancelAllRequests();
   }
 
-  private void snapPackageNotification(Application app) {
-    if (!isSnap() || !mySettings.isCheckNeeded()) return;
+  private static void snapPackageNotification() {
+    UpdateSettings settings = UpdateSettings.getInstance();
+    if (!settings.isCheckNeeded() || ExternalUpdateManager.ACTUAL != ExternalUpdateManager.SNAP) {
+      return;
+    }
 
-    app.executeOnPooledThread(() -> {
+    ApplicationManager.getApplication().executeOnPooledThread(() -> {
       final BuildNumber currentBuild = ApplicationInfo.getInstance().getBuild();
-      final BuildNumber lastBuildChecked = BuildNumber.fromString(mySettings.getLastBuildChecked());
+      final BuildNumber lastBuildChecked = BuildNumber.fromString(settings.getLastBuildChecked());
 
       if (lastBuildChecked == null) {
         /* First IDE start, just save info about build */
@@ -174,10 +168,10 @@ public class UpdateCheckerComponent implements Disposable, BaseComponent {
       if (!currentBuild.equals(lastBuildChecked)) {
         UpdatesInfo updatesInfo = null;
         try {
-          updatesInfo = UpdateChecker.getUpdatesInfo(UpdateSettings.getInstance());
+          updatesInfo = UpdateChecker.getUpdatesInfo();
         }
-        catch (IOException e) {
-          LOG.error(e);
+        catch (IOException | JDOMException e) {
+          LOG.warn(e);
         }
 
         String blogPost = null;
@@ -197,7 +191,7 @@ public class UpdateCheckerComponent implements Disposable, BaseComponent {
         }
 
         String message = ((blogPost == null) ? IdeBundle.message("update.snap.message")
-                                             : IdeBundle.message("update.snap.message.with.blog.post", StringUtil.escapeXml(blogPost)));
+                                             : IdeBundle.message("update.snap.message.with.blog.post", StringUtil.escapeXmlEntities(blogPost)));
 
         UpdateChecker.NOTIFICATIONS.createNotification(IdeBundle.message("update.notifications.title"),
                                                        message,

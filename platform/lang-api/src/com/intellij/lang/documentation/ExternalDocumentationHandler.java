@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2010 JetBrains s.r.o.
+ * Copyright 2000-2019 JetBrains s.r.o.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@ import com.intellij.psi.PsiManager;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+/**
+ * Implement additionally in your {@link DocumentationProvider}.
+ */
 public interface ExternalDocumentationHandler {
   boolean handleExternal(PsiElement element, PsiElement originalElement);
   boolean handleExternalLink(PsiManager psiManager, String link, PsiElement context);
@@ -39,5 +42,16 @@ public interface ExternalDocumentationHandler {
   default boolean canHandleExternal(@Nullable PsiElement element,
                                     @Nullable PsiElement originalElement) {
     return true;
+  }
+
+  /**
+   * This method can supply a target (HTML reference), which will be navigated to on showing of
+   * {@link #fetchExternalDocumentation(String, PsiElement)}) result.
+   *
+   * @see com.intellij.codeInsight.documentation.DocumentationManagerProtocol
+   */
+  @Nullable
+  default String extractRefFromLink(@NotNull String link) {
+    return null;
   }
 }

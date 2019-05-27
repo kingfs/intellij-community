@@ -111,6 +111,12 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
       return false;
     }
 
+    String switchLabelError = RefactoringUtil.checkEnumConstantInSwitchLabel(selectedExpr);
+    if (switchLabelError != null) {
+      CommonRefactoringUtil.showErrorHint(project, editor, switchLabelError, getRefactoringName(), getHelpID());
+      return false;
+    }
+
     myParentClass = getParentClass(selectedExpr);
     final List<PsiClass> classes = new ArrayList<>();
     PsiClass aClass = myParentClass;
@@ -214,9 +220,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
                                  anchorStatementIfAll, tempAnchorElement, editor,
                                  myParentClass);
 
-    WriteCommandAction.writeCommandAction(project).withName(getRefactoringName()).run(() -> {
-      runnable.run();
-    });
+    WriteCommandAction.writeCommandAction(project).withName(getRefactoringName()).run(() -> runnable.run());
     return false;
   }
 
@@ -825,9 +829,7 @@ public abstract class BaseExpressionToFieldHandler extends IntroduceHandlerBase 
         if (myReplaceAll) {
           List<PsiElement> array = new ArrayList<>();
           for (PsiExpression occurrence : myOccurrences) {
-            if (occurrence instanceof PsiExpression) {
-              occurrence = RefactoringUtil.outermostParenthesizedExpression(occurrence);
-            }
+            occurrence = RefactoringUtil.outermostParenthesizedExpression(occurrence);
             if (myDeleteSelf && occurrence.equals(mySelectedExpr)) continue;
             final PsiElement replaced = RefactoringUtil.replaceOccurenceWithFieldRef(occurrence, myField, destClass);
             if (replaced != null) {

@@ -1,11 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInspection;
 
 import com.intellij.codeInsight.daemon.impl.analysis.HighlightControlFlowUtil;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.psi.*;
-import com.intellij.psi.impl.PsiDiamondTypeUtil;
 import com.intellij.psi.util.PsiUtil;
 import com.intellij.util.ObjectUtils;
 import com.siyeh.ig.psiutils.CommentTracker;
@@ -65,7 +64,7 @@ public class WrapWithMutableCollectionFix implements LocalQuickFix {
     CommentTracker ct = new CommentTracker();
     PsiElement replacement =
       ct.replaceAndRestoreComments(initializer, "new " + myCollectionName + typeParameters + "(" + ct.text(initializer) + ")");
-    PsiDiamondTypeUtil.removeRedundantTypeArguments(replacement);
+    RemoveRedundantTypeArgumentsUtil.removeRedundantTypeArguments(replacement);
     if (myOnTheFly) {
       HighlightUtils.highlightElement(replacement);
     }
@@ -91,7 +90,7 @@ public class WrapWithMutableCollectionFix implements LocalQuickFix {
       anchor = ((PsiReferenceExpression)anchor.getParent()).getQualifierExpression();
     }
     if (!(anchor instanceof PsiExpression)) return null;
-    return ExpressionUtils.resolveLocalVariable(PsiUtil.skipParenthesizedExprDown((PsiExpression)anchor));
+    return ExpressionUtils.resolveLocalVariable((PsiExpression)anchor);
   }
 
   @Contract("null -> null")

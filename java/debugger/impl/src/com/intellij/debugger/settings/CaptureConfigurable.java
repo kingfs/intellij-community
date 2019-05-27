@@ -7,6 +7,7 @@ import com.intellij.debugger.engine.JVMNameUtil;
 import com.intellij.debugger.jdi.DecompiledLocalVariable;
 import com.intellij.debugger.ui.JavaDebuggerSupport;
 import com.intellij.icons.AllIcons;
+import com.intellij.ide.highlighter.ArchiveFileType;
 import com.intellij.ide.ui.laf.darcula.DarculaUIUtil;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CustomShortcutSet;
@@ -16,8 +17,8 @@ import com.intellij.openapi.fileChooser.FileChooser;
 import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.fileChooser.FileChooserFactory;
 import com.intellij.openapi.fileChooser.FileSaverDescriptor;
-import com.intellij.openapi.fileTypes.FileTypes;
 import com.intellij.openapi.fileTypes.StdFileTypes;
+import com.intellij.openapi.options.Configurable.NoScroll;
 import com.intellij.openapi.options.ConfigurationException;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.progress.ProcessCanceledException;
@@ -64,7 +65,7 @@ import java.util.function.BiConsumer;
 /**
  * @author egor
  */
-public class CaptureConfigurable implements SearchableConfigurable {
+public class CaptureConfigurable implements SearchableConfigurable, NoScroll {
   private static final Logger LOG = Logger.getInstance(CaptureConfigurable.class);
   private final Project myProject;
 
@@ -206,7 +207,7 @@ public class CaptureConfigurable implements SearchableConfigurable {
           @Override
           public boolean isFileVisible(VirtualFile file, boolean showHiddenFiles) {
             return super.isFileVisible(file, showHiddenFiles) &&
-                   (file.isDirectory() || "xml".equals(file.getExtension()) || file.getFileType() == FileTypes.ARCHIVE);
+                   (file.isDirectory() || "xml".equals(file.getExtension()) || file.getFileType() == ArchiveFileType.INSTANCE);
           }
 
           @Override
@@ -517,7 +518,7 @@ public class CaptureConfigurable implements SearchableConfigurable {
     return DebuggerBundle.message("async.stacktraces.configurable.display.name");
   }
 
-  static void processCaptureAnnotations(BiConsumer<Boolean, PsiModifierListOwner> consumer) {
+  static void processCaptureAnnotations(BiConsumer<? super Boolean, ? super PsiModifierListOwner> consumer) {
     ApplicationManager.getApplication().assertReadAccessAllowed();
     Project project = JavaDebuggerSupport.getContextProjectForEditorFieldsInDebuggerConfigurables();
     DebuggerProjectSettings debuggerProjectSettings = DebuggerProjectSettings.getInstance(project);
@@ -528,14 +529,14 @@ public class CaptureConfigurable implements SearchableConfigurable {
   private static void scanPointsInt(Project project,
                                     DebuggerProjectSettings debuggerProjectSettings,
                                     boolean capture,
-                                    BiConsumer<Boolean, PsiModifierListOwner> consumer) {
+                                    BiConsumer<? super Boolean, ? super PsiModifierListOwner> consumer) {
     try {
       GlobalSearchScope allScope = GlobalSearchScope.allScope(project);
       JavaPsiFacade psiFacade = JavaPsiFacade.getInstance(project);
       for (String annotationName : getAsyncAnnotations(debuggerProjectSettings, capture)) {
         PsiClass annotationClass = psiFacade.findClass(annotationName, allScope);
         if (annotationClass != null) {
-          AnnotatedElementsSearch.searchElements(annotationClass, allScope, PsiMethod.class, PsiParameter.class)
+          AnnotatedElementsSearch.<PsiModifierListOwner>searchElements(annotationClass, allScope, PsiMethod.class, PsiParameter.class)
             .forEach(e -> {
               consumer.accept(capture, e);
             });
@@ -603,6 +604,12 @@ public class CaptureConfigurable implements SearchableConfigurable {
         .filter(e -> !e.equals(getAnnotationName(false)))
         .toArray(ArrayUtil.EMPTY_STRING_ARRAY);
       super.doOKAction();
+    }
+
+    @Nullable
+    @Override
+    protected String getHelpId() {
+      return "reference.idesettings.debugger.customAsyncAnnotations";
     }
   }
 }

@@ -1,10 +1,9 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.structuralsearch.plugin.ui.filters;
 
 import com.intellij.ide.DataManager;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.ActionToolbarPosition;
-import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.application.ReadAction;
@@ -17,7 +16,10 @@ import com.intellij.structuralsearch.MatchVariableConstraint;
 import com.intellij.structuralsearch.StructuralSearchProfile;
 import com.intellij.structuralsearch.impl.matcher.CompiledPattern;
 import com.intellij.structuralsearch.plugin.ui.Configuration;
-import com.intellij.ui.*;
+import com.intellij.ui.SimpleColoredComponent;
+import com.intellij.ui.SimpleTextAttributes;
+import com.intellij.ui.TableUtil;
+import com.intellij.ui.ToolbarDecorator;
 import com.intellij.ui.awt.RelativePoint;
 import com.intellij.ui.table.JBTable;
 import com.intellij.ui.table.TableView;
@@ -25,6 +27,7 @@ import com.intellij.util.SmartList;
 import com.intellij.util.ui.ColumnInfo;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.ListTableModel;
+import com.intellij.util.ui.StatusText;
 import com.intellij.util.ui.table.JBListTable;
 import com.intellij.util.ui.table.JBTableRowEditor;
 import com.intellij.util.ui.table.JBTableRowRenderer;
@@ -34,8 +37,6 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import javax.swing.table.JTableHeader;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
 import java.util.Arrays;
 import java.util.List;
 
@@ -56,6 +57,8 @@ public class FilterPanel implements FilterTable {
   final Header myHeader = new Header();
   private final List<FilterAction> myFilters =
     Arrays.asList(new TextFilter(this), new CountFilter(this), new TypeFilter(this), new ReferenceFilter(this), new ScriptFilter(this));
+  private Runnable myConstraintChangedCallback;
+  boolean myValid;
 
   public FilterPanel(@NotNull Project project, StructuralSearchProfile profile, Disposable parent) {
     myProject = project;
@@ -71,16 +74,12 @@ public class FilterPanel implements FilterTable {
 
       @Override
       protected JBTableRowRenderer getRowRenderer(int row) {
-        return new JBTableRowRenderer() {
-          @Override
-          public JComponent getRowRendererComponent(JTable table, int row, boolean selected, boolean focused) {
-            return myTableModel.getRowValue(row).getRenderer();
-          }
-        };
+        return (table, row1, selected, focused) -> myTableModel.getRowValue(row1).getRenderer();
       }
 
       @Override
       protected JBTableRowEditor getRowEditor(int row) {
+        if (!myValid) return null;
         return myTableModel.getRowValue(row).getEditor();
       }
     };
@@ -88,35 +87,25 @@ public class FilterPanel implements FilterTable {
     table.setTableHeader(new JTableHeader());
     table.setStriped(false);
     myFilterPanel = ToolbarDecorator.createDecorator(table)
-                                    .disableUpDownActions()
-                                    .setToolbarPosition(ActionToolbarPosition.RIGHT)
-                                    .setAddAction(new AnActionButtonRunnable() {
-                                      @Override
-                                      public void run(AnActionButton button) {
-                                        final RelativePoint point = button.getPreferredPopupPoint();
-                                        if (point == null) return;
-                                        showAddFilterPopup(button.getContextComponent(), point);
-                                      }
-                                    })
-                                    .setRemoveAction(new AnActionButtonRunnable() {
-                                      @Override
-                                      public void run(AnActionButton button) {
-                                        myFilterTable.stopEditing();
-                                        final int selectedRow = myFilterTable.getTable().getSelectedRow();
-                                        final Filter filter = myTableModel.getRowValue(selectedRow);
-                                        if (filter instanceof FilterAction) {
-                                          removeFilter((FilterAction)filter);
-                                        }
-                                      }
-                                    })
-                                    .setRemoveActionUpdater(new AnActionButtonUpdater() {
-                                      @Override
-                                      public boolean isEnabled(@NotNull AnActionEvent e) {
-                                        return myFilterTable.getTable().getSelectedRow() != 0;
-                                      }
-                                    })
-                                    .setPanelBorder(null)
-                                    .createPanel();
+      .disableUpDownActions()
+      .setToolbarPosition(ActionToolbarPosition.RIGHT)
+      .setAddAction(button -> {
+        final RelativePoint point = button.getPreferredPopupPoint();
+        if (point == null) return;
+        showAddFilterPopup(button.getContextComponent(), point);
+      })
+      .setAddActionUpdater(e -> myValid)
+      .setRemoveAction(button -> {
+        myFilterTable.stopEditing();
+        final int selectedRow = myFilterTable.getTable().getSelectedRow();
+        final Filter filter = myTableModel.getRowValue(selectedRow);
+        if (filter instanceof FilterAction) {
+          removeFilter((FilterAction)filter);
+        }
+      })
+      .setRemoveActionUpdater(e -> myValid && myFilterTable.getTable().getSelectedRow() != 0)
+      .setPanelBorder(null)
+      .createPanel();
     myFilterPanel.setPreferredSize(new Dimension(350, 60));
     myFilterPanel.setBorder(BorderFactory.createCompoundBorder(JBUI.Borders.empty(3, 0), myFilterPanel.getBorder()));
   }
@@ -162,7 +151,7 @@ public class FilterPanel implements FilterTable {
     }
   }
 
-  public final void initFilter(FilterAction filter, List<PsiElement> nodes, boolean completePattern, boolean target) {
+  public final void initFilter(FilterAction filter, List<? extends PsiElement> nodes, boolean completePattern, boolean target) {
     if (filter.isApplicable(nodes, completePattern, target) && !myTableModel.getItems().contains(filter)) {
       addFilterIfPresent(filter);
     }
@@ -179,6 +168,7 @@ public class FilterPanel implements FilterTable {
     if (myTableModel.getRowCount() == 1) myTableModel.removeRow(0); // remove header
     filter.getTemplatePresentation().setEnabledAndVisible(true);
     filter.clearFilter();
+    myConstraintChangedCallback.run();
   }
 
   @Override
@@ -211,7 +201,7 @@ public class FilterPanel implements FilterTable {
     return myFilterPanel;
   }
 
-  public void setProfile(StructuralSearchProfile profile) {
+  public void setProfile(@NotNull StructuralSearchProfile profile) {
     myProfile = profile;
   }
 
@@ -219,11 +209,19 @@ public class FilterPanel implements FilterTable {
     myCompiledPattern = compiledPattern;
   }
 
+  public void setValid(boolean valid) {
+    myValid = valid;
+    initFilters(myConstraint);
+  }
+
   public boolean isInitialized() {
     return myConstraint != null;
   }
 
   public void initFilters(@NotNull MatchVariableConstraint constraint) {
+    if (myCompiledPattern == null) {
+      return;
+    }
     myConstraint = constraint;
     final String varName = myConstraint.getName();
     final List<PsiElement> nodes = myCompiledPattern.getVariableNodes(varName);
@@ -239,15 +237,24 @@ public class FilterPanel implements FilterTable {
     final String message = Configuration.CONTEXT_VAR_NAME.equals(varName)
                            ? "No filters added for the complete match."
                            : "No Filters added for $" + varName + "$.";
-    myFilterTable.getTable().getEmptyText().setText(message)
-                 .appendSecondaryText("Add filter", SimpleTextAttributes.LINK_ATTRIBUTES,
-                                      new ActionListener() {
-                                        @Override
-                                        public void actionPerformed(ActionEvent e) {
-                                          final JBTable table = myFilterTable.getTable();
-                                          showAddFilterPopup(table, new RelativePoint(table, table.getMousePosition()));
-                                        }
-                                      });
+    final StatusText statusText = myFilterTable.getTable().getEmptyText();
+    statusText.setText(message);
+    if (myValid) {
+      statusText.appendSecondaryText("Add filter", SimpleTextAttributes.LINK_ATTRIBUTES,
+                                     e -> {
+                                       final JBTable table = myFilterTable.getTable();
+                                       showAddFilterPopup(table, new RelativePoint(table, table.getMousePosition()));
+                                     });
+    }
+  }
+
+  public void setConstraintChangedCallback(Runnable callback) {
+    myConstraintChangedCallback = callback;
+  }
+
+  @Override
+  public Runnable getConstraintChangedCallback() {
+    return myConstraintChangedCallback;
   }
 
   private class Header implements Filter {

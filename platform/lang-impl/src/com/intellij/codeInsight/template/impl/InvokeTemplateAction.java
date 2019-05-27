@@ -1,12 +1,10 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.codeInsight.template.impl;
 
 import com.intellij.codeInsight.template.TemplateManager;
 import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.command.CommandProcessor;
-import com.intellij.openapi.editor.Caret;
-import com.intellij.openapi.editor.CaretAction;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -16,7 +14,9 @@ import com.intellij.openapi.vfs.ReadonlyStatusHandler;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.ui.UIUtil;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
 import java.util.Set;
 
 /**
@@ -26,13 +26,26 @@ public class InvokeTemplateAction extends AnAction {
   private final TemplateImpl myTemplate;
   private final Editor myEditor;
   private final Project myProject;
+  @Nullable private final Runnable myCallback;
 
-  public InvokeTemplateAction(TemplateImpl template, Editor editor, Project project, Set<Character> usedMnemonicsSet) {
+  public InvokeTemplateAction(TemplateImpl template,
+                              Editor editor,
+                              Project project,
+                              Set<Character> usedMnemonicsSet) {
+    this(template, editor, project, usedMnemonicsSet, null);
+  }
+
+  public InvokeTemplateAction(TemplateImpl template,
+                              Editor editor,
+                              Project project,
+                              Set<Character> usedMnemonicsSet,
+                              @Nullable Runnable afterInvocationCallback) {
     super(extractMnemonic(template.getKey(), usedMnemonicsSet) +
           (StringUtil.isEmptyOrSpaces(template.getDescription()) ? "" : ". " + template.getDescription()));
     myTemplate = template;
     myProject = project;
     myEditor = editor;
+    myCallback = afterInvocationCallback;
   }
 
   public static String extractMnemonic(String caption, Set<? super Character> usedMnemonics) {
@@ -61,12 +74,11 @@ public class InvokeTemplateAction extends AnAction {
     final Document document = myEditor.getDocument();
     final VirtualFile file = FileDocumentManager.getInstance().getFile(document);
     if (file != null) {
-      ReadonlyStatusHandler.getInstance(myProject).ensureFilesWritable(file);
+      ReadonlyStatusHandler.getInstance(myProject).ensureFilesWritable(Collections.singletonList(file));
     }
 
-    CommandProcessor.getInstance().executeCommand(myProject, () -> myEditor.getCaretModel().runForEachCaret(new CaretAction() {
-      @Override
-      public void perform(Caret caret) {
+    CommandProcessor.getInstance().executeCommand(myProject, () -> {
+      myEditor.getCaretModel().runForEachCaret(__ -> {
         // adjust the selection so that it starts with a non-whitespace character (to make sure that the template is inserted
         // at a meaningful position rather than at indent 0)
         if (myEditor.getSelectionModel().hasSelection() && myTemplate.isToReformat()) {
@@ -87,7 +99,10 @@ public class InvokeTemplateAction extends AnAction {
         }
         String selectionString = myEditor.getSelectionModel().getSelectedText();
         TemplateManager.getInstance(myProject).startTemplate(myEditor, selectionString, myTemplate);
+      });
+      if (myCallback != null) {
+        myCallback.run();
       }
-    }), "Wrap with template", "Wrap with template " + myTemplate.getKey());
+    }, "Wrap with template", "Wrap with template " + myTemplate.getKey());
   }
 }

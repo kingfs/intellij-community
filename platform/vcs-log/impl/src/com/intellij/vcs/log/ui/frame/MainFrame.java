@@ -1,10 +1,11 @@
+// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.vcs.log.ui.frame;
 
 import com.google.common.primitives.Ints;
+import com.intellij.diff.impl.DiffRequestProcessor;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.keymap.KeymapUtil;
 import com.intellij.openapi.progress.util.ProgressWindow;
 import com.intellij.openapi.ui.Splitter;
@@ -18,24 +19,19 @@ import com.intellij.ui.SearchTextField;
 import com.intellij.ui.SideBorder;
 import com.intellij.ui.components.JBLoadingPanel;
 import com.intellij.ui.components.panels.Wrapper;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import com.intellij.util.ui.JBUI;
 import com.intellij.util.ui.StatusText;
 import com.intellij.util.ui.table.ComponentsListFocusTraversalPolicy;
-import com.intellij.vcs.CommittedChangeListForRevision;
-import com.intellij.vcs.log.CommitId;
-import com.intellij.vcs.log.VcsFullCommitDetails;
-import com.intellij.vcs.log.VcsLog;
-import com.intellij.vcs.log.VcsLogFilterUi;
+import com.intellij.vcs.log.*;
 import com.intellij.vcs.log.data.VcsLogData;
 import com.intellij.vcs.log.impl.CommonUiProperties;
 import com.intellij.vcs.log.impl.MainVcsLogUiProperties;
-import com.intellij.vcs.log.ui.AbstractVcsLogUi;
 import com.intellij.vcs.log.ui.VcsLogActionPlaces;
 import com.intellij.vcs.log.ui.VcsLogInternalDataKeys;
 import com.intellij.vcs.log.ui.VcsLogUiImpl;
 import com.intellij.vcs.log.ui.actions.IntelliSortChooserPopupAction;
+import com.intellij.vcs.log.ui.actions.ShowPreviewEditorAction;
 import com.intellij.vcs.log.ui.filter.VcsLogClassicFilterUi;
 import com.intellij.vcs.log.ui.table.CommitSelectionListener;
 import com.intellij.vcs.log.ui.table.VcsLogGraphTable;
@@ -65,45 +61,38 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
   private static final String CHANGES_SPLITTER_PROPORTION = "vcs.log.changes.splitter.proportion";
 
   @NotNull private final VcsLogData myLogData;
-  @NotNull private final AbstractVcsLogUi myUi;
-  @NotNull private final VcsLog myLog;
-  @NotNull private final VcsLogClassicFilterUi myFilterUi;
+  @NotNull private final MainVcsLogUiProperties myUiProperties;
 
-  @NotNull private final JBLoadingPanel myChangesLoadingPane;
-  @NotNull private final VcsLogGraphTable myGraphTable;
-  @NotNull private final DetailsPanel myDetailsPanel;
-  @NotNull private final Splitter myDetailsSplitter;
   @NotNull private final JComponent myToolbar;
+  @NotNull private final VcsLogGraphTable myGraphTable;
+
+  @NotNull private final VcsLogClassicFilterUi myFilterUi;
+  @NotNull private final SearchTextField myTextFilter;
+
   @NotNull private final VcsLogChangesBrowser myChangesBrowser;
   @NotNull private final Splitter myChangesBrowserSplitter;
-  @NotNull private final Splitter myPreviewDiffSplitter;
-  @NotNull private final SearchTextField myTextFilter;
-  @NotNull private final MainVcsLogUiProperties myUiProperties;
-  @NotNull private final MyCommitSelectionListenerForDiff mySelectionListenerForDiff;
-  @NotNull private final VcsLogChangeProcessor myPreviewDiff;
 
-  public MainFrame(@NotNull VcsLogData logData,
-                   @NotNull VcsLogUiImpl ui,
-                   @NotNull MainVcsLogUiProperties uiProperties,
-                   @NotNull VcsLog log,
-                   @NotNull VisiblePack initialDataPack) {
-    // collect info
+  @NotNull private final VcsLogChangeProcessor myPreviewDiff;
+  @NotNull private final Splitter myPreviewDiffSplitter;
+
+  @NotNull private final DetailsPanel myDetailsPanel;
+  @NotNull private final Splitter myDetailsSplitter;
+
+  public MainFrame(@NotNull VcsLogData logData, @NotNull VcsLogUiImpl logUi, @NotNull MainVcsLogUiProperties uiProperties,
+                   @NotNull VisiblePack initialDataPack, @Nullable VcsLogFilterCollection filters) {
     myLogData = logData;
-    myUi = ui;
-    myLog = log;
     myUiProperties = uiProperties;
 
-    myFilterUi = new VcsLogClassicFilterUi(ui, logData, myUiProperties, initialDataPack);
+    myFilterUi = new VcsLogClassicFilterUi(logUi, logData, myUiProperties, initialDataPack, filters);
 
-    // initialize components
-    myGraphTable = new MyVcsLogGraphTable(ui, logData, initialDataPack);
+    myGraphTable = new MyVcsLogGraphTable(logUi, logData, initialDataPack);
     myGraphTable.setCompactReferencesView(myUiProperties.get(MainVcsLogUiProperties.COMPACT_REFERENCES_VIEW));
     myGraphTable.setShowTagNames(myUiProperties.get(MainVcsLogUiProperties.SHOW_TAG_NAMES));
     PopupHandler.installPopupHandler(myGraphTable, VcsLogActionPlaces.POPUP_ACTION_GROUP, VcsLogActionPlaces.VCS_LOG_TABLE_PLACE);
-    myDetailsPanel = new DetailsPanel(logData, ui.getColorManager(), this) {
+    myDetailsPanel = new DetailsPanel(logData, logUi.getColorManager(), this) {
       @Override
       protected void navigate(@NotNull CommitId commit) {
-        myUi.jumpToCommit(commit.getHash(), commit.getRoot());
+        logUi.jumpToCommit(commit.getHash(), commit.getRoot());
       }
     };
 
@@ -112,23 +101,21 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
       return myLogData.getMiniDetailsGetter().getCommitData(index, Collections.singleton(index));
     }, this);
     myChangesBrowser.getDiffAction().registerCustomShortcutSet(myChangesBrowser.getDiffAction().getShortcutSet(), getGraphTable());
-    myChangesLoadingPane = new JBLoadingPanel(new BorderLayout(), this, ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS);
-    myChangesLoadingPane.add(myChangesBrowser);
+    JBLoadingPanel changesLoadingPane = new JBLoadingPanel(new BorderLayout(), this,
+                                                           ProgressWindow.DEFAULT_PROGRESS_DIALOG_POSTPONE_TIME_MILLIS);
+    changesLoadingPane.add(myChangesBrowser);
 
-    myPreviewDiff = new VcsLogChangeProcessor(logData.getProject(), myChangesBrowser, this);
+    myPreviewDiff = new VcsLogChangeProcessor(logData.getProject(), myChangesBrowser, false, this);
 
     myTextFilter = myFilterUi.createTextFilter();
     myToolbar = createActionsToolbar();
     myChangesBrowser.setToolbarHeightReferent(myToolbar);
     myPreviewDiff.getToolbarWrapper().setVerticalSizeReferent(myToolbar);
 
-    Runnable changesListener = () -> ApplicationManager.getApplication().invokeLater(
-      () -> myPreviewDiff.updatePreview(myUiProperties.get(CommonUiProperties.SHOW_DIFF_PREVIEW)));
-    myChangesBrowser.getViewer().addSelectionListener(changesListener);
-    myChangesBrowser.setModelUpdateListener(changesListener);
+    MyCommitSelectionListenerForDiff listenerForDiff = new MyCommitSelectionListenerForDiff(changesLoadingPane);
+    myGraphTable.getSelectionModel().addListSelectionListener(listenerForDiff);
+    Disposer.register(this, () -> myGraphTable.getSelectionModel().removeListSelectionListener(listenerForDiff));
 
-    mySelectionListenerForDiff = new MyCommitSelectionListenerForDiff();
-    myGraphTable.getSelectionModel().addListSelectionListener(mySelectionListenerForDiff);
     myDetailsPanel.installCommitSelectionListener(myGraphTable);
     VcsLogUiUtil.installDetailsListeners(myGraphTable, myDetailsPanel, myLogData, this);
 
@@ -137,10 +124,10 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
     JComponent toolbarsAndTable = new JPanel(new BorderLayout());
     toolbarsAndTable.add(toolbars, BorderLayout.NORTH);
     toolbarsAndTable.add(VcsLogUiUtil.installProgress(VcsLogUiUtil.setupScrolledGraph(myGraphTable, SideBorder.TOP),
-                                                      myLogData, ui.getId(), this), BorderLayout.CENTER);
+                                                      myLogData, logUi.getId(), this), BorderLayout.CENTER);
 
     myDetailsSplitter = new OnePixelSplitter(true, DETAILS_SPLITTER_PROPORTION, 0.7f);
-    myDetailsSplitter.setFirstComponent(myChangesLoadingPane);
+    myDetailsSplitter.setFirstComponent(changesLoadingPane);
     showDetails(myUiProperties.get(CommonUiProperties.SHOW_DETAILS));
 
     myChangesBrowserSplitter = new OnePixelSplitter(false, CHANGES_SPLITTER_PROPORTION, 0.7f);
@@ -155,7 +142,7 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
     setLayout(new BorderLayout());
     add(myPreviewDiffSplitter);
 
-    Disposer.register(ui, this);
+    Disposer.register(logUi, this);
     myGraphTable.resetDefaultFocusTraversalKeys();
     setFocusCycleRoot(true);
     setFocusTraversalPolicy(new MyFocusPolicy());
@@ -171,6 +158,7 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
   public void updateDataPack(@NotNull VisiblePack dataPack, boolean permGraphChanged) {
     myFilterUi.updateDataPack(dataPack);
     myGraphTable.updateDataPack(dataPack, permGraphChanged);
+    myChangesBrowser.setAffectedPaths(VcsLogUtil.getAffectedPaths(dataPack));
   }
 
   @NotNull
@@ -211,16 +199,16 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
     textFilter.setVerticalSizeReferent(toolbar.getComponent());
     textFilter.setBorder(JBUI.Borders.emptyLeft(5));
 
-    ActionToolbar goToHashOrRefAction =
-      createActionsToolbar(
-        new DefaultActionGroup(ActionManager.getInstance().getAction(VcsLogActionPlaces.VCS_LOG_GO_TO_HASH_OR_REF_ACTION)));
-    goToHashOrRefAction.setReservePlaceAutoPopupIcon(false);
-    goToHashOrRefAction.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
+    DefaultActionGroup rightCornerGroup =
+      new DefaultActionGroup(ActionManager.getInstance().getAction(VcsLogActionPlaces.TOOLBAR_RIGHT_CORNER_ACTION_GROUP));
+    ActionToolbar rightCornerToolbar = createActionsToolbar(rightCornerGroup);
+    rightCornerToolbar.setReservePlaceAutoPopupIcon(false);
+    rightCornerToolbar.setLayoutPolicy(ActionToolbar.NOWRAP_LAYOUT_POLICY);
 
     JPanel panel = new JPanel(new MigLayout("ins 0, fill", "[left]0[left, fill]push[right]", "center"));
     panel.add(textFilter);
     panel.add(toolbar.getComponent());
-    panel.add(goToHashOrRefAction.getComponent());
+    panel.add(rightCornerToolbar.getComponent());
     return panel;
   }
 
@@ -240,12 +228,7 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
   @Override
   public Object getData(@NotNull @NonNls String dataId) {
     if (VcsDataKeys.CHANGES.is(dataId) || VcsDataKeys.SELECTED_CHANGES.is(dataId)) {
-      return ArrayUtil.toObjectArray(myChangesBrowser.getDirectChanges(), Change.class);
-    }
-    else if (VcsDataKeys.CHANGE_LISTS.is(dataId)) {
-      List<VcsFullCommitDetails> details = myLog.getSelectedDetails();
-      if (details.size() > VcsLogUtil.MAX_SELECTED_COMMITS) return null;
-      return ContainerUtil.map2Array(details, CommittedChangeListForRevision.class, VcsLogUtil::createCommittedChangeList);
+      return myChangesBrowser.getDirectChanges().toArray(new Change[0]);
     }
     else if (VcsLogInternalDataKeys.LOG_UI_PROPERTIES.is(dataId)) {
       return myUiProperties;
@@ -257,16 +240,37 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
     else if (VcsLogInternalDataKeys.LOG_DIFF_HANDLER.is(dataId)) {
       Collection<VirtualFile> roots = getSelectedRoots();
       if (roots.size() != 1) return null;
-      return myUi.getLogData().getLogProvider(notNull(getFirstItem(roots))).getDiffHandler();
+      return myLogData.getLogProvider(notNull(getFirstItem(roots))).getDiffHandler();
+    }
+    else if (ShowPreviewEditorAction.DATA_KEY.is(dataId)) {
+      return new ShowPreviewEditorAction.DiffPreviewProvider() {
+        @NotNull
+        @Override
+        public DiffRequestProcessor createDiffRequestProcessor() {
+          VcsLogChangeProcessor preview = new VcsLogChangeProcessor(myLogData.getProject(), myChangesBrowser, true,
+                                                                    myChangesBrowser);
+          preview.updatePreview(true);
+          return preview;
+        }
+
+        @NotNull
+        @Override
+        public Object getOwner() {
+          return MainFrame.this;
+        }
+      };
     }
     return null;
   }
 
   @NotNull
   private Collection<VirtualFile> getSelectedRoots() {
-    if (myUi.getLogData().getRoots().size() == 1) return myUi.getLogData().getRoots();
+    Collection<VirtualFile> roots = myLogData.getRoots();
+    if (roots.size() == 1) return roots;
     int[] selectedRows = myGraphTable.getSelectedRows();
-    if (selectedRows.length == 0 || selectedRows.length > VcsLogUtil.MAX_SELECTED_COMMITS) return VcsLogUtil.getVisibleRoots(myUi);
+    if (selectedRows.length == 0 || selectedRows.length > VcsLogUtil.MAX_SELECTED_COMMITS) {
+      return VcsLogUtil.getAllVisibleRoots(roots, myFilterUi.getFilters());
+    }
     return ContainerUtil.map2Set(Ints.asList(selectedRows), row -> myGraphTable.getModel().getRoot(row));
   }
 
@@ -291,14 +295,16 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
 
   @Override
   public void dispose() {
-    myGraphTable.getSelectionModel().removeListSelectionListener(mySelectionListenerForDiff);
     myDetailsSplitter.dispose();
     myChangesBrowserSplitter.dispose();
   }
 
   private class MyCommitSelectionListenerForDiff extends CommitSelectionListener<VcsFullCommitDetails> {
-    protected MyCommitSelectionListenerForDiff() {
+    @NotNull private final JBLoadingPanel myChangesLoadingPane;
+
+    protected MyCommitSelectionListenerForDiff(@NotNull JBLoadingPanel changesLoadingPane) {
       super(MainFrame.this.myGraphTable, myLogData.getCommitDetailsGetter());
+      myChangesLoadingPane = changesLoadingPane;
     }
 
     @Override
@@ -307,8 +313,20 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
     }
 
     @Override
-    protected void onDetailsLoaded(@NotNull List<VcsFullCommitDetails> detailsList) {
-      myChangesBrowser.setSelectedDetails(detailsList);
+    protected void onDetailsLoaded(@NotNull List<? extends VcsFullCommitDetails> detailsList) {
+      int maxSize = VcsLogUtil.getMaxSize(detailsList);
+      if (maxSize > VcsLogUtil.getShownChangesLimit()) {
+        String commitText = detailsList.size() == 1 ? "This commit" : "One of the selected commits";
+        String sizeText = VcsLogUtil.getSizeText(maxSize);
+        myChangesBrowser.showText(statusText -> {
+          statusText.setText(commitText + " has " + sizeText + " changes");
+          statusText.appendSecondaryText("Show anyway", VcsLogUiUtil.getLinkAttributes(),
+                                         e -> myChangesBrowser.setSelectedDetails(detailsList));
+        });
+      }
+      else {
+        myChangesBrowser.setSelectedDetails(detailsList);
+      }
     }
 
     @Override
@@ -328,8 +346,7 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
 
     @Override
     protected void onError(@NotNull Throwable error) {
-      myChangesBrowser.setSelectedDetails(Collections.emptyList());
-      myChangesBrowser.getViewer().setEmptyText("Error loading commits");
+      myChangesBrowser.showText(statusText -> statusText.setText("Error loading commits"));
     }
   }
 
@@ -337,7 +354,10 @@ public class MainFrame extends JPanel implements DataProvider, Disposable {
     @NotNull
     @Override
     protected List<Component> getOrderedComponents() {
-      return Arrays.asList(myGraphTable, myChangesBrowser.getPreferredFocusedComponent(), myTextFilter.getTextEditor());
+      return Arrays.asList(myGraphTable,
+                           myChangesBrowser.getPreferredFocusedComponent(),
+                           myPreviewDiff.getPreferredFocusedComponent(),
+                           myTextFilter.getTextEditor());
     }
   }
 

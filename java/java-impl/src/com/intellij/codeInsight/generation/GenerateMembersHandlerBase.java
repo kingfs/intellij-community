@@ -160,15 +160,21 @@ public abstract class GenerateMembersHandlerBase implements CodeInsightActionHan
       runTemplates(project, editor, templates, 0);
     }
     else if (!newMembers.isEmpty()){
-      newMembers.get(0).positionCaret(editor, false);
+      notifyOnSuccess(editor, members, newMembers);
     }
+  }
+
+  protected void notifyOnSuccess(Editor editor,
+                                 ClassMember[] members,
+                                 List<? extends GenerationInfo> generatedMembers) {
+    generatedMembers.get(0).positionCaret(editor, false);
   }
 
   protected String getNothingFoundMessage() {
     return "Nothing found to insert";
   }
 
-  private static void runTemplates(final Project myProject, final Editor editor, final List<TemplateGenerationInfo> templates, final int index) {
+  private static void runTemplates(final Project myProject, final Editor editor, final List<? extends TemplateGenerationInfo> templates, final int index) {
     TemplateGenerationInfo info = templates.get(index);
     final Template template = info.getTemplate();
 

@@ -152,7 +152,12 @@ public abstract class PsiElementListCellRenderer<T extends PsiElement> extends J
         }
         setIcon(PsiElementListCellRenderer.this.getIcon(element));
 
-        String containerText = getContainerTextForLeftComponent(element, name + (myModuleName != null ? myModuleName + "        " : ""));
+        FontMetrics fm = list.getFontMetrics(list.getFont());
+        int maxWidth = list.getWidth() -
+                       fm.stringWidth(name) -
+                       (myModuleName != null ? fm.stringWidth(myModuleName + "        ") : 0) -
+                       16 - myRightComponentWidth - 20;
+        String containerText = getContainerTextForLeftComponent(element, name, maxWidth, fm);
         if (containerText != null) {
           appendLocationText(selected, bgColor, isProblemFile, containerText);
         }
@@ -165,9 +170,9 @@ public abstract class PsiElementListCellRenderer<T extends PsiElement> extends J
     }
 
     private void appendLocationText(boolean selected, Color bgColor, boolean isProblemFile, String containerText) {
-      SimpleTextAttributes locationAttrs = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, JBColor.GRAY);
+      SimpleTextAttributes locationAttrs = SimpleTextAttributes.GRAYED_ATTRIBUTES;
       if (isProblemFile) {
-        SimpleTextAttributes wavedAttributes = SimpleTextAttributes.merge(new SimpleTextAttributes(SimpleTextAttributes.STYLE_WAVED, JBColor.GRAY, JBColor.RED), locationAttrs);
+        SimpleTextAttributes wavedAttributes = SimpleTextAttributes.merge(new SimpleTextAttributes(SimpleTextAttributes.STYLE_WAVED, UIUtil.getInactiveTextColor(), JBColor.RED), locationAttrs);
         java.util.regex.Matcher matcher = CONTAINER_PATTERN.matcher(containerText);
         if (matcher.matches()) {
           String prefix = matcher.group(1);
@@ -272,7 +277,7 @@ public abstract class PsiElementListCellRenderer<T extends PsiElement> extends J
   protected abstract String getContainerText(T element, final String name);
 
   @Nullable
-  protected String getContainerTextForLeftComponent(T element, final String name) {
+  protected String getContainerTextForLeftComponent(T element, String name, int maxWidth, FontMetrics fm) {
     return getContainerText(element, name);
   }
 

@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.vcs.changes.committed;
 
 import com.intellij.ide.util.treeView.TreeState;
@@ -31,7 +31,6 @@ import javax.swing.event.TreeSelectionListener;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.TreePath;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * @author yole
@@ -161,12 +160,10 @@ public class StructureFilteringStrategy implements ChangeListFilteringStrategy {
       Object userObject = node.getUserObject();
 
       if (userObject instanceof FilePath) {
-        result = ContainerUtil.list(((FilePath)userObject));
+        result = Collections.singletonList(((FilePath)userObject));
       }
       else if (userObject instanceof Module) {
-        result = Arrays.stream(ModuleRootManager.getInstance((Module)userObject).getContentRoots())
-          .map(VcsUtil::getFilePath)
-          .collect(Collectors.toList());
+        result = ContainerUtil.map(ModuleRootManager.getInstance((Module)userObject).getContentRoots(), VcsUtil::getFilePath);
       }
 
       return result;
@@ -186,10 +183,10 @@ public class StructureFilteringStrategy implements ChangeListFilteringStrategy {
     public void reset() {
       myFilePaths.clear();
       myState = TreeState.createOn(myStructureTree, (DefaultMutableTreeNode)myStructureTree.getModel().getRoot());
-      myStructureTree.setModel(TreeModelBuilder.buildEmpty(myProject));
+      myStructureTree.setModel(TreeModelBuilder.buildEmpty());
     }
 
-    public void append(final List<CommittedChangeList> changeLists) {
+    public void append(final List<? extends CommittedChangeList> changeLists) {
       final TreeState localState = myState != null && myFilePaths.isEmpty()
                                    ? myState
                                    : TreeState.createOn(myStructureTree, (DefaultMutableTreeNode)myStructureTree.getModel().getRoot());
@@ -203,9 +200,8 @@ public class StructureFilteringStrategy implements ChangeListFilteringStrategy {
         }
       }
 
-      myStructureTree
-        .setModel(TreeModelBuilder.buildFromFilePaths(myProject, new DirectoryChangesGroupingPolicy.Factory(myProject), myFilePaths));
-      localState.applyTo(myStructureTree, (DefaultMutableTreeNode)myStructureTree.getModel().getRoot());
+      myStructureTree.setModel(TreeModelBuilder.buildFromFilePaths(myProject, new DirectoryChangesGroupingPolicy.Factory(), myFilePaths));
+      localState.applyTo(myStructureTree, myStructureTree.getModel().getRoot());
       myStructureTree.revalidate();
       myStructureTree.repaint();
       initRenderer();

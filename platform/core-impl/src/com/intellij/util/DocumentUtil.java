@@ -118,8 +118,10 @@ public final class DocumentUtil {
 
   public static boolean isSurrogatePair(@NotNull Document document, int offset) {
     CharSequence text = document.getImmutableCharSequence();
-    if (offset < 0 || (offset + 1) >= text.length()) return false;
-    return Character.isSurrogatePair(text.charAt(offset), text.charAt(offset + 1));
+    return offset >= 0 &&
+           offset + 1 < text.length() &&
+           Character.isHighSurrogate(text.charAt(offset)) &&
+           Character.isLowSurrogate(text.charAt(offset + 1));
   }
 
   public static boolean isInsideSurrogatePair(@NotNull Document document, int offset) {
@@ -142,5 +144,22 @@ public final class DocumentUtil {
       if (!Character.isWhitespace(chars.charAt(i))) return false;
     }
     return true;
+  }
+
+  /**
+   * Calculates indent of the line containing {@code offset}
+   * @return Whitespaces at the beginning of the line
+   */
+  public static CharSequence getIndent(@NotNull Document document, int offset) {
+    int lineOffset = getLineStartOffset(offset, document);
+    int result = 0;
+    while (lineOffset + result < document.getTextLength() &&
+           Character.isWhitespace(document.getCharsSequence().charAt(lineOffset + result))) {
+      result++;
+    }
+    if (result + lineOffset > document.getTextLength()) {
+      result--;
+    }
+    return document.getCharsSequence().subSequence(lineOffset, lineOffset + Math.max(result, 0));
   }
 }

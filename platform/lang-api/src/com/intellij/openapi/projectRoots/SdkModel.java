@@ -30,6 +30,7 @@ public interface SdkModel {
    * Returns the list of SDKs in the table.
    * @return the SDK list.
    */
+  @NotNull
   Sdk[] getSdks();
 
   /**
@@ -46,7 +47,7 @@ public interface SdkModel {
    *
    * @param sdk the SDK to add
    */
-  void addSdk(Sdk sdk);
+  void addSdk(@NotNull Sdk sdk);
 
   /**
    * Allows to receive notifications when the JDK list has been changed by the
@@ -73,7 +74,6 @@ public interface SdkModel {
      *
      * @param sdk          the changed or renamed JDK.
      * @param previousName the old name of the changed or renamed JDK.
-     * @since 5.0.1
      */
     default void sdkChanged(@NotNull Sdk sdk, String previousName) {}
 
@@ -91,14 +91,15 @@ public interface SdkModel {
    *
    * @param listener the listener instance.
    */
-  void addListener(Listener listener);
+  void addListener(@NotNull Listener listener);
 
   /**
    * Removes a listener for receiving notifications about changes in the list.
    *
    * @param listener the listener instance.
    */
-  void removeListener(Listener listener);
+  void removeListener(@NotNull Listener listener);
 
+  @NotNull
   Listener getMulticaster();
 }

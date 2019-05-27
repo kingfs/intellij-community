@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.execution.junit;
 
@@ -23,7 +23,10 @@ import com.intellij.openapi.module.ModuleManager;
 import com.intellij.openapi.options.SettingsEditor;
 import com.intellij.openapi.options.SettingsEditorGroup;
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.Comparing;
+import com.intellij.openapi.util.DefaultJDOMExternalizer;
+import com.intellij.openapi.util.DifferenceFilter;
+import com.intellij.openapi.util.InvalidDataException;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.util.io.FileUtilRt;
 import com.intellij.openapi.util.text.StringUtil;
@@ -38,6 +41,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.jps.model.serialization.PathMacroUtil;
 
+import java.lang.reflect.Field;
 import java.util.*;
 
 public class JUnitConfiguration extends JavaTestConfigurationWithDiscoverySupport implements InputRedirectAware {
@@ -209,7 +213,9 @@ public class JUnitConfiguration extends JavaTestConfigurationWithDiscoverySuppor
       default:
         repeat = "";
     }
-    return myData.getGeneratedName(getConfigurationModule()) + repeat;
+    String generatedName = myData.getGeneratedName(getConfigurationModule());
+    if (generatedName == null) return null;
+    return generatedName + repeat;
   }
 
   @Override
@@ -461,12 +467,17 @@ public class JUnitConfiguration extends JavaTestConfigurationWithDiscoverySuppor
   }
 
   @Override
-  public void writeExternal(@NotNull final Element element) throws WriteExternalException {
+  public void writeExternal(@NotNull final Element element) {
     super.writeExternal(element);
     JavaRunConfigurationExtensionManager.getInstance().writeExternal(this, element);
     DefaultJDOMExternalizer.writeExternal(this, element, JavaParametersUtil.getFilter(this));
     final Data persistentData = getPersistentData();
-    DefaultJDOMExternalizer.writeExternal(persistentData, element, new DifferenceFilter<>(persistentData, new Data()));
+    DefaultJDOMExternalizer.writeExternal(persistentData, element, new DifferenceFilter<Data>(persistentData, new Data()) {
+      @Override
+      public boolean isAccept(@NotNull Field field) {
+        return "TEST_OBJECT".equals(field.getName()) || super.isAccept(field);
+      }
+    });
 
     if (!persistentData.getEnvs().isEmpty()) {
       EnvironmentVariablesComponent.writeExternal(element, persistentData.getEnvs());
@@ -611,6 +622,7 @@ public class JUnitConfiguration extends JavaTestConfigurationWithDiscoverySuppor
     private Map<String, String> myEnvs = new LinkedHashMap<>();
     private String myChangeList = "All";
 
+    @Override
     public boolean equals(final Object object) {
       if (!(object instanceof Data)) return false;
       final Data second = (Data)object;
@@ -625,12 +637,13 @@ public class JUnitConfiguration extends JavaTestConfigurationWithDiscoverySuppor
              Comparing.equal(FORK_MODE, second.FORK_MODE) &&
              Comparing.equal(DIR_NAME, second.DIR_NAME) &&
              Comparing.equal(CATEGORY_NAME, second.CATEGORY_NAME) &&
-             Comparing.equal(UNIQUE_ID, second.UNIQUE_ID) &&
+             Arrays.equals(UNIQUE_ID, second.UNIQUE_ID) &&
              Comparing.equal(TAGS, second.TAGS) &&
              Comparing.equal(REPEAT_MODE, second.REPEAT_MODE) &&
              REPEAT_COUNT == second.REPEAT_COUNT;
     }
 
+    @Override
     public int hashCode() {
       return Comparing.hashcode(TEST_OBJECT) ^
              Comparing.hashcode(getMainClassName()) ^

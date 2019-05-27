@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 
 package com.intellij.ide.projectView.impl;
 
@@ -119,7 +119,7 @@ public class PackageViewPane extends AbstractProjectViewPSIPane {
   @NotNull
   @Override
   public PsiDirectory[] getSelectedDirectories() {
-    List<PsiDirectory> directories = ContainerUtil.newArrayList();
+    List<PsiDirectory> directories = new ArrayList<>();
     for (PackageElementNode node : getSelectedNodes(PackageElementNode.class)) {
       PackageElement packageElement = node.getValue();
       PsiPackage aPackage = packageElement != null ? packageElement.getPackage() : null;
@@ -295,7 +295,7 @@ public class PackageViewPane extends AbstractProjectViewPSIPane {
       if (module != null) {
         modules.add(module);
       }
-      if (fileIndex.isInLibrarySource(vFile) || fileIndex.isInLibraryClasses(vFile)) {
+      if (fileIndex.isInLibrary(vFile)) {
         final List<OrderEntry> orderEntries = fileIndex.getOrderEntriesForFile(vFile);
         if (orderEntries.isEmpty()) {
           return Module.EMPTY_ARRAY;
@@ -319,7 +319,7 @@ public class PackageViewPane extends AbstractProjectViewPSIPane {
 
     @Override
     public void deleteElement(@NotNull DataContext dataContext) {
-      List<PsiDirectory> allElements = Arrays.asList(getSelectedDirectories());
+      PsiDirectory[] allElements = getSelectedDirectories();
       List<PsiElement> validElements = new ArrayList<>();
       for (PsiElement psiElement : allElements) {
         if (psiElement != null && psiElement.isValid()) validElements.add(psiElement);

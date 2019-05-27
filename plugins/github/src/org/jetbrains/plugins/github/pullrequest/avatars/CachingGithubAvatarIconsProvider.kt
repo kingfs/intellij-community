@@ -1,11 +1,10 @@
 // Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.plugins.github.pullrequest.avatars
 
-import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.runInEdt
-import com.intellij.openapi.util.LowMemoryWatcher
 import com.intellij.util.IconUtil
-import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.JBUIScale
 import com.intellij.util.ui.JBValue
 import icons.GithubIcons
 import org.jetbrains.annotations.CalledInAwt
@@ -26,18 +25,14 @@ internal class CachingGithubAvatarIconsProvider(private val avatarsLoader: Cachi
                                                 private val imagesResizer: GithubImageResizer,
                                                 private val requestExecutor: GithubApiRequestExecutor,
                                                 private val iconSize: JBValue,
-                                                private val component: Component) : Disposable {
+                                                private val component: Component) {
 
-  private val scaleContext = JBUI.ScaleContext.create(component)
+  private val scaleContext = JBUIScale.ScaleContext.create(component)
   private var defaultIcon = createDefaultIcon(iconSize.get())
   private val icons = mutableMapOf<GithubUser, Icon>()
 
-  init {
-    LowMemoryWatcher.register(Runnable { icons.clear() }, this)
-  }
-
   private fun createDefaultIcon(size: Int): Icon {
-    val standardDefaultAvatar = GithubIcons.DefaultAvatar_40
+    val standardDefaultAvatar = GithubIcons.DefaultAvatar
     val scale = size.toFloat() / standardDefaultAvatar.iconWidth.toFloat()
     return IconUtil.scale(standardDefaultAvatar, null, scale)
   }
@@ -47,11 +42,12 @@ internal class CachingGithubAvatarIconsProvider(private val avatarsLoader: Cachi
     val iconSize = iconSize.get()
 
     // so that icons are rescaled when any scale changes (be it font size or current DPI)
-    if (scaleContext.update(JBUI.ScaleContext.create(component))) {
+    if (scaleContext.update(JBUIScale.ScaleContext.create(component))) {
       defaultIcon = createDefaultIcon(iconSize)
       icons.clear()
     }
 
+    val modality = ModalityState.stateForComponent(component)
     return icons.getOrPut(user) {
       val icon = DelegatingIcon(defaultIcon)
       avatarsLoader
@@ -61,7 +57,7 @@ internal class CachingGithubAvatarIconsProvider(private val avatarsLoader: Cachi
           else CompletableFuture.completedFuture(null)
         }
         .thenAccept {
-          if (it != null) runInEdt {
+          if (it != null) runInEdt(modality) {
             icon.delegate = IconUtil.createImageIcon(it)
             component.repaint()
           }
@@ -76,8 +72,6 @@ internal class CachingGithubAvatarIconsProvider(private val avatarsLoader: Cachi
     override fun getIconWidth() = delegate.iconWidth
     override fun paintIcon(c: Component?, g: Graphics?, x: Int, y: Int) = delegate.paintIcon(c, g, x, y)
   }
-
-  override fun dispose() {}
 
   // helper to avoid passing all the services to clients
   class Factory(private val avatarsLoader: CachingGithubUserAvatarLoader,

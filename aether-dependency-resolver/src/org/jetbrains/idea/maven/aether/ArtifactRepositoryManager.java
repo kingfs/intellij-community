@@ -1,3 +1,4 @@
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package org.jetbrains.idea.maven.aether;
 
 import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
@@ -16,6 +17,7 @@ import org.eclipse.aether.graph.DependencyVisitor;
 import org.eclipse.aether.impl.DefaultServiceLocator;
 import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.repository.RepositoryPolicy;
 import org.eclipse.aether.resolution.*;
 import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
 import org.eclipse.aether.spi.connector.transport.TransporterFactory;
@@ -151,7 +153,6 @@ public class ArtifactRepositoryManager {
       com.google.common.base.Predicate.class, //guava
       org.apache.http.HttpConnection.class, //httpcore
       org.apache.http.client.HttpClient.class, //httpclient
-      org.apache.commons.codec.binary.Base64.class, // commons-codec
       org.apache.commons.logging.LogFactory.class, // commons-logging
       org.slf4j.Marker.class // slf4j
     );
@@ -220,7 +221,9 @@ public class ArtifactRepositoryManager {
                 requests.add(new ArtifactRequest(newArtifact, Collections.unmodifiableList(myRemoteRepositories), null));
               }
             }
-            requests.add(new ArtifactRequest(artifact, Collections.unmodifiableList(myRemoteRepositories), null));
+            else {
+              requests.add(new ArtifactRequest(artifact, Collections.unmodifiableList(myRemoteRepositories), null));
+            }
           }
         }
 
@@ -308,6 +311,10 @@ public class ArtifactRepositoryManager {
     return DependencyFilterUtils.classpathFilter(JavaScopes.COMPILE, JavaScopes.RUNTIME);
   }
 
+  /**
+   * Gets the versions (in ascending order) that matched the requested range.
+   */
+  @NotNull
   public List<Version> getAvailableVersions(String groupId, String artifactId, String versionConstraint, final ArtifactKind artifactKind) throws Exception {
     final VersionRangeResult result = ourSystem.resolveVersionRange(
       mySession, createVersionRangeRequest(groupId, artifactId, asVersionConstraint(versionConstraint), artifactKind)
@@ -338,7 +345,12 @@ public class ArtifactRepositoryManager {
     for (Artifact artifact : toArtifacts(groupId, artifactId, Collections.singleton(versioning), EnumSet.of(artifactKind))) {
       request.setArtifact(artifact); // will be at most 1 artifact
     }
-    return request.setRepositories(Collections.unmodifiableList(myRemoteRepositories));
+    List<RemoteRepository> repositories = new ArrayList<>(myRemoteRepositories.size());
+    for (RemoteRepository repository : myRemoteRepositories) {
+      RepositoryPolicy policy = new RepositoryPolicy(true, RepositoryPolicy.UPDATE_POLICY_ALWAYS, RepositoryPolicy.CHECKSUM_POLICY_WARN);
+      repositories.add(new RemoteRepository.Builder(repository).setPolicy(policy).build());
+    }
+    return request.setRepositories(repositories);
   }
 
   public static Version asVersion(@Nullable String str) throws InvalidVersionSpecificationException {
@@ -396,11 +408,17 @@ public class ArtifactRepositoryManager {
     public boolean visitEnter(DependencyNode node) {
       final Dependency dep = node.getDependency();
       if (dep != null) {
-        myRequests.add(new ArtifactRequest(
-          new ArtifactWithChangedClassifier(node.getDependency().getArtifact(), myKind.getClassifier()),
-          node.getRepositories(),
-          node.getRequestContext()
-        ));
+        Artifact artifact = dep.getArtifact();
+        String classifier = myKind.getClassifier();
+        if (classifier.isEmpty()) {
+          myRequests.add(new ArtifactRequest(node));
+        }
+        else {
+          myRequests.add(new ArtifactRequest(new ArtifactWithChangedClassifier(artifact, classifier),
+            node.getRepositories(),
+            node.getRequestContext()
+          ));
+        }
       }
       return true;
     }

@@ -203,7 +203,9 @@ public abstract class XmlCodeFoldingBuilder extends CustomFoldingBuilder impleme
       final boolean entity = isEntity(elementToFold);
       if (startLine < endLine || elementToFold instanceof XmlAttribute || entity) {
         if (range.getStartOffset() + MIN_TEXT_RANGE_LENGTH < range.getEndOffset() || entity) {
-          foldings.add(new FoldingDescriptor(elementToFold.getNode(), range));
+          ASTNode node = elementToFold.getNode();
+          String placeholder = getLanguagePlaceholderText(node, range);
+          foldings.add(placeholder != null ? new FoldingDescriptor(node, range, null, placeholder) : new FoldingDescriptor(node, range));
           return true;
         }
       }
@@ -240,7 +242,7 @@ public abstract class XmlCodeFoldingBuilder extends CustomFoldingBuilder impleme
   @Nullable
   public static String getEntityPlaceholder(@NotNull PsiElement psi) {
     String text = psi.getText();
-    String fastPath = StringUtil.unescapeXml(text);
+    String fastPath = StringUtil.unescapeXmlEntities(text);
     if (!StringUtil.equals(fastPath, text)) return fastPath;
     if (psi.isValid()) {
       final XmlEntityDecl resolve = XmlEntityRefImpl.resolveEntity((XmlElement)psi, text, psi.getContainingFile());

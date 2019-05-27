@@ -21,7 +21,6 @@ import com.intellij.openapi.project.DumbAware;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.wm.IdeFocusManager;
-import com.intellij.util.ArrayUtil;
 import com.intellij.util.containers.ContainerUtil;
 import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
@@ -103,9 +102,7 @@ public class DuplexConsoleView<S extends ConsoleView, T extends ConsoleView> ext
     CardLayout cl = (CardLayout)(getLayout());
     cl.show(this, primary ? PRIMARY_CONSOLE_PANEL : SECONDARY_CONSOLE_PANEL);
 
-    IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> {
-      IdeFocusManager.getGlobalInstance().requestFocus(getSubConsoleView(primary).getComponent(), true);
-    });
+    IdeFocusManager.getGlobalInstance().doWhenFocusSettlesDown(() -> IdeFocusManager.getGlobalInstance().requestFocus(getSubConsoleView(primary).getComponent(), true));
 
     myPrimary = primary;
   }
@@ -215,7 +212,7 @@ public class DuplexConsoleView<S extends ConsoleView, T extends ConsoleView> ext
     ConsoleHistoryController controller = langConsole != null ? ConsoleHistoryController.getController(langConsole) : null;
     if (controller != null) actions.add(controller.getBrowseHistory());
 
-    return ArrayUtil.toObjectArray(actions, AnAction.class);
+    return actions.toArray(AnAction.EMPTY_ARRAY);
   }
 
   @Override
@@ -270,7 +267,7 @@ public class DuplexConsoleView<S extends ConsoleView, T extends ConsoleView> ext
   }
   
   @NotNull
-  private List<AnAction> mergeConsoleActions(@NotNull List<AnAction> actions1, @NotNull Collection<AnAction> actions2) {
+  private List<AnAction> mergeConsoleActions(@NotNull List<? extends AnAction> actions1, @NotNull Collection<? extends AnAction> actions2) {
     return ContainerUtil.map(actions1, action1 -> {
       final AnAction action2 = ContainerUtil.find(actions2, action -> action1.getClass() == action.getClass()
                                                                       && StringUtil.equals(action1.getTemplatePresentation().getText(),

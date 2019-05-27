@@ -54,7 +54,7 @@ public class PackagePatternProvider extends PatternDialectProvider {
     final String scope = scope1;
     if (node instanceof ModuleGroupNode){
       if (!recursively) return null;
-      return new PatternPackageSet("*..*", scope, ProjectPatternProvider.getGroupModulePattern((ModuleGroupNode)node));
+      return new PatternPackageSet("*..*", scope, PatternDialectProvider.getGroupModulePattern((ModuleGroupNode)node));
     } else if (node instanceof ModuleNode) {
       if (!recursively) return null;
       final String modulePattern = ((ModuleNode)node).getModuleName();
@@ -108,7 +108,7 @@ public class PackagePatternProvider extends PatternDialectProvider {
   }
 
   @Override
-  public TreeModel createTreeModel(final Project project, final Set<PsiFile> deps, final Marker marker,
+  public TreeModel createTreeModel(final Project project, final Set<? extends PsiFile> deps, final Marker marker,
                                    final DependenciesPanel.DependencyPanelSettings settings) {
     return TreeModelBuilder.createTreeModel(project, false, deps, marker, settings);
   }

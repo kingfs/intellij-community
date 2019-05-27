@@ -1,4 +1,4 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.testFramework;
 
 import com.intellij.ProjectTopics;
@@ -14,13 +14,17 @@ import com.intellij.codeInspection.ex.InspectionToolWrapper;
 import com.intellij.ide.highlighter.ProjectFileType;
 import com.intellij.ide.startup.StartupManagerEx;
 import com.intellij.ide.startup.impl.StartupManagerImpl;
+import com.intellij.ide.structureView.StructureViewFactory;
+import com.intellij.ide.structureView.impl.StructureViewFactoryImpl;
 import com.intellij.idea.IdeaLogger;
 import com.intellij.idea.IdeaTestApplication;
+import com.intellij.lang.Language;
 import com.intellij.mock.MockApplication;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.DataProvider;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.application.ex.ApplicationEx;
 import com.intellij.openapi.application.impl.ApplicationInfoImpl;
 import com.intellij.openapi.command.WriteCommandAction;
@@ -34,6 +38,7 @@ import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
 import com.intellij.openapi.editor.impl.EditorFactoryImpl;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
+import com.intellij.openapi.fileEditor.impl.EditorHistoryManager;
 import com.intellij.openapi.fileEditor.impl.FileDocumentManagerImpl;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.fileTypes.FileTypeManager;
@@ -41,7 +46,6 @@ import com.intellij.openapi.fileTypes.impl.FileTypeManagerImpl;
 import com.intellij.openapi.module.EmptyModuleType;
 import com.intellij.openapi.module.Module;
 import com.intellij.openapi.module.ModuleType;
-import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.ModuleListener;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -49,11 +53,16 @@ import com.intellij.openapi.project.ex.ProjectManagerEx;
 import com.intellij.openapi.project.impl.ProjectImpl;
 import com.intellij.openapi.project.impl.ProjectManagerImpl;
 import com.intellij.openapi.projectRoots.Sdk;
+import com.intellij.openapi.roots.AnnotationOrderRootType;
 import com.intellij.openapi.roots.ModuleRootManager;
 import com.intellij.openapi.roots.OrderRootType;
+import com.intellij.openapi.roots.ProjectRootManager;
+import com.intellij.openapi.roots.ex.ProjectRootManagerEx;
+import com.intellij.openapi.roots.impl.ProjectRootManagerImpl;
 import com.intellij.openapi.startup.StartupManager;
 import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.EmptyRunnable;
+import com.intellij.openapi.util.Pair;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -67,16 +76,18 @@ import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiFileFactory;
 import com.intellij.psi.PsiManager;
 import com.intellij.psi.codeStyle.CodeStyleSettings;
+import com.intellij.psi.codeStyle.CommonCodeStyleSettings;
+import com.intellij.psi.codeStyle.CustomCodeStyleSettings;
 import com.intellij.psi.impl.PsiDocumentManagerImpl;
 import com.intellij.psi.impl.PsiManagerImpl;
 import com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl;
 import com.intellij.psi.templateLanguages.TemplateDataLanguageMappings;
+import com.intellij.ui.UiInterceptors;
 import com.intellij.util.IncorrectOperationException;
 import com.intellij.util.LocalTimeCounter;
 import com.intellij.util.ReflectionUtil;
 import com.intellij.util.ThrowableRunnable;
 import com.intellij.util.containers.ContainerUtil;
-import com.intellij.util.indexing.UnindexedFilesUpdater;
 import com.intellij.util.messages.MessageBusConnection;
 import com.intellij.util.ref.GCUtil;
 import com.intellij.util.ui.UIUtil;
@@ -114,7 +125,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   private static boolean ourAssertionsInTestDetected;
   private static VirtualFile ourSourceRoot;
   private static TestCase ourTestCase;
-  public static Thread ourTestThread;
   private static LightProjectDescriptor ourProjectDescriptor;
   private static SdkLeakTracker myOldSdks;
 
@@ -130,14 +140,14 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   /**
    * @return Project to be used in tests for example for project components retrieval.
    */
-  public static Project getProject() {
+  protected static Project getProject() {
     return ourProject;
   }
 
   /**
    * @return Module to be used in tests for example for module components retrieval.
    */
-  public static Module getModule() {
+  protected static Module getModule() {
     return ourModule;
   }
 
@@ -145,7 +155,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
    * Shortcut to PsiManager.getInstance(getProject())
    */
   @NotNull
-  public static PsiManager getPsiManager() {
+  protected static PsiManager getPsiManager() {
     if (ourPsiManager == null) {
       ourPsiManager = PsiManager.getInstance(ourProject);
     }
@@ -159,7 +169,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
   }
 
   @TestOnly
-  public static void disposeApplication() {
+  static void disposeApplication() {
     if (ourApplication != null) {
       ApplicationManager.getApplication().runWriteAction(() -> Disposer.dispose(ourApplication));
 
@@ -226,19 +236,30 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     ourPathToKeep = projectFile.getPath();
     ourPsiManager = null;
 
-    ourProjectDescriptor.setUpProject(ourProject, new LightProjectDescriptor.SetupHandler() {
-      @Override
-      public void moduleCreated(@NotNull Module module) {
-        //noinspection AssignmentToStaticFieldFromInstanceMethod
-        ourModule = module;
-      }
+    try {
+      ourProjectDescriptor.setUpProject(ourProject, new LightProjectDescriptor.SetupHandler() {
+        @Override
+        public void moduleCreated(@NotNull Module module) {
+          //noinspection AssignmentToStaticFieldFromInstanceMethod
+          ourModule = module;
+        }
 
-      @Override
-      public void sourceRootCreated(@NotNull VirtualFile sourceRoot) {
-        //noinspection AssignmentToStaticFieldFromInstanceMethod
-        ourSourceRoot = sourceRoot;
+        @Override
+        public void sourceRootCreated(@NotNull VirtualFile sourceRoot) {
+          //noinspection AssignmentToStaticFieldFromInstanceMethod
+          ourSourceRoot = sourceRoot;
+        }
+      });
+    }
+    catch (Throwable e) {
+      try {
+        closeAndDeleteProject();
       }
-    });
+      catch (Throwable suppressed) {
+        e.addSuppressed(suppressed);
+      }
+      throw new RuntimeException(e);
+    }
   }
 
   /**
@@ -279,9 +300,10 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return new SimpleLightProjectDescriptor(getModuleType(), getProjectJDK());
   }
 
-  public static void doSetup(@NotNull LightProjectDescriptor descriptor,
-                             @NotNull LocalInspectionTool[] localInspectionTools,
-                             @NotNull Disposable parentDisposable) throws Exception {
+  @NotNull
+  public static Pair.NonNull<Project, Module> doSetup(@NotNull LightProjectDescriptor descriptor,
+                                                      @NotNull LocalInspectionTool[] localInspectionTools,
+                                                      @NotNull Disposable parentDisposable) throws Exception {
     assertNull("Previous test " + ourTestCase + " hasn't called tearDown(). Probably overridden without super call.", ourTestCase);
     IdeaLogger.ourErrorsOccurred = null;
     ApplicationManager.getApplication().assertIsDispatchThread();
@@ -303,14 +325,15 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       throw e;
     }
     if (reusedProject) {
-      DumbService.getInstance(ourProject).queueTask(new UnindexedFilesUpdater(ourProject));
+      // clear all caches, reindex
+      WriteAction.run(()-> ProjectRootManagerEx.getInstanceEx(getProject()).makeRootsChange(EmptyRunnable.getInstance(), false, true));
     }
 
     MessageBusConnection connection = ourProject.getMessageBus().connect(parentDisposable);
     connection.subscribe(ProjectTopics.MODULES, new ModuleListener() {
       @Override
       public void moduleAdded(@NotNull Project project, @NotNull Module module) {
-        fail("Adding modules is not permitted in LightIdeaTestCase.");
+        fail("Adding modules is not permitted in light tests.");
       }
     });
 
@@ -344,6 +367,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     UIUtil.dispatchAllInvocationEvents(); // startup activities
 
     ((FileTypeManagerImpl)FileTypeManager.getInstance()).drainReDetectQueue();
+    return Pair.createNonNull(getProject(), getModule());
   }
 
   protected void enableInspectionTools(@NotNull InspectionProfileEntry... tools) {
@@ -373,6 +397,10 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       () -> CodeStyle.dropTemporarySettings(project),
       () -> myCodeStyleSettingsTracker.checkForSettingsDamage(),
       () -> doTearDown(project, ourApplication),
+      () -> {
+        // needed for myVirtualFilePointerTracker check below
+        ((ProjectRootManagerImpl)ProjectRootManager.getInstance(project)).clearScopesCachesForModules();
+      },
       () -> checkEditorsReleased(),
       () -> myOldSdks.checkForJdkTableLeaks(),
       super::tearDown,
@@ -411,6 +439,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
           ((FileDocumentManagerImpl)manager).dropAllUnsavedDocuments();
         }
       })).
+      append(() -> EditorHistoryManager.getInstance(project).removeAllFiles()).
       append(() -> assertFalse(PsiManager.getInstance(project).isDisposed())).
       append(() -> {
         clearEncodingManagerDocumentQueue();
@@ -428,8 +457,11 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       append(() -> ((DocumentReferenceManagerImpl)DocumentReferenceManager.getInstance()).cleanupForNextTest()).
       append(() -> TemplateDataLanguageMappings.getInstance(project).cleanupForNextTest()).
       append(() -> ((PsiManagerImpl)PsiManager.getInstance(project)).cleanupForNextTest()).
+      append(() -> ((StructureViewFactoryImpl)StructureViewFactory.getInstance(project)).cleanupForNextTest()).
+      append(() -> PlatformTestCase.waitForProjectLeakingThreads(project, 10, TimeUnit.SECONDS)).
       append(() -> ProjectManagerEx.getInstanceEx().closeTestProject(project)).
       append(() -> application.setDataProvider(null)).
+      append(() -> UiInterceptors.clear()).
       append(() -> ourTestCase = null).
       append(() -> CompletionProgressIndicator.cleanupForNextTest()).
       append(() -> {
@@ -507,7 +539,6 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     runBareImpl(this::startRunAndTear);
   }
 
-  @SuppressWarnings("AssignmentToStaticFieldFromInstanceMethod")
   protected void runBareImpl(ThrowableRunnable<?> start) throws Exception {
     if (!shouldRunTest()) {
       return;
@@ -516,11 +547,9 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     TestRunnerUtil.replaceIdeEventQueueSafely();
     EdtTestUtil.runInEdtAndWait(() -> {
       try {
-        ourTestThread = Thread.currentThread();
         start.run();
       }
       finally {
-        ourTestThread = null;
         try {
           Application application = ApplicationManager.getApplication();
           if (application instanceof ApplicationEx) {
@@ -616,6 +645,21 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     return name;
   }
 
+  @NotNull
+  protected static CodeStyleSettings getCurrentCodeStyleSettings() {
+    return CodeStyle.getSettings(getProject());
+  }
+
+  @NotNull
+  protected static CommonCodeStyleSettings getLanguageSettings(@NotNull Language language) {
+    return getCurrentCodeStyleSettings().getCommonSettings(language);
+  }
+
+  @NotNull
+  protected static <T extends CustomCodeStyleSettings> T getCustomSettings(@NotNull Class<T> settingsClass) {
+    return getCurrentCodeStyleSettings().getCustomSettings(settingsClass);
+  }
+
   protected static void commitDocument(@NotNull Document document) {
     PsiDocumentManager.getInstance(getProject()).commitDocument(document);
   }
@@ -653,7 +697,7 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
       }
     }
 
-    assertTrue(ProjectManagerEx.getInstanceEx().closeAndDispose(ourProject));
+    assertTrue(ProjectManagerEx.getInstanceEx().forceCloseProject(ourProject, true));
     assertTrue(ourProject.isDisposed());
 
     // project may be disposed but empty folder may still be there
@@ -716,9 +760,13 @@ public abstract class LightPlatformTestCase extends UsefulTestCase implements Da
     private boolean areJdksEqual(final Sdk newSdk) {
       if (mySdk == null || newSdk == null) return mySdk == newSdk;
 
-      final String[] myUrls = mySdk.getRootProvider().getUrls(OrderRootType.CLASSES);
-      final String[] newUrls = newSdk.getRootProvider().getUrls(OrderRootType.CLASSES);
-      return ContainerUtil.newHashSet(myUrls).equals(ContainerUtil.newHashSet(newUrls));
+      OrderRootType[] rootTypes = {OrderRootType.CLASSES, AnnotationOrderRootType.getInstance()};
+      for (OrderRootType rootType : rootTypes) {
+        final String[] myUrls = mySdk.getRootProvider().getUrls(rootType);
+        final String[] newUrls = newSdk.getRootProvider().getUrls(rootType);
+        if (!ContainerUtil.newHashSet(myUrls).equals(ContainerUtil.newHashSet(newUrls))) return false;
+      }
+      return true;
     }
   }
 }

@@ -1,8 +1,9 @@
-// Copyright 2000-2018 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
+// Copyright 2000-2019 JetBrains s.r.o. Use of this source code is governed by the Apache 2.0 license that can be found in the LICENSE file.
 package com.intellij.openapi.module.impl;
 
 import com.intellij.ProjectTopics;
 import com.intellij.concurrency.JobSchedulerImpl;
+import com.intellij.configurationStore.StateStorageManagerKt;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationInfo;
@@ -14,7 +15,6 @@ import com.intellij.openapi.components.ServiceKt;
 import com.intellij.openapi.components.impl.stores.ModuleStore;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.module.*;
-import com.intellij.openapi.module.Module;
 import com.intellij.openapi.progress.*;
 import com.intellij.openapi.progress.util.ProgressWrapper;
 import com.intellij.openapi.project.Project;
@@ -36,6 +36,7 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.SmartList;
 import com.intellij.util.concurrency.AppExecutorUtil;
 import com.intellij.util.containers.ContainerUtil;
+import com.intellij.util.containers.Interner;
 import com.intellij.util.containers.StringInterner;
 import com.intellij.util.graph.*;
 import com.intellij.util.messages.MessageBus;
@@ -45,6 +46,7 @@ import gnu.trove.TObjectHashingStrategy;
 import org.jdom.Element;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.SystemIndependent;
 import org.jetbrains.annotations.TestOnly;
 
 import java.io.FileNotFoundException;
@@ -80,6 +82,7 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
   private Set<ModulePath> myModulePathsToLoad;
   private final Set<ModulePath> myFailedModulePaths = new THashSet<>();
   private final Map<String, UnloadedModuleDescriptionImpl> myUnloadedModules = new LinkedHashMap<>();
+  private boolean myModulesLoaded;
 
   public static ModuleManagerImpl getInstanceImpl(Project project) {
     return (ModuleManagerImpl)getInstance(project);
@@ -109,6 +112,8 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
   protected void cleanCachedStuff() {
     myCachedModuleComparator = null;
     myCachedSortedModules = null;
+    myCachedModuleProductionGraph = null;
+    myCachedModuleTestGraph = null;
   }
 
   @Override
@@ -124,7 +129,7 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
   }
 
   private static class ModuleGroupInterner {
-    private final StringInterner groups = new StringInterner();
+    private final Interner<String> groups = new StringInterner();
     private final Map<String[], String[]> paths = new THashMap<>(new TObjectHashingStrategy<String[]>() {
       @Override
       public int computeHashCode(String[] object) {
@@ -262,6 +267,7 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
     myFailedModulePaths.clear();
 
     if (myModulePathsToLoad == null || myModulePathsToLoad.isEmpty()) {
+      myModulesLoaded = true;
       return;
     }
 
@@ -345,6 +351,8 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
 
     progressIndicator.checkCanceled();
 
+    myModulesLoaded = true;
+
     Application app = ApplicationManager.getApplication();
     if (app.isInternal() || app.isEAP() || ApplicationInfo.getInstance().getBuild().isSnapshot()) {
       Map<String, Module> track = new THashMap<>();
@@ -370,6 +378,10 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
   }
 
   public int getModulePathsCount() { return myModulePathsToLoad == null ? 0 : myModulePathsToLoad.size(); }
+
+  public boolean areModulesLoaded() {
+    return myModulesLoaded;
+  }
 
   private double myProgressStep;
 
@@ -543,6 +555,8 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
   }
 
   private volatile Module[] myCachedSortedModules;
+  private volatile Graph<Module> myCachedModuleProductionGraph;
+  private volatile Graph<Module> myCachedModuleTestGraph;
 
   @Override
   @NotNull
@@ -587,7 +601,18 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
   @Override
   public Graph<Module> moduleGraph(boolean includeTests) {
     ApplicationManager.getApplication().assertReadAccessAllowed();
-    return myModuleModel.moduleGraph(includeTests);
+
+    Graph<Module> graph = includeTests ? myCachedModuleTestGraph : myCachedModuleProductionGraph;
+    if (graph != null) return graph;
+
+    graph = myModuleModel.moduleGraph(includeTests);
+    if (includeTests) {
+      myCachedModuleTestGraph = graph;
+    } else {
+      myCachedModuleProductionGraph = graph;
+    }
+
+    return graph;
   }
 
   @Override
@@ -773,7 +798,7 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
     }
 
     @Nullable
-    private ModuleEx getModuleByFilePath(@NotNull String filePath) {
+    private ModuleEx getModuleByFilePath(@NotNull @SystemIndependent String filePath) {
       for (Module module : getModules()) {
         if (SystemInfo.isFileSystemCaseSensitive ? module.getModuleFilePath().equals(filePath) : module.getModuleFilePath().equalsIgnoreCase(filePath)) {
           return (ModuleEx)module;
@@ -784,7 +809,7 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
 
     @Override
     @NotNull
-    public Module loadModule(@NotNull String filePath) throws IOException {
+    public Module loadModule(@NotNull @SystemIndependent String filePath) throws IOException {
       assertWritable();
       String resolvedPath = FileUtilRt.toSystemIndependentName(resolveShortWindowsName(filePath));
       try {
@@ -987,7 +1012,7 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
       modulesToBeRenamed.removeAll(moduleModel.myModulesToDispose);
 
       List<Module> modules = new ArrayList<>();
-      Map<Module, String> oldNames = ContainerUtil.newHashMap();
+      Map<Module, String> oldNames = new HashMap<>();
       for (final Module module : modulesToBeRenamed) {
         oldNames.put(module, module.getName());
         moduleModel.myModules.remove(module.getName());
@@ -1097,7 +1122,8 @@ public abstract class ModuleManagerImpl extends ModuleManager implements Disposa
           VirtualFilePointerManager pointerManager = VirtualFilePointerManager.getInstance();
           List<VirtualFilePointer> contentRoots = ContainerUtil.map(ModuleRootManager.getInstance(module).getContentRootUrls(), url -> pointerManager.create(url, this, null));
           UnloadedModuleDescriptionImpl unloadedModuleDescription = new UnloadedModuleDescriptionImpl(modulePath, description.getDependencyModuleNames(), contentRoots);
-          ServiceKt.getStateStore(module).save(new SmartList<>(), false);//we need to save module configuration before unloading, otherwise its settings will be lost
+          // we need to save module configuration before unloading, otherwise its settings will be lost
+          StateStorageManagerKt.saveComponentManager(module);
           model.disposeModule(module);
           myUnloadedModules.put(name, unloadedModuleDescription);
         }
